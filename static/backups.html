@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Бэкапы</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Бэкапы конфигураций</h1>
+  <p>Снимок конфигурации узла по SSH, история и сравнение с предыдущей версией. Снимается по кнопке, не по расписанию.</p>
+</div>
+
+<div class="panel">
+  <h2>Узел <span class="count" id="backup-node-picker-count"></span></h2>
+  <div class="form-row" style="border-top:none">
+    <select id="backup-node-select"><option value="">выбери узел…</option></select>
+  </div>
+</div>
+
+<div id="backup-panels" hidden>
+  <div class="panel">
+    <h2>Снять новый бэкап</h2>
+    <div class="form-row" style="border-top:none">
+      <input id="b-user" placeholder="логин">
+      <input id="b-port" type="number" value="22" style="max-width:80px">
+      <input id="b-key" placeholder="путь к приватному ключу">
+      <input id="b-cmd" placeholder="команда (например: show running-config)">
+      <button id="run-backup">Снять бэкап</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>История <span class="count" id="backups-count"></span></h2>
+    <div class="body" id="backups-body"><div class="empty">Выбери узел выше</div></div>
+  </div>
+</div>
+
+<dialog id="diff-modal">
+  <h3>Diff — <span id="diff-modal-id"></span></h3>
+  <pre id="diff-content" style="margin:0;padding:16px 18px;max-height:60vh;overflow:auto;font-family:var(--mono);font-size:12px;white-space:pre-wrap;"></pre>
+  <div class="modal-actions" style="padding:0 18px 16px">
+    <button type="button" class="btn-ghost" id="diff-close">Закрыть</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="backups.js"></script>
+</body>
+</html>

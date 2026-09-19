@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Трафик</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Захват трафика</h1>
+  <p>Только по кнопке, только интерфейс этой машины — не mirror-порт коммутатора (вопрос физической топологии, не софта).</p>
+</div>
+
+<div class="panel">
+  <h2>Новый захват</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="c-iface" placeholder="интерфейс, например eth0 или lo">
+    <input id="c-bpf" placeholder="BPF-фильтр (опц.), например tcp port 443">
+    <input id="c-duration" type="number" value="30" style="max-width:90px" title="секунд">
+    <button id="run-capture">Захватить</button>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>История <span class="count" id="captures-count"></span></h2>
+    <div class="body" id="captures-body"><div class="empty">Загрузка…</div></div>
+  </div>
+  <div class="panel">
+    <h2>Анализ</h2>
+    <div class="form-row" style="border-top:none">
+      <button id="analyze-protocols" disabled>Иерархия протоколов</button>
+      <button id="analyze-conversations" disabled>IP-разговоры</button>
+    </div>
+    <pre id="analyze-output" style="margin:0;padding:16px;max-height:420px;overflow:auto;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;color:var(--text-dim)">Выбери завершённый захват слева</pre>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="capture.js"></script>
+</body>
+</html>

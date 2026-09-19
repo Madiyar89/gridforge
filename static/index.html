@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Дашборд</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Дашборд</h1>
+  <p>Открытые инциденты по всей сети — обновляется каждые 5 секунд.</p>
+</div>
+
+<div class="stat-strip" id="stat-strip">
+  <div class="stat crit"><div class="n" id="stat-crit">–</div><div class="l">critical</div></div>
+  <div class="stat warn"><div class="n" id="stat-warn">–</div><div class="l">warning</div></div>
+  <div class="stat info"><div class="n" id="stat-info">–</div><div class="l">info</div></div>
+  <div class="stat"><div class="n" id="stat-nodes">–</div><div class="l">узлов</div></div>
+</div>
+
+<div class="panel">
+  <h2>Открытые инциденты <span class="count" id="incidents-count"></span></h2>
+  <div class="body" id="incidents-body"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="index.js"></script>
+</body>
+</html>

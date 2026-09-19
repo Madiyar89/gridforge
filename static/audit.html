@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Аудит</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Аудит конфигураций</h1>
+  <p>Чеклист-правила по тексту последнего бэкапа узла — «должно/не должно встречаться». Аналог NetOpsHub config_analysis, написан с нуля.</p>
+</div>
+
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>Правила <span class="count" id="rules-count"></span></h2>
+      <div class="body" id="rules-body"><div class="empty">Загрузка…</div></div>
+      <div class="form-row">
+        <input id="r-name" placeholder="имя правила">
+        <select id="r-kind">
+          <option value="must_not_contain">не должно встречаться</option>
+          <option value="must_contain">должно встречаться</option>
+        </select>
+        <input id="r-pattern" placeholder="искомая строка">
+      </div>
+      <div class="form-row" style="border-top:none">
+        <select id="r-vendor">
+          <option value="">любой вендор</option>
+          <option value="cisco_ios">cisco_ios</option>
+          <option value="cisco_ios_telnet">cisco_ios_telnet</option>
+          <option value="junos">junos</option>
+          <option value="generic">generic</option>
+        </select>
+        <select id="r-severity">
+          <option value="critical">critical</option>
+          <option value="warning" selected>warning</option>
+          <option value="info">info</option>
+        </select>
+        <input id="r-desc" placeholder="описание (что проверяем и почему)">
+        <button id="add-rule">+ правило</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Прогнать аудит</h2>
+      <div class="form-row" style="border-top:none">
+        <select id="audit-node-select"><option value="">выбери узел…</option></select>
+        <button id="run-audit">Прогнать аудит</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Находки <span class="count" id="findings-count"></span></h2>
+      <div class="body" id="findings-body"><div class="empty">Выбери узел и прогони аудит</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="audit.js"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Шаблоны</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Шаблоны мониторинга</h1>
+  <p>Набор проверок и условий, применяемый к узлу одним действием. Не копировать содержимое чужих Zabbix-шаблонов — см. GridForge Rewrite Ledger.</p>
+</div>
+
+<div class="panel">
+  <h2>Шаблоны <span class="count" id="templates-count"></span></h2>
+  <div class="body" id="templates-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <input id="new-tpl-name" placeholder="имя шаблона">
+    <select id="new-tpl-vendor">
+      <option value="">вендор не указан</option>
+      <option value="cisco_ios">cisco_ios</option>
+      <option value="cisco_ios_telnet">cisco_ios_telnet</option>
+      <option value="junos">junos</option>
+      <option value="generic">generic</option>
+    </select>
+    <textarea id="new-tpl-defs" placeholder='probe_defs, например:
+[{"kind":"tcp_port","params":{"port":22},"interval_seconds":30,"timeout_seconds":2,
+  "watches":[{"operator":"probe_failed","streak_required":3,"severity":"critical","label":"SSH недоступен"}]}]'></textarea>
+    <button id="add-template">+ шаблон</button>
+  </div>
+  <div class="hint">Формат probe_defs — см. README, раздел «Шаблоны мониторинга».</div>
+</div>
+
+<dialog id="apply-modal">
+  <form method="dialog" id="apply-form">
+    <h3>Применить «<span id="apply-modal-tpl"></span>» к узлу</h3>
+    <label>Узел
+      <select id="apply-node"></select>
+    </label>
+    <div class="modal-actions">
+      <button type="button" value="cancel" class="btn-ghost" id="apply-cancel">Отмена</button>
+      <button type="submit" value="ok" id="apply-submit">Применить</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="templates.js"></script>
+</body>
+</html>

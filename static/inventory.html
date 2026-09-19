@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Инвентарь</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Инвентарь</h1>
+  <p>Группы, узлы, проверки и условия срабатывания. «+ действие» на условии — SSH-команда, выполняемая при открытии инцидента.</p>
+</div>
+
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>Группы <span class="count" id="groups-count"></span></h2>
+      <div class="body" id="groups-body"><div class="empty">Загрузка…</div></div>
+      <div class="form-row">
+        <input id="new-group-name" placeholder="имя группы (например: ЦОД-1, филиал-Алматы)">
+        <button id="add-group">+ группа</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Узлы и проверки <span class="count" id="nodes-count"></span></h2>
+      <div class="body" id="nodes-body"><div class="empty">Загрузка…</div></div>
+      <div class="form-row">
+        <input id="new-node-name" placeholder="имя узла">
+        <input id="new-node-addr" placeholder="адрес (IP/hostname)">
+        <select id="new-node-group"><option value="">без группы</option></select>
+        <select id="new-node-vendor">
+          <option value="">вендор не указан</option>
+          <option value="cisco_ios">cisco_ios</option>
+          <option value="cisco_ios_telnet">cisco_ios_telnet</option>
+          <option value="junos">junos</option>
+          <option value="generic">generic</option>
+        </select>
+        <button id="add-node">+ узел</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<dialog id="probe-modal">
+  <form method="dialog" id="probe-form">
+    <h3>Новая проверка — <span id="probe-modal-node"></span></h3>
+    <label>Тип
+      <select id="probe-kind">
+        <option value="icmp_ping">icmp_ping — пинг</option>
+        <option value="tcp_port">tcp_port — TCP-порт</option>
+        <option value="ssh_command">ssh_command — команда по SSH</option>
+        <option value="snmp_get">snmp_get — SNMP OID</option>
+      </select>
+    </label>
+    <label>Интервал опроса, с <input id="probe-interval" type="number" min="1" value="60"></label>
+    <label>Таймаут, с <input id="probe-timeout" type="number" min="0.5" step="0.5" value="2"></label>
+
+    <div id="probe-params-tcp_port" class="probe-params">
+      <label>Порт <input id="p-tcp-port" type="number" placeholder="22"></label>
+    </div>
+    <div id="probe-params-ssh_command" class="probe-params" hidden>
+      <label>Порт <input id="p-ssh-port" type="number" value="22"></label>
+      <label>Логин <input id="p-ssh-user" placeholder="monitor"></label>
+      <label>Путь к приватному ключу <input id="p-ssh-key" placeholder="/home/user/.ssh/id_ed25519"></label>
+      <label>Команда <input id="p-ssh-cmd" placeholder="nproc"></label>
+      <label><input id="p-ssh-numeric" type="checkbox"> вывод — число (для Watch с gt/lt)</label>
+    </div>
+    <div id="probe-params-snmp_get" class="probe-params" hidden>
+      <label>Community <input id="p-snmp-community" value="public"></label>
+      <label>Версия
+        <select id="p-snmp-version"><option value="2c">2c</option><option value="1">1</option></select>
+      </label>
+      <label>OID <input id="p-snmp-oid" placeholder="1.3.6.1.2.1.1.3.0"></label>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" value="cancel" class="btn-ghost" id="probe-cancel">Отмена</button>
+      <button type="submit" value="ok" id="probe-submit">Создать</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="watch-modal">
+  <form method="dialog" id="watch-form">
+    <h3>Новое условие — <span id="watch-modal-probe"></span></h3>
+    <label>Название <input id="w-label" placeholder="например: RTT выше нормы"></label>
+    <label>Оператор
+      <select id="w-operator">
+        <option value="probe_failed">probe_failed — проверка не прошла</option>
+        <option value="gt">gt — значение больше порога</option>
+        <option value="lt">lt — значение меньше порога</option>
+        <option value="eq">eq — значение равно порогу</option>
+      </select>
+    </label>
+    <label id="w-threshold-row">Порог <input id="w-threshold" type="number" step="any"></label>
+    <label>Серия подряд <input id="w-streak" type="number" min="1" value="1"></label>
+    <label>Важность
+      <select id="w-severity">
+        <option value="critical">critical</option>
+        <option value="warning" selected>warning</option>
+        <option value="info">info</option>
+      </select>
+    </label>
+    <div class="modal-actions">
+      <button type="button" value="cancel" class="btn-ghost" id="watch-cancel">Отмена</button>
+      <button type="submit" value="ok" id="watch-submit">Создать</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="action-modal">
+  <form method="dialog" id="action-form">
+    <h3>Новое действие — <span id="action-modal-watch"></span></h3>
+    <p class="hint" style="padding:0">Выполняется по SSH на узле условия, при каждом открытии нового инцидента.</p>
+    <label>Порт <input id="a-port" type="number" value="22"></label>
+    <label>Логин <input id="a-user" placeholder="monitor"></label>
+    <label>Путь к приватному ключу <input id="a-key" placeholder="/home/user/.ssh/id_ed25519"></label>
+    <label>Команда <input id="a-cmd" placeholder="systemctl restart nginx"></label>
+    <div class="modal-actions">
+      <button type="button" value="cancel" class="btn-ghost" id="action-cancel">Отмена</button>
+      <button type="submit" value="ok" id="action-submit">Создать</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="inventory.js"></script>
+</body>
+</html>

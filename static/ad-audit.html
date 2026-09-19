@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — AD-аудит</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Аудит Active Directory</h1>
+  <p>Проверки в духе PingCastle — привилегированные аккаунты, аномалии userAccountControl, риск Kerberoasting. Свой код на ldap3, категории проверок общеизвестны, не заимствованы.</p>
+</div>
+
+<div class="panel">
+  <h2>Новый прогон</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="a-server" placeholder="LDAP-сервер (host)">
+    <input id="a-port" type="number" value="636" style="max-width:80px">
+    <input id="a-base" placeholder="search base, например dc=example,dc=com">
+  </div>
+  <div class="form-row" style="border-top:none">
+    <input id="a-binddn" placeholder="bind DN, например administrator@example.com">
+    <input id="a-bindpass" type="password" placeholder="пароль">
+    <button id="run-ad-audit">Прогнать аудит</button>
+  </div>
+  <div class="hint">Учётка используется только для этого запроса, в БД не сохраняется.</div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>История прогонов <span class="count" id="runs-count"></span></h2>
+    <div class="body" id="runs-body"><div class="empty">Загрузка…</div></div>
+  </div>
+  <div class="panel">
+    <h2>Находки <span class="count" id="ad-findings-count"></span></h2>
+    <div class="body" id="ad-findings-body"><div class="empty">Прогони аудит или выбери прогон слева</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="ad-audit.js"></script>
+</body>
+</html>

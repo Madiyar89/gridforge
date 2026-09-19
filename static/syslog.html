@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Syslog</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .syslog-row{padding:8px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;display:flex;gap:10px;}
+  .syslog-row .time{color:var(--text-dim);white-space:nowrap;flex-shrink:0;}
+  .syslog-row .src{color:var(--accent);white-space:nowrap;flex-shrink:0;}
+  .syslog-row .sev{flex-shrink:0;width:16px;text-align:center;}
+  .syslog-row .msg{overflow-wrap:anywhere;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Syslog</h1>
+  <p>Приём по UDP на порту <b id="syslog-port">5140</b> (не 514 — не требует root). Настрой устройства слать логи именно сюда.</p>
+</div>
+
+<div class="panel">
+  <h2>Поиск IP → hostname/пользователь</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="lookup-q" placeholder="IP или текст, например 192.168.10.55">
+    <button id="run-lookup">Найти</button>
+  </div>
+  <div id="lookup-result" style="padding:0 16px 14px;font-size:12.5px;color:var(--text-dim)"></div>
+</div>
+
+<div class="panel">
+  <h2>Сообщения <span class="count" id="syslog-count"></span></h2>
+  <div class="form-row" style="border-top:none">
+    <select id="syslog-node-filter"><option value="">все узлы</option></select>
+    <button id="refresh-syslog">Обновить</button>
+  </div>
+  <div class="body" id="syslog-body" style="max-height:640px"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="syslog.js"></script>
+</body>
+</html>

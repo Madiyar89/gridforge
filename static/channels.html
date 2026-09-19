@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Каналы</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Каналы уведомлений</h1>
+  <p>Куда уходят новые инциденты. Канал глобальный — получает все инциденты не ниже своего порога важности.</p>
+</div>
+
+<div class="panel">
+  <h2>Каналы <span class="count" id="channels-count"></span></h2>
+  <div class="body" id="channels-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <select id="new-channel-kind">
+      <option value="webhook">webhook</option>
+      <option value="telegram">telegram</option>
+    </select>
+    <input id="new-channel-target" placeholder="webhook: URL / telegram: bot_token,chat_id">
+    <select id="new-channel-severity">
+      <option value="info" selected>от info (все)</option>
+      <option value="warning">от warning</option>
+      <option value="critical">только critical</option>
+    </select>
+    <button id="add-channel">+ канал</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="channels.js"></script>
+</body>
+</html>

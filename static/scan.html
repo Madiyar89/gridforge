@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Скан сети</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Скан сети</h1>
+  <p>Nmap-обнаружение живых хостов в диапазоне. Найденные — в один клик заводятся как Node в инвентаре.</p>
+</div>
+
+<div class="panel">
+  <h2>Новый скан</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="scan-cidr" placeholder="CIDR/IP, например 192.168.1.0/24">
+    <input id="scan-ports" placeholder="порты (опц., например 22,80,443) — иначе топ-20">
+    <button id="run-scan">Сканировать</button>
+  </div>
+  <div class="hint">Может занять до пары минут на большом диапазоне — TCP connect scan, без прав root.</div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>История сканов <span class="count" id="scans-count"></span></h2>
+    <div class="body" id="scans-body"><div class="empty">Загрузка…</div></div>
+  </div>
+  <div class="panel">
+    <h2>Найденные хосты <span class="count" id="hosts-count"></span></h2>
+    <div class="body" id="hosts-body"><div class="empty">Выбери скан слева</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="scan.js"></script>
+</body>
+</html>
