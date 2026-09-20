@@ -30,6 +30,7 @@ from app.auth import (
 )
 from app.db import get_session, init_db
 from app.ad_audit_engine import run_ad_audit
+from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
@@ -861,9 +862,20 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(_db)):
     # Проверяем пароль даже для несуществующего пользователя — иначе по
     # времени ответа можно было бы перебором выяснить, какие логины
     # заведены, не зная ни одного пароля.
-    stored_hash = user.password_hash if user else _DUMMY_PASSWORD_HASH
+    stored_hash = user.password_hash if user and user.password_hash else _DUMMY_PASSWORD_HASH
     password_ok = verify_password(payload.password, stored_hash)
-    if user is None or not password_ok or not user.active:
+
+    if user is not None and user.password_hash and password_ok and user.active:
+        pass  # локальный пароль подошёл
+    elif ad_enabled() and (user is None or user.source == "ad") and check_ad_credentials(
+        payload.username, payload.password
+    ):
+        # Домен подтвердил пароль. Локальная запись нужна, чтобы хранить
+        # роль и область по группе — в AD их взять неоткуда.
+        user = sync_ad_user(db, payload.username)
+        if not user.active:
+            raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    else:
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     raw_token = create_session(db, user)
@@ -918,6 +930,7 @@ def list_users(db: Session = Depends(_db), admin: Principal = Depends(require_ad
         {
             "id": u.id,
             "username": u.username,
+            "source": u.source,
             "role": u.role.value,
             "group_id": u.group_id,
             "active": u.active,
@@ -932,6 +945,11 @@ def change_user_password(user_id: int, payload: PasswordChangeIn, db: Session = 
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.source == "ad":
+        # Иначе мы завели бы локальный пароль в обход домена: у учётки
+        # появилось бы два разных пароля, и отзыв доступа в AD перестал
+        # бы закрывать вход в GridForge.
+        raise HTTPException(status_code=409, detail="Пароль доменной учётки меняется в Active Directory")
     problem = password_problem(payload.password)
     if problem:
         raise HTTPException(status_code=422, detail=f"Пароль не принят: {problem}")
@@ -1133,5 +1151,27 @@ async def ws_console(websocket: WebSocket):
     без ручного клиента), см. app/console_ws.py."""
     await handle_console(websocket)
 
+class _NoCacheStaticFiles(StaticFiles):
+    """Статика отдаётся с запретом кеширования.
+
+    Реальная проблема, а не перестраховка: после обновления GridForge
+    браузер на другой машине продолжал показывать СТАРЫЙ интерфейс —
+    без новых пунктов меню и без перенаправления на страницу входа, —
+    потому что держал прежние .js и .html в кеше. Выглядит это как
+    «ничего не изменилось» или как сломанный сайт, а причина невидима.
+
+    Здесь нет сборки с хешами в именах файлов (весь фронтенд — обычные
+    .html/.js без шага сборки), поэтому самый честный вариант —
+    no-cache: браузер каждый раз переспрашивает, не изменился ли файл.
+    Трафик мизерный, а интерфейс всегда соответствует установленной
+    версии.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+app.mount("/", _NoCacheStaticFiles(directory=_STATIC_DIR, html=True), name="static")
