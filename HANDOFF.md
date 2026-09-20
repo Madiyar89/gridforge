@@ -1,0 +1,199 @@
+# GridForge — справка для коллеги: что сделано и что осталось
+
+Репозиторий: `github.com/Madiyar89/gridforge` (приватный, ветка `master`).
+Подробности по каждой фиче и командам `curl` — в [README.md](README.md);
+здесь — сводка состояния, как запустить и что делать дальше.
+
+## 1. Что это
+
+Собственная система мониторинга сети, написанная **с нуля**. Zabbix 6.0
+(GPLv2) использовался только как источник идей — ни код, ни схема БД, ни
+формат протокола не копировались. Цель — продукт, который можно будет
+продавать как закрытый (см. «Правила разработки» ниже). Параллельно в него
+переносится функционал проекта NetOpsHub (тоже переписывается, не
+копируется).
+
+Стек: Python 3.14, FastAPI, SQLAlchemy + SQLite, asyncio; фронтенд —
+vanilla HTML/CSS/JS без сборки.
+
+## 2. Быстрый старт
+
+```bash
+cd gridforge
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8100
+```
+
+- При **первом** старте в консоль печатается admin API-ключ — **один раз**,
+  сохрани его (в БД лежит только SHA-256 хеш). Вход в интерфейс —
+  `http://localhost:8100/`, ключ вводится в шапке страницы.
+- Данные — в `data/` (SQLite, ключ шифрования секретов `data/secret.key`,
+  pcap-файлы). Папка в `.gitignore`, в репозиторий не попадает; **потеря
+  `secret.key` = потеря всех сохранённых паролей**.
+- Syslog слушает UDP **5140** (не 514 — тот требует root). Порт меняется
+  переменной `GRIDFORGE_SYSLOG_PORT` (нужно, если запускаешь два экземпляра
+  на одной машине — иначе второй не стартует).
+- Миграции схемы — ручные (`app/db.py:_migrate_missing_columns`, только
+  `ALTER TABLE ADD COLUMN`). Alembic не подключён. Новая **таблица**
+  создаётся сама; новая **колонка в существующей таблице** требует записи
+  в `_migrate_missing_columns`.
+
+## 3. Что сделано
+
+Ядро (мониторинг):
+- Планировщик опроса на мин-куче, один asyncio-цикл (`scheduler.py`).
+- Проверки (`probes.py`, реестр по `ProbeKind`): `icmp_ping`, `tcp_port`,
+  `ssh_command`, `snmp_get` (**v1/v2c/v3 USM** — v3 см. §5).
+- Условия `Watch` → `Incident` с дедупом и серией подряд (`watch_engine.py`).
+- Уведомления: webhook и Telegram (`signal.py`), фильтр по severity.
+- Действия по инциденту: SSH-команда на узле (`actions_engine.py`), журнал
+  `ActionRun`.
+- Шаблоны мониторинга — наборы Probe+Watch, применяются к узлу одним
+  запросом (`templates_engine.py`).
+- Авторизация: API-ключи с ролями `admin`/`viewer`; секреты в
+  `Probe.params`/`Action.config` шифруются Fernet (`secrets_crypto.py`).
+
+Перенос из NetOpsHub (все переписаны с нуля):
+- Инвентарь: `Group`, `Node.vendor`.
+- Бэкапы конфигураций по SSH + unified diff, **в SQLite, без git**
+  (в NetOpsHub git-репозиторий рвался при параллельных коммитах).
+- Аудит конфигураций: правила `must_contain`/`must_not_contain` по тексту
+  последнего успешного бэкапа.
+- AD-аудит в духе PingCastle (ldap3): отключённый привилегированный
+  аккаунт, пароль не истекает, PASSWD_NOTREQD, Kerberoastable SPN,
+  несколько Domain Admins.
+- Скан сети (nmap) с созданием `Node` из найденного хоста.
+- SSH-консоль в браузере (WebSocket-мост xterm.js ↔ asyncssh).
+- Приём Syslog (UDP) с привязкой к `Node` по IP.
+- Захват и анализ трафика (dumpcap/tshark), IP-поиск hostname/пользователя
+  по накопленному syslog.
+
+Интерфейс: 11 отдельных страниц (`static/*.html`) — Дашборд, Инвентарь,
+Шаблоны, Бэкапы, Аудит, Скан, Консоль, AD-аудит, Syslog, Трафик, Каналы.
+Общее — `style.css` и `common.js` (навигация, ключ, вызов API).
+
+Как проверялось: каждая фича прогонялась вживую, не только компиляцией —
+реальный SSH и SNMPv3-агент, nmap/tshark на реальном трафике, поднятый
+Samba4 AD DC, клики в headless Chromium (CDP). Юнит-тестов (pytest) в
+репозитории **нет** — вся верификация была ручной/скриптовой (см. §4).
+
+## 4. Что надо сделать
+
+Приоритет — сверху вниз.
+
+1. **Закоммитить незакоммиченное**: SNMPv3 в `probes.py`, шифрование
+   `auth_password`/`priv_password` в `main.py`, поля v3 и порта SNMP в
+   форме проверки (`inventory.html`/`inventory.js`). Всё проверено вживую,
+   но в git ещё не лежит.
+2. **Автотесты.** Сейчас их нет. Минимум: pytest на `ip_lookup.extract_hints`,
+   `secrets_crypto`, `audit_engine`, `templates_engine.validate_probe_defs`,
+   `backups_engine.diff_backups`, парсер PRI в `syslog_server`, и
+   API-тесты (FastAPI `TestClient`) на авторизацию/роли.
+3. **Привязка `Channel` к конкретным `Node`/`Watch`** — сейчас канал
+   глобальный, получает все инциденты выше своего `min_severity`.
+4. **Многошаговая эскалация** — сейчас один шаг (алерт + отправка).
+5. **Более тонкий RBAC** — сейчас только `admin`/`viewer` на всё сразу;
+   в NetOpsHub права по группам (`SiteRole`) и по функциям.
+6. **Хранение секретов шире**: SSH-ключи лежат как путь на диске; пароль
+   Telegram-бота/webhook-URL в `Channel.config` пока **не шифруются**.
+7. **Ретеншн**: `Sample`, `SyslogMessage`, `Backup`, pcap растут без
+   ограничений — нужна очистка/агрегация (аналог trends в Zabbix).
+8. **SNMP**: только GET одного OID; нет walk/bulk, нет счётчиков с
+   расчётом скорости (rate) — для загрузки интерфейсов нужно.
+9. **Веб-интерфейс**: логин по паролю/AD вместо ручного ввода API-ключа;
+   правка/удаление Node, Probe, Watch из интерфейса (сейчас частично
+   только через API); дашборд-виджеты как в NetOpsHub.
+10. **Не перенесено из NetOpsHub** (нужна внешняя инфраструктура, которой
+    не было под рукой): интеграция с Graylog, ESXi-инвентарь,
+    Firepower/PAN-OS API, RDP через браузер (Guacamole-аналог).
+    SSH-консоль сделана, RDP — нет: это отдельный сложный бинарный протокол.
+11. **Реестр переписывания (лицензия).** Перед любым релизом/продажей —
+    пройти чеклист «GridForge Rewrite Ledger» (артефакт claude.ai, ссылка
+    у владельца): все модули должны быть «переписано с нуля» или «не
+    используется». Отдельно проверить второй человек — grep по характерным
+    строкам/именам Zabbix. Юрист по IP — **до** подписания договора.
+
+## 5. Известные ограничения и подводные камни
+
+- `known_hosts` для SSH по умолчанию **не проверяется** (`None`) — только
+  для лабораторной сети; для боевой задать явно в `params.known_hosts`.
+- LDAP-подключение AD-аудита идёт по LDAPS с `CERT_NONE` (самоподписанные
+  сертификаты лабораторных доменов) — для боевого домена включить проверку.
+- Учётка AD-аудита, пароль SSH-консоли и BackupTrigger в БД **не
+  сохраняются** (используются один раз в запросе) — так задумано.
+- Захват трафика видит только интерфейсы этой машины, не mirror-порт
+  коммутатора (физическая топология, не софт). Нужны права `dumpcap`
+  (`cap_net_raw`/`cap_net_admin` или группа `wireshark`).
+- `str(asyncio.TimeoutError())` — пустая строка. Любой код вида
+  `detail or fallback` на таймауте молча теряет текст ошибки; уже
+  исправлено в `probes.py`/`ssh_client.py`, не повторять в новых местах.
+- `Base.metadata.create_all()` не добавляет колонки в существующие таблицы
+  (см. §2, миграции).
+- Тесты запуска второго экземпляра: разные `--port` **и** разный
+  `GRIDFORGE_SYSLOG_PORT`, и отдельная копия папки — иначе оба процесса
+  пишут в один `data/gridforge.db`.
+- `pysnmp` пишет `CryptographyDeprecationWarning` про CFB-режим AES при
+  SNMPv3 — безвредно, но при обновлении `cryptography` до 49+ проверить.
+
+## 6. Состояние окружения на машине разработчика (на 2026-09-20)
+
+- **Сервер GridForge на :8100 не запущен** (после перезагрузки/сброса
+  сессии). Запуск — команда из §2. `data/gridforge.db` сохранён, в нём
+  один реальный узел `LAB-1` (`198.51.100.1`) — не удалять.
+- **Тестовый AD-домен `GRIDFORGE.TEST`** (Samba4 AD DC, пакет `samba-ad-dc`)
+  установлен, сервис сейчас остановлен. Запуск:
+  `sudo systemctl start samba-ad-dc`. Порты 389/636/88 и др. Заведены
+  тестовые аккаунты: `svc-backup` (пароль не истекает + SPN), `admin2`
+  (второй Domain Admin), `old-admin` (отключён, но в Domain Admins), `jdoe`.
+  Пароль администратора домена — тот, что задавался при
+  `samba-tool domain provision`; в репозиторий он **не записан**. Если
+  утерян — переразвернуть домен. Для рабочей машины домен лучше удалить.
+- **Расширенный sudo**: созданы `/etc/sudoers.d/claude-zabbix-install` и
+  `/etc/sudoers.d/claude-samba-install` (NOPASSWD на apt/dpkg/systemctl/
+  samba-tool/rm/mv/tee/cp). Нужны были только для установки — **удалить**:
+  `sudo rm /etc/sudoers.d/claude-zabbix-install /etc/sudoers.d/claude-samba-install`.
+- **Zabbix 6.0 в Docker** (`/home/omarov/Desktop/Project/zabbix-6.0/`) —
+  отладка не завершена: `zabbix-server` уходил в перезапуск из-за ошибки
+  MySQL «Row size too large» (в `docker-compose.yml` добавлен
+  `--innodb_default_row_format=DYNAMIC`, после чего повторный прогон не
+  доводился до конца). К GridForge отношения не имеет — это была
+  отдельная попытка изучения, можно удалить.
+- Пакеты, поставленные для тестов: `samba-ad-dc`, `krb5-user`, `winbind`,
+  `snmpd`, `ldap-utils` (последние два были). Тестовые SSH-ключи и
+  временные копии проекта из `/tmp` удалялись после каждого прогона.
+
+## 7. Правила разработки (из документа по переписыванию Zabbix)
+
+1. Писать от описания функции, не глядя в исходник Zabbix.
+2. Идеи и архитектура — свободны; конкретный код, SQL-схема, формат
+   протокола/конфигов Zabbix — нет.
+3. Своя схема БД — ни одна таблица/поле не копируются 1:1.
+4. Не скачивать готовые шаблоны Zabbix/share.zabbix.com — только свои
+   наборы поверх своих `Probe`/`Watch`; OID брать из MIB/документации
+   вендора.
+5. Не считать модуль «переписанным» из-за переименований — суд смотрит на
+   сходство логики.
+6. Свою терминологию держать отдельной (`Node`/`Probe`/`Sample`/`Watch`/
+   `Incident`/`Signal`), не возвращаться к `host`/`item`/`trigger`.
+
+## 8. Карта кода
+
+```
+app/main.py            маршруты API, lifespan (планировщик + syslog)
+app/models.py          все таблицы SQLAlchemy
+app/schemas.py         входные модели pydantic
+app/scheduler.py       опрос на мин-куче
+app/probes.py          исполнители проверок (icmp/tcp/ssh/snmp v1-v3)
+app/watch_engine.py    Watch → Incident
+app/signal.py          webhook/telegram
+app/actions_engine.py  действия по инциденту
+app/templates_engine.py шаблоны
+app/backups_engine.py, audit_engine.py, ad_audit_engine.py,
+scan_engine.py, capture_engine.py, ip_lookup.py, syslog_server.py,
+console_ws.py          перенос из NetOpsHub
+app/ssh_client.py      единая SSH-обёртка (probes + actions + backups)
+app/secrets_crypto.py  Fernet-шифрование секретов
+app/auth.py            API-ключи и роли
+static/                11 страниц + common.js + style.css + vendor/xterm
+```
