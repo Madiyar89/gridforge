@@ -25,6 +25,32 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8100
 ```
 
+### Постоянная работа (systemd)
+
+Для боевого запуска — не `uvicorn` руками в фоне, а служба:
+
+```bash
+sudo cp deploy/gridforge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now gridforge
+```
+
+Почему это важно, а не «для красоты»: запущенный через `nohup` сайт
+**не переживает перезагрузку машины** — так он однажды и оказался
+выключен, причём вместе с логом в `/tmp` (папка очищается), из-за чего
+причину было уже не посмотреть. Служба поднимается сама при загрузке,
+перезапускается при падении (проверено принудительным `kill -9`) и
+пишет в журнал:
+
+```bash
+systemctl status gridforge
+journalctl -u gridforge -f        # живой лог
+journalctl -u gridforge --since today
+```
+
+Работает не от root: GridForge ничего от суперпользователя не требует —
+syslog слушает 5140, а не привилегированный 514, именно поэтому.
+
 ### Вход в интерфейс
 
 `http://localhost:8100/` → логин **`Admin`**, пароль **`gridforge`**

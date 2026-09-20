@@ -1,0 +1,30 @@
+[Unit]
+Description=GridForge — мониторинг сети
+# Сайту нужна поднятая сеть: он сразу открывает UDP-сокет syslog (5140)
+# и начинает опрашивать узлы.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Не root: GridForge ничего не требует от суперпользователя — syslog
+# слушает 5140, а не привилегированный 514, именно поэтому.
+User=omarov
+Group=omarov
+WorkingDirectory=/home/omarov/Desktop/Project/gridforge
+ExecStart=/home/omarov/Desktop/Project/gridforge/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8100
+
+# Перезапуск при любом падении. RestartSec — чтобы при устойчивой
+# ошибке (занятый порт, битая БД) сервис не крутился в бесконечном
+# цикле, забивая журнал десятками попыток в секунду.
+Restart=always
+RestartSec=5
+
+# Логи уходят в journald, а не в файл в /tmp: тот очищается при
+# перезагрузке — именно так уже пропал лог вместе с историей запуска,
+# и причину падения было не посмотреть. Читать: journalctl -u gridforge
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
