@@ -62,6 +62,9 @@ def _migrate_missing_columns() -> None:
         "incidents": [
             ("last_escalated_minutes", "INTEGER DEFAULT 0"),
         ],
+        "api_keys": [
+            ("group_id", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

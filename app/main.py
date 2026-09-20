@@ -17,9 +17,14 @@ from sqlalchemy.orm import Session
 from app.auth import (
     bootstrap_first_key,
     generate_key,
+    key_sees_group,
     require_admin_key,
     require_api_key,
+    require_backup_access,
+    require_node_access,
     require_operator_key,
+    require_probe_access,
+    scope_nodes,
 )
 from app.db import get_session, init_db
 from app.ad_audit_engine import run_ad_audit
@@ -172,9 +177,13 @@ def delete_group(group_id: int, db: Session = Depends(_db)):
 
 
 @api_write.post("/api/nodes", status_code=201)
-def create_node(payload: NodeIn, db: Session = Depends(_db)):
+def create_node(payload: NodeIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
     if payload.group_id is not None and db.get(Group, payload.group_id) is None:
         raise HTTPException(status_code=404, detail="Group не найдена")
+    if not key_sees_group(key, payload.group_id):
+        # Иначе admin, ограниченный своей группой, создавал бы узлы в чужой
+        # (или вне групп) и тем самым выходил бы за свою область.
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
     node = Node(
         name=payload.name,
         address=payload.address,
@@ -189,8 +198,12 @@ def create_node(payload: NodeIn, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/nodes")
-def list_nodes(group_id: int | None = None, db: Session = Depends(_db)):
-    query = db.query(Node)
+def list_nodes(
+    group_id: int | None = None,
+    db: Session = Depends(_db),
+    key: ApiKey = Depends(require_api_key),
+):
+    query = scope_nodes(db.query(Node), key)
     if group_id is not None:
         query = query.filter(Node.group_id == group_id)
     return [
@@ -209,9 +222,8 @@ def list_nodes(group_id: int | None = None, db: Session = Depends(_db)):
 
 
 @api_write.post("/api/probes", status_code=201)
-def create_probe(payload: ProbeIn, db: Session = Depends(_db)):
-    if db.get(Node, payload.node_id) is None:
-        raise HTTPException(status_code=404, detail="Node не найден")
+def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    require_node_access(db, key, payload.node_id)
     params = dict(payload.params)
     for secret_field in ("password", "auth_password", "priv_password"):
         if params.get(secret_field):
@@ -230,9 +242,10 @@ def create_probe(payload: ProbeIn, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/nodes/{node_id}/probes")
-def list_node_probes(node_id: int, db: Session = Depends(_db)):
+def list_node_probes(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
     """Для веб-интерфейса (static/app.js) — Probe каждого Node вместе с
     последней Sample, чтобы не делать по отдельному запросу на probe."""
+    require_node_access(db, key, node_id)
     probes = db.query(Probe).filter(Probe.node_id == node_id).all()
     result = []
     for p in probes:
@@ -259,7 +272,13 @@ def list_node_probes(node_id: int, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/probes/{probe_id}/samples")
-def probe_samples(probe_id: int, limit: int = 50, db: Session = Depends(_db)):
+def probe_samples(
+    probe_id: int,
+    limit: int = 50,
+    db: Session = Depends(_db),
+    key: ApiKey = Depends(require_api_key),
+):
+    require_probe_access(db, key, probe_id)
     rows = (
         db.query(Sample)
         .filter(Sample.probe_id == probe_id)
@@ -274,9 +293,8 @@ def probe_samples(probe_id: int, limit: int = 50, db: Session = Depends(_db)):
 
 
 @api_write.post("/api/watches", status_code=201)
-def create_watch(payload: WatchIn, db: Session = Depends(_db)):
-    if db.get(Probe, payload.probe_id) is None:
-        raise HTTPException(status_code=404, detail="Probe не найден")
+def create_watch(payload: WatchIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    require_probe_access(db, key, payload.probe_id)
     watch = Watch(
         probe_id=payload.probe_id,
         operator=payload.operator,
@@ -292,10 +310,11 @@ def create_watch(payload: WatchIn, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/probes/{probe_id}/watches")
-def list_probe_watches(probe_id: int, db: Session = Depends(_db)):
+def list_probe_watches(probe_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
     """Для инвентаря на сайте (static/inventory.js) — список условий под
     каждой проверкой, с количеством уже настроенных действий (Action), не
     только сам факт существования Watch."""
+    require_probe_access(db, key, probe_id)
     watches = db.query(Watch).filter(Watch.probe_id == probe_id).all()
     result = []
     for w in watches:
@@ -314,10 +333,20 @@ def list_probe_watches(probe_id: int, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/incidents")
-def list_incidents(include_resolved: bool = False, db: Session = Depends(_db)):
+def list_incidents(
+    include_resolved: bool = False,
+    db: Session = Depends(_db),
+    key: ApiKey = Depends(require_api_key),
+):
     query = db.query(Incident)
     if not include_resolved:
         query = query.filter(Incident.resolved_at.is_(None))
+    if key.group_id is not None:
+        # Incident → Watch → Probe → Node: инциденты чужих групп не должны
+        # быть видны даже в виде «что-то где-то упало».
+        query = query.join(Incident.watch).join(Watch.probe).join(Probe.node).filter(
+            Node.group_id == key.group_id
+        )
     rows = query.order_by(desc(Incident.opened_at)).all()
     result = []
     for i in rows:
@@ -337,11 +366,14 @@ def list_incidents(include_resolved: bool = False, db: Session = Depends(_db)):
 
 
 @api_write.post("/api/channels", status_code=201)
-def create_channel(payload: ChannelIn, db: Session = Depends(_db)):
-    if payload.node_id is not None and db.get(Node, payload.node_id) is None:
-        raise HTTPException(status_code=404, detail="Node не найден")
-    if payload.watch_id is not None and db.get(Watch, payload.watch_id) is None:
-        raise HTTPException(status_code=404, detail="Watch не найден")
+def create_channel(payload: ChannelIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    if payload.node_id is not None:
+        require_node_access(db, key, payload.node_id)
+    if payload.watch_id is not None:
+        watch = db.get(Watch, payload.watch_id)
+        if watch is None:
+            raise HTTPException(status_code=404, detail="Watch не найден")
+        require_probe_access(db, key, watch.probe_id)
     channel = Channel(
         kind=payload.kind,
         config=payload.config,
@@ -504,10 +536,13 @@ def list_action_runs(incident_id: int, db: Session = Depends(_db)):
 
 
 @api_operate.post("/api/nodes/{node_id}/backup", status_code=201)
-async def trigger_backup(node_id: int, payload: BackupTriggerIn, db: Session = Depends(_db)):
-    node = db.get(Node, node_id)
-    if node is None:
-        raise HTTPException(status_code=404, detail="Node не найден")
+async def trigger_backup(
+    node_id: int,
+    payload: BackupTriggerIn,
+    db: Session = Depends(_db),
+    key: ApiKey = Depends(require_api_key),
+):
+    node = require_node_access(db, key, node_id)
     backup = await run_backup(
         db, node,
         username=payload.username, command=payload.command,
@@ -517,7 +552,8 @@ async def trigger_backup(node_id: int, payload: BackupTriggerIn, db: Session = D
 
 
 @api_read.get("/api/nodes/{node_id}/backups")
-def list_backups(node_id: int, db: Session = Depends(_db)):
+def list_backups(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    require_node_access(db, key, node_id)
     rows = (
         db.query(Backup)
         .filter(Backup.node_id == node_id)
@@ -531,20 +567,16 @@ def list_backups(node_id: int, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/backups/{backup_id}")
-def get_backup(backup_id: int, db: Session = Depends(_db)):
-    backup = db.get(Backup, backup_id)
-    if backup is None:
-        raise HTTPException(status_code=404, detail="Бэкап не найден")
+def get_backup(backup_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    backup = require_backup_access(db, key, backup_id)
     return {"id": backup.id, "node_id": backup.node_id, "taken_at": backup.taken_at.isoformat(), "content": backup.content, "changed": backup.changed, "error": backup.error}
 
 
 @api_read.get("/api/backups/{backup_id}/diff")
-def get_backup_diff(backup_id: int, db: Session = Depends(_db)):
+def get_backup_diff(backup_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
     """Diff против предыдущего УСПЕШНОГО снимка того же узла (см.
     backups_engine.run_backup — та же логика поиска "previous")."""
-    backup = db.get(Backup, backup_id)
-    if backup is None:
-        raise HTTPException(status_code=404, detail="Бэкап не найден")
+    backup = require_backup_access(db, key, backup_id)
     previous = (
         db.query(Backup)
         .filter(Backup.node_id == backup.node_id, Backup.error.is_(None), Backup.taken_at < backup.taken_at)
@@ -590,10 +622,8 @@ def delete_audit_rule(rule_id: int, db: Session = Depends(_db)):
 
 
 @api_operate.post("/api/nodes/{node_id}/audit")
-def trigger_audit(node_id: int, db: Session = Depends(_db)):
-    node = db.get(Node, node_id)
-    if node is None:
-        raise HTTPException(status_code=404, detail="Node не найден")
+def trigger_audit(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    node = require_node_access(db, key, node_id)
     findings = run_audit(db, node)
     rules_by_id = {r.id: r for r in db.query(AuditRule).all()}
     result = []
@@ -610,7 +640,8 @@ def trigger_audit(node_id: int, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/nodes/{node_id}/audit")
-def get_audit_findings(node_id: int, db: Session = Depends(_db)):
+def get_audit_findings(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    require_node_access(db, key, node_id)
     findings = db.query(AuditFinding).filter(AuditFinding.node_id == node_id).order_by(AuditFinding.checked_at.desc()).all()
     rules_by_id = {r.id: r for r in db.query(AuditRule).all()}
     result = []
@@ -722,7 +753,7 @@ def whoami(key: ApiKey = Depends(require_api_key)):
     тому, прошёл ли GET /api/api-keys (получилось → admin, иначе viewer)
     — с появлением operator такое угадывание врало бы, показывая
     operator как viewer."""
-    return {"label": key.label, "role": key.role.value}
+    return {"label": key.label, "role": key.role.value, "group_id": key.group_id}
 
 
 @api_write.post("/api/api-keys", status_code=201)
@@ -730,8 +761,15 @@ def create_api_key(payload: ApiKeyIn, db: Session = Depends(_db)):
     """Только admin создаёт новые ключи (в т.ч. другие admin-ключи или
     viewer-ключи для read-only интеграций). Сырое значение показывается
     ровно здесь и один раз, дальше — только хеш в БД."""
-    raw_key = generate_key(db, label=payload.label, role=payload.role)
-    return {"key": raw_key, "label": payload.label, "role": payload.role.value}
+    if payload.group_id is not None and db.get(Group, payload.group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    raw_key = generate_key(db, label=payload.label, role=payload.role, group_id=payload.group_id)
+    return {
+        "key": raw_key,
+        "label": payload.label,
+        "role": payload.role.value,
+        "group_id": payload.group_id,
+    }
 
 
 @api_read.get("/api/api-keys")
@@ -740,7 +778,14 @@ def list_api_keys(admin: ApiKey = Depends(require_admin_key), db: Session = Depe
     Явный Depends(require_admin_key) поверх api_read: viewer видит другие
     эндпоинты этого роутера, но не список ключей доступа."""
     return [
-        {"id": k.id, "label": k.label, "role": k.role.value, "created_at": k.created_at.isoformat(), "revoked": k.revoked}
+        {
+            "id": k.id,
+            "label": k.label,
+            "role": k.role.value,
+            "group_id": k.group_id,
+            "created_at": k.created_at.isoformat(),
+            "revoked": k.revoked,
+        }
         for k in db.query(ApiKey).all()
     ]
 
@@ -756,8 +801,19 @@ def revoke_api_key(key_id: int, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/syslog")
-def list_syslog(node_id: int | None = None, source_ip: str | None = None, limit: int = 100, db: Session = Depends(_db)):
+def list_syslog(
+    node_id: int | None = None,
+    source_ip: str | None = None,
+    limit: int = 100,
+    db: Session = Depends(_db),
+    key: ApiKey = Depends(require_api_key),
+):
     query = db.query(SyslogMessage)
+    if key.group_id is not None:
+        # Сообщения с нераспознанным источником (node_id IS NULL) ключу с
+        # группой не показываем: неизвестно, от чьего устройства они, а
+        # содержимое syslog бывает чувствительным.
+        query = query.join(Node, SyslogMessage.node_id == Node.id).filter(Node.group_id == key.group_id)
     if node_id is not None:
         query = query.filter(SyslogMessage.node_id == node_id)
     if source_ip is not None:

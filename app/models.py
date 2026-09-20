@@ -207,6 +207,13 @@ class ApiKey(Base):
     role: Mapped[ApiKeyRole] = mapped_column(Enum(ApiKeyRole), default=ApiKeyRole.admin)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     revoked: Mapped[bool] = mapped_column(default=False)
+    # Вторая ось прав (первая — role): ограничение области видимости одной
+    # группой узлов. None = все группы (так ведут себя все ключи, выданные
+    # до появления этого поля). Ключ с группой не видит ни узлы других
+    # групп, ни узлы вообще без группы — строгая, предсказуемая граница.
+    # Проверки — в auth.py (key_sees_group/require_node_access), не
+    # россыпью по эндпоинтам.
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
 
 
 class ChannelKind(str, enum.Enum):
@@ -257,6 +264,8 @@ class Backup(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     changed: Mapped[bool] = mapped_column(default=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    node: Mapped["Node"] = relationship()
 
 
 class ScanStatus(str, enum.Enum):

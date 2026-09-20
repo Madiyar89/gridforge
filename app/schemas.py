@@ -59,6 +59,7 @@ class EscalationStepIn(BaseModel):
 class ApiKeyIn(BaseModel):
     label: str
     role: ApiKeyRole = ApiKeyRole.viewer
+    group_id: int | None = None  # None = ключ видит все группы
 
 
 class TemplateIn(BaseModel):
