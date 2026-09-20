@@ -25,6 +25,7 @@ from app.db import get_session
 from app.escalation_engine import run_escalations
 from app.models import Probe, ProbeKind, Sample
 from app.probes import run_probe
+from app.retention_engine import run_retention
 from app.watch_engine import evaluate_probe
 
 logger = logging.getLogger("gridforge.scheduler")
@@ -77,11 +78,19 @@ class Scheduler:
             finally:
                 db.close()
 
-    async def run_forever(self, reload_interval_seconds: float = 5.0, escalation_interval_seconds: float = 30.0) -> None:
+    async def run_forever(
+        self,
+        reload_interval_seconds: float = 5.0,
+        escalation_interval_seconds: float = 30.0,
+        retention_interval_seconds: float = 24 * 3600,
+    ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
             last_reload = 0.0
             last_escalation_check = 0.0
+            # Первая очистка — не сразу при старте, а через сутки работы:
+            # перезапуск сервиса не должен каждый раз запускать удаление.
+            last_retention = time.monotonic()
             while not self._stop.is_set():
                 now = time.monotonic()
                 if now - last_reload >= reload_interval_seconds:
@@ -100,6 +109,15 @@ class Scheduler:
                     finally:
                         db.close()
                     last_escalation_check = now
+                if now - last_retention >= retention_interval_seconds:
+                    db = get_session()
+                    try:
+                        run_retention(db)
+                    except Exception:
+                        logger.exception("сбой очистки истории")
+                    finally:
+                        db.close()
+                    last_retention = now
                 await self._run_due()
                 sleep_for = 0.5
                 if self._heap:

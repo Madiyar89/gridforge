@@ -59,6 +59,7 @@ from app.models import (
     Template,
     Watch,
 )
+from app.retention_engine import run_retention
 from app.scan_engine import ScanValidationError, run_scan
 from app.scheduler import Scheduler
 from app.syslog_server import DEFAULT_SYSLOG_PORT, start_syslog_server
@@ -746,6 +747,13 @@ def get_ad_audit_findings(run_id: int, db: Session = Depends(_db)):
         {"id": f.id, "check_name": f.check_name, "severity": f.severity.value, "dn": f.dn, "detail": f.detail}
         for f in findings
     ]
+
+
+@api_write.post("/api/retention/run")
+def trigger_retention(db: Session = Depends(_db)):
+    """Ручной запуск очистки. Планировщик и так делает её раз в сутки, но
+    ждать сутки, когда место на диске кончается сейчас, неудобно."""
+    return run_retention(db)
 
 
 @api_read.get("/api/whoami")
