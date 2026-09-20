@@ -47,6 +47,8 @@ class ChannelIn(BaseModel):
     kind: ChannelKind
     config: dict
     min_severity: WatchSeverity = WatchSeverity.info
+    node_id: int | None = None
+    watch_id: int | None = None
 
 
 class ApiKeyIn(BaseModel):

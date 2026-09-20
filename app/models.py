@@ -206,10 +206,14 @@ class ChannelKind(str, enum.Enum):
 
 
 class Channel(Base):
-    """Канал доставки Signal (см. signal.py). Глобальный на весь GridForge
-    на этом этапе — все Incident уходят во все enabled Channel, привязка
-    канала к конкретному Node/Watch (аналог action-условий в Zabbix) пока
-    не сделана, см. README «Что дальше»."""
+    """Канал доставки Signal (см. signal.py). По умолчанию глобальный —
+    получает все Incident выше своего min_severity. `node_id`/`watch_id`
+    сужают охват (оба опциональны, None = без сужения по этому
+    признаку): `watch_id` — только инциденты этого конкретного Watch;
+    `node_id` — только инциденты узла (по всем его Watch). Если задано
+    и то, и другое — на практике избыточно (watch уже принадлежит
+    ровно одному node), сужение по watch_id просто более узкое и
+    "выигрывает" в фильтре dispatch()."""
 
     __tablename__ = "channels"
 
@@ -219,6 +223,8 @@ class Channel(Base):
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True)
     min_severity: Mapped[WatchSeverity] = mapped_column(Enum(WatchSeverity), default=WatchSeverity.info)
+    node_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id"), nullable=True)
+    watch_id: Mapped[int | None] = mapped_column(ForeignKey("watches.id"), nullable=True)
 
 
 class Backup(Base):

@@ -1,5 +1,21 @@
 // Каналы уведомлений — webhook/telegram.
 
+let _nodesById = {};
+
+async function refreshNodeOptions() {
+  const select = document.getElementById("new-channel-node");
+  let nodes;
+  try {
+    nodes = await api("/api/nodes");
+  } catch (e) {
+    return;
+  }
+  _nodesById = Object.fromEntries(nodes.map((n) => [n.id, n.name]));
+  select.innerHTML =
+    `<option value="">все узлы</option>` +
+    nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("");
+}
+
 async function refreshChannels() {
   const body = document.getElementById("channels-body");
   let channels;
@@ -15,13 +31,14 @@ async function refreshChannels() {
     return;
   }
   body.innerHTML = channels
-    .map(
-      (c) => `
+    .map((c) => {
+      const scope = c.node_id ? `узел: ${escapeHtml(_nodesById[c.node_id] || `#${c.node_id}`)}` : "все узлы";
+      return `
       <div class="channel-row">
-        <span><span class="kind">${escapeHtml(c.kind)}</span> · min ${escapeHtml(c.min_severity)}</span>
+        <span><span class="kind">${escapeHtml(c.kind)}</span> · min ${escapeHtml(c.min_severity)} · ${scope}</span>
         <button data-id="${c.id}" class="del-channel">удалить</button>
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
   body.querySelectorAll(".del-channel").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -40,6 +57,8 @@ document.getElementById("add-channel").addEventListener("click", async () => {
   const kind = document.getElementById("new-channel-kind").value;
   const target = document.getElementById("new-channel-target").value.trim();
   const min_severity = document.getElementById("new-channel-severity").value;
+  const nodeValue = document.getElementById("new-channel-node").value;
+  const node_id = nodeValue ? Number(nodeValue) : null;
   if (!target) return toast("Заполни поле канала", true);
   let config;
   if (kind === "webhook") {
@@ -50,7 +69,7 @@ document.getElementById("add-channel").addEventListener("click", async () => {
     config = { bot_token, chat_id };
   }
   try {
-    await api("/api/channels", { method: "POST", body: JSON.stringify({ kind, config, min_severity }) });
+    await api("/api/channels", { method: "POST", body: JSON.stringify({ kind, config, min_severity, node_id }) });
     document.getElementById("new-channel-target").value = "";
     toast("Канал добавлен");
     refreshChannels();
@@ -60,8 +79,10 @@ document.getElementById("add-channel").addEventListener("click", async () => {
 });
 
 function onKeySaved() {
+  refreshNodeOptions();
   refreshChannels();
 }
 
+refreshNodeOptions();
 refreshChannels();
 setInterval(refreshChannels, REFRESH_MS);

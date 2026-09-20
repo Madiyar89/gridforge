@@ -55,6 +55,10 @@ def _migrate_missing_columns() -> None:
             ("vendor", "TEXT"),
             ("active", "BOOLEAN DEFAULT 1"),
         ],
+        "channels": [
+            ("node_id", "INTEGER"),
+            ("watch_id", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

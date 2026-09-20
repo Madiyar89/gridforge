@@ -79,9 +79,14 @@ async def dispatch(client: httpx.AsyncClient, db: Session, incidents: list[Incid
         return
     for incident in incidents:
         message = _format_message(incident)
-        rank = _SEVERITY_RANK[incident.watch.severity]
+        watch = incident.watch
+        rank = _SEVERITY_RANK[watch.severity]
         for channel in channels:
             if rank < _SEVERITY_RANK[channel.min_severity]:
+                continue
+            if channel.watch_id is not None and channel.watch_id != watch.id:
+                continue
+            if channel.watch_id is None and channel.node_id is not None and channel.node_id != watch.probe.node.id:
                 continue
             sender = _REGISTRY.get(channel.kind)
             if sender is None:

@@ -323,7 +323,17 @@ def list_incidents(include_resolved: bool = False, db: Session = Depends(_db)):
 
 @api_write.post("/api/channels", status_code=201)
 def create_channel(payload: ChannelIn, db: Session = Depends(_db)):
-    channel = Channel(kind=payload.kind, config=payload.config, min_severity=payload.min_severity)
+    if payload.node_id is not None and db.get(Node, payload.node_id) is None:
+        raise HTTPException(status_code=404, detail="Node не найден")
+    if payload.watch_id is not None and db.get(Watch, payload.watch_id) is None:
+        raise HTTPException(status_code=404, detail="Watch не найден")
+    channel = Channel(
+        kind=payload.kind,
+        config=payload.config,
+        min_severity=payload.min_severity,
+        node_id=payload.node_id,
+        watch_id=payload.watch_id,
+    )
     db.add(channel)
     db.commit()
     db.refresh(channel)
@@ -333,7 +343,15 @@ def create_channel(payload: ChannelIn, db: Session = Depends(_db)):
 @api_read.get("/api/channels")
 def list_channels(db: Session = Depends(_db)):
     return [
-        {"id": c.id, "kind": c.kind.value, "config": c.config, "enabled": c.enabled, "min_severity": c.min_severity.value}
+        {
+            "id": c.id,
+            "kind": c.kind.value,
+            "config": c.config,
+            "enabled": c.enabled,
+            "min_severity": c.min_severity.value,
+            "node_id": c.node_id,
+            "watch_id": c.watch_id,
+        }
         for c in db.query(Channel).all()
     ]
 

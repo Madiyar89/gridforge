@@ -22,7 +22,7 @@
 
 <div class="page-head">
   <h1>Каналы уведомлений</h1>
-  <p>Куда уходят новые инциденты. Канал глобальный — получает все инциденты не ниже своего порога важности.</p>
+  <p>Куда уходят новые инциденты. По умолчанию канал глобальный (все узлы); можно привязать к конкретному узлу — тогда он получает инциденты только с него.</p>
 </div>
 
 <div class="panel">
@@ -38,6 +38,9 @@
       <option value="info" selected>от info (все)</option>
       <option value="warning">от warning</option>
       <option value="critical">только critical</option>
+    </select>
+    <select id="new-channel-node">
+      <option value="">все узлы</option>
     </select>
     <button id="add-channel">+ канал</button>
   </div>
