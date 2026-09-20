@@ -33,6 +33,7 @@ from app.capture_engine import CaptureValidationError, analyze_capture, run_capt
 from app.console_ws import handle_console
 from app.ip_lookup import extract_hints
 from app.secrets_crypto import encrypt_secret
+from app.signal import encrypt_channel_config, mask_channel_config
 from app.backups_engine import diff_backups, run_backup
 from app.models import (
     Action,
@@ -376,7 +377,7 @@ def create_channel(payload: ChannelIn, db: Session = Depends(_db), key: ApiKey =
         require_probe_access(db, key, watch.probe_id)
     channel = Channel(
         kind=payload.kind,
-        config=payload.config,
+        config=encrypt_channel_config(payload.config),
         min_severity=payload.min_severity,
         node_id=payload.node_id,
         watch_id=payload.watch_id,
@@ -393,7 +394,7 @@ def list_channels(db: Session = Depends(_db)):
         {
             "id": c.id,
             "kind": c.kind.value,
-            "config": c.config,
+            "config": mask_channel_config(c.config),
             "enabled": c.enabled,
             "min_severity": c.min_severity.value,
             "node_id": c.node_id,

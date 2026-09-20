@@ -33,9 +33,11 @@ async function refreshChannels() {
   body.innerHTML = channels
     .map((c) => {
       const scope = c.node_id ? `узел: ${escapeHtml(_nodesById[c.node_id] || `#${c.node_id}`)}` : "все узлы";
+      // Сам адрес/токен канала API не отдаёт (зашифрован в БД) — только хост.
+      const target = c.config && c.config.url_host ? ` · ${escapeHtml(c.config.url_host)}` : "";
       return `
       <div class="channel-row">
-        <span><span class="kind">${escapeHtml(c.kind)}</span> · min ${escapeHtml(c.min_severity)} · ${scope}</span>
+        <span><span class="kind">${escapeHtml(c.kind)}</span>${target} · min ${escapeHtml(c.min_severity)} · ${scope}</span>
         <button data-id="${c.id}" class="del-channel">удалить</button>
       </div>`;
     })

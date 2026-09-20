@@ -9,15 +9,52 @@ from __future__ import annotations
 
 import logging
 from typing import Awaitable, Callable
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy.orm import Session
 
 from app.models import Channel, ChannelKind, Incident, WatchSeverity
+from app.secrets_crypto import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger("gridforge.signal")
 
 _SEVERITY_RANK = {WatchSeverity.info: 0, WatchSeverity.warning: 1, WatchSeverity.critical: 2}
+
+# Поля Channel.config, которые надо хранить зашифрованными. Список общий
+# для шифрования (main.py при создании канала) и расшифровки (отправители
+# ниже): разъехавшись, они молча сломали бы доставку — поле зашифровали, а
+# расшифровать забыли.
+#
+# `url` здесь не паранойя: в webhook-адресах Slack/Discord/Teams сам токен
+# лежит в пути, то есть URL целиком является учётными данными.
+CHANNEL_SECRET_FIELDS = ("bot_token", "url")
+
+
+def encrypt_channel_config(config: dict) -> dict:
+    result = dict(config)
+    for field in CHANNEL_SECRET_FIELDS:
+        if result.get(field):
+            result[field] = encrypt_secret(result[field])
+    return result
+
+
+def _decrypted(config: dict, field: str) -> str | None:
+    value = config.get(field)
+    return decrypt_secret(value) if value else None
+
+
+def mask_channel_config(config: dict) -> dict:
+    """Версия конфига для выдачи наружу (GET /api/channels): секреты не
+    отдаются даже в зашифрованном виде. Для webhook остаётся хост — по нему
+    видно, куда шлёт канал, а токен из пути не раскрывается."""
+    masked = {k: v for k, v in config.items() if k not in CHANNEL_SECRET_FIELDS}
+    if config.get("url"):
+        host = urlparse(decrypt_secret(config["url"])).netloc
+        masked["url_host"] = host or "?"
+    if config.get("bot_token"):
+        masked["bot_token"] = "••••"
+    return masked
 
 ChannelSender = Callable[[httpx.AsyncClient, Channel, Incident, str], Awaitable[None]]
 
@@ -42,7 +79,7 @@ def format_message(incident: Incident, *, prefix: str | None = None) -> str:
 
 @register(ChannelKind.webhook)
 async def _send_webhook(client: httpx.AsyncClient, channel: Channel, incident: Incident, message: str) -> None:
-    url = channel.config.get("url")
+    url = _decrypted(channel.config, "url")
     if not url:
         logger.warning("channel_id=%s (webhook): config.url не задан", channel.id)
         return
@@ -60,7 +97,7 @@ async def _send_webhook(client: httpx.AsyncClient, channel: Channel, incident: I
 
 @register(ChannelKind.telegram)
 async def _send_telegram(client: httpx.AsyncClient, channel: Channel, incident: Incident, message: str) -> None:
-    bot_token = channel.config.get("bot_token")
+    bot_token = _decrypted(channel.config, "bot_token")
     chat_id = channel.config.get("chat_id")
     if not bot_token or not chat_id:
         logger.warning("channel_id=%s (telegram): config.bot_token/chat_id не заданы", channel.id)
