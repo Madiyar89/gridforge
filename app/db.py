@@ -1,18 +1,38 @@
-"""Хранилище GridForge — своя SQLite-схема, не имеет отношения к схеме
-Zabbix (hosts/items/history) и не переиспользует схему NetOpsHub (Device/
-Alert): у GridForge собственная терминология (Node/Probe/Sample/Watch/
-Incident), см. models.py."""
+"""Хранилище GridForge — своя схема, не имеет отношения к схеме Zabbix
+(hosts/items/history) и не переиспользует схему NetOpsHub (Device/Alert):
+у GridForge собственная терминология (Node/Probe/Sample/Watch/Incident),
+см. models.py.
 
+По умолчанию — SQLite-файл (удобно для разработки/тестов, не нужен
+отдельный сервер БД). Для боевого сайта — MySQL/MariaDB через
+`GRIDFORGE_DATABASE_URL` (2026-09-20, по прямому запросу — "как в Zabbix",
+но своя схема, не их SQL). SQLite — не убран, оставлен как fallback,
+не требующий поднятого сервера БД; при переходе на MySQL код ниже не
+меняется, меняется только это одно значение."""
+
+import os
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "gridforge.db"
+# Переопределяется тестами (GRIDFORGE_DB_PATH) — иначе pytest писал бы в
+# тот же файл, что боевой сервер, включая уже реальный узел LAB-1. Тот
+# же паттерн, что уже применяется для GRIDFORGE_SYSLOG_PORT (см. syslog_server.py).
+DB_PATH = Path(os.environ.get("GRIDFORGE_DB_PATH") or (DATA_DIR / "gridforge.db"))
 
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+# GRIDFORGE_DATABASE_URL — полный SQLAlchemy URL, например:
+#   mysql+pymysql://gridforge:PASSWORD@127.0.0.1:3306/gridforge?charset=utf8mb4
+# Не задан — используется SQLite-файл (см. DB_PATH выше), как раньше.
+_DATABASE_URL = os.environ.get("GRIDFORGE_DATABASE_URL") or f"sqlite:///{DB_PATH}"
+_IS_SQLITE = _DATABASE_URL.startswith("sqlite")
+
+# check_same_thread — специфичен для SQLite-драйвера (позволяет делить
+# соединение между потоками asyncio-обработчиков); MySQL-драйвер (pymysql)
+# такого аргумента не знает и упадёт, если передать его туда тоже.
+engine = create_engine(_DATABASE_URL, connect_args={"check_same_thread": False} if _IS_SQLITE else {})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -22,10 +42,13 @@ class Base(DeclarativeBase):
 
 def _migrate_missing_columns() -> None:
     """`Base.metadata.create_all()` создаёт только ОТСУТСТВУЮЩИЕ таблицы —
-    новую колонку в уже существующей таблице (SQLite, без Alembic) он не
-    добавит. Тот же приём, что уже применялся в NetOpsHub при похожей
-    проблеме: PRAGMA table_info — если колонки нет, ALTER TABLE ADD COLUMN.
-    Идемпотентно, безопасно гонять при каждом старте."""
+    новую колонку в уже существующей таблице (без Alembic) он не добавит.
+    Раньше проверка "есть ли колонка" шла через `PRAGMA table_info`
+    (SQLite-специфичный синтаксис) — не работает на MySQL. Заменено на
+    `sqlalchemy.inspect`, диалект-независимо (работает и на SQLite, и на
+    MySQL/MariaDB без правок). Сам `ALTER TABLE ... ADD COLUMN ...` —
+    синтаксис одинаковый у обоих. Идемпотентно, безопасно гонять при
+    каждом старте."""
     additions = {
         "nodes": [
             ("group_id", "INTEGER"),
@@ -33,9 +56,10 @@ def _migrate_missing_columns() -> None:
             ("active", "BOOLEAN DEFAULT 1"),
         ],
     }
+    inspector = inspect(engine)
     with engine.connect() as conn:
         for table, columns in additions.items():
-            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            existing = {col["name"] for col in inspector.get_columns(table)}
             for name, coltype in columns:
                 if name not in existing:
                     conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")

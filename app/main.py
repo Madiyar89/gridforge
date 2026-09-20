@@ -88,14 +88,25 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     if raw_key:
+        # Реальный найденный баг (2026-09-20): под nohup/systemd/Docker
+        # (stdout не TTY) print() без flush=True может не долетать до
+        # лога вообще — проверено полным циклом старт→graceful shutdown
+        # против реальной MariaDB, строка не появилась ни разу, хотя
+        # остальные (uvicorn, через logging) появлялись. Не полагаемся
+        # только на консоль — тот же ключ пишется в файл, читаемый только
+        # владельцем; убрать файл после того, как ключ сохранён.
         print(
             "\n"
             "=================================================================\n"
             f"  Первый API-ключ GridForge, роль admin (сохрани — второй раз не покажется):\n"
             f"  {raw_key}\n"
             "  Использовать: заголовок 'X-API-Key: <ключ>' на каждый /api/ запрос.\n"
-            "=================================================================\n"
+            "=================================================================\n",
+            flush=True,
         )
+        bootstrap_key_path = Path(__file__).resolve().parent.parent / "data" / "BOOTSTRAP_ADMIN_KEY_DELETE_ME.txt"
+        bootstrap_key_path.write_text(raw_key + "\n", encoding="utf-8")
+        bootstrap_key_path.chmod(0o600)
     task = asyncio.create_task(_scheduler.run_forever())
     syslog_transport = await start_syslog_server()
     yield
