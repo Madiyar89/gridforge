@@ -14,7 +14,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.auth import bootstrap_first_key, generate_key, require_admin_key, require_api_key
+from app.auth import (
+    bootstrap_first_key,
+    generate_key,
+    require_admin_key,
+    require_api_key,
+    require_operator_key,
+)
 from app.db import get_session, init_db
 from app.ad_audit_engine import run_ad_audit
 from app.audit_engine import run_audit
@@ -119,10 +125,17 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="GridForge", lifespan=lifespan)
 
-# read: любой действующий ключ (admin или viewer). write: только admin —
-# viewer может смотреть Node/Probe/Sample/Watch/Incident/Channel, но не
-# создавать/удалять их и не управлять ключами (см. app/auth.py).
+# Три уровня доступа (см. app/auth.py, ROLE_RANK):
+#   api_read    — любой действующий ключ: смотреть Node/Probe/Sample/
+#                 Watch/Incident/Channel и историю.
+#   api_operate — operator и выше: ЗАПУСК операций на оборудовании (снять
+#                 бэкап, прогнать аудит, скан сети, захват трафика). Сами
+#                 по себе ничего не меняют в конфигурации GridForge, но
+#                 лезут на боевые устройства — viewer'у их давать нельзя.
+#   api_write   — только admin: инвентарь, правила, каналы, шаблоны,
+#                 действия и выдача ключей доступа.
 api_read = APIRouter(dependencies=[Depends(require_api_key)])
+api_operate = APIRouter(dependencies=[Depends(require_operator_key)])
 api_write = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
@@ -490,7 +503,7 @@ def list_action_runs(incident_id: int, db: Session = Depends(_db)):
     ]
 
 
-@api_write.post("/api/nodes/{node_id}/backup", status_code=201)
+@api_operate.post("/api/nodes/{node_id}/backup", status_code=201)
 async def trigger_backup(node_id: int, payload: BackupTriggerIn, db: Session = Depends(_db)):
     node = db.get(Node, node_id)
     if node is None:
@@ -576,7 +589,7 @@ def delete_audit_rule(rule_id: int, db: Session = Depends(_db)):
     db.commit()
 
 
-@api_write.post("/api/nodes/{node_id}/audit")
+@api_operate.post("/api/nodes/{node_id}/audit")
 def trigger_audit(node_id: int, db: Session = Depends(_db)):
     node = db.get(Node, node_id)
     if node is None:
@@ -613,7 +626,7 @@ def get_audit_findings(node_id: int, db: Session = Depends(_db)):
     return result
 
 
-@api_write.post("/api/scans", status_code=201)
+@api_operate.post("/api/scans", status_code=201)
 async def create_scan(payload: ScanIn, db: Session = Depends(_db)):
     try:
         scan = await run_scan(db, payload.cidr, payload.ports)
@@ -667,7 +680,7 @@ def create_node_from_scan_host(host_id: int, payload: ScanHostToNodeIn, db: Sess
     return {"id": node.id}
 
 
-@api_write.post("/api/ad-audit", status_code=201)
+@api_operate.post("/api/ad-audit", status_code=201)
 async def trigger_ad_audit(payload: AdAuditIn, db: Session = Depends(_db)):
     """Учётка для LDAP-подключения нигде не сохраняется — используется
     один раз для этого прогона и не попадает в БД (см. AdAuditRun)."""
@@ -701,6 +714,15 @@ def get_ad_audit_findings(run_id: int, db: Session = Depends(_db)):
         {"id": f.id, "check_name": f.check_name, "severity": f.severity.value, "dn": f.dn, "detail": f.detail}
         for f in findings
     ]
+
+
+@api_read.get("/api/whoami")
+def whoami(key: ApiKey = Depends(require_api_key)):
+    """Роль текущего ключа. Нужен интерфейсу: раньше роль угадывалась по
+    тому, прошёл ли GET /api/api-keys (получилось → admin, иначе viewer)
+    — с появлением operator такое угадывание врало бы, показывая
+    operator как viewer."""
+    return {"label": key.label, "role": key.role.value}
 
 
 @api_write.post("/api/api-keys", status_code=201)
@@ -787,7 +809,7 @@ def ip_lookup(q: str, limit: int = 50, db: Session = Depends(_db)):
     }
 
 
-@api_write.post("/api/captures", status_code=201)
+@api_operate.post("/api/captures", status_code=201)
 async def create_capture(payload: CaptureIn, db: Session = Depends(_db)):
     try:
         capture = await run_capture(db, payload.interface, payload.bpf_filter, payload.duration_seconds)
@@ -825,6 +847,7 @@ def health():
 
 
 app.include_router(api_read)
+app.include_router(api_operate)
 app.include_router(api_write)
 
 

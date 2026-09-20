@@ -60,10 +60,23 @@ async def require_api_key(x_api_key: str | None = Header(default=None)) -> ApiKe
         db.close()
 
 
+ROLE_RANK = {ApiKeyRole.viewer: 0, ApiKeyRole.operator: 1, ApiKeyRole.admin: 2}
+
+
+async def require_operator_key(key: ApiKey = Depends(require_api_key)) -> ApiKey:
+    """operator и выше — запуск операций на узлах (бэкап, аудит, скан,
+    захват трафика). Сами операции ничего не меняют в конфигурации
+    GridForge, поэтому не требуют admin; но и viewer их запускать не
+    должен — они лезут на боевое оборудование."""
+    if ROLE_RANK[key.role] < ROLE_RANK[ApiKeyRole.operator]:
+        raise HTTPException(status_code=403, detail="Требуется ключ с ролью operator или admin")
+    return key
+
+
 async def require_admin_key(key: ApiKey = Depends(require_api_key)) -> ApiKey:
-    """Только role=admin — для создания/изменения/удаления. viewer-ключ
-    здесь получает 403, не 401 (ключ валиден, прав не хватает — разные
-    вещи)."""
+    """Только role=admin — изменение инвентаря/правил/каналов и выдача
+    ключей. viewer/operator здесь получают 403, не 401 (ключ валиден,
+    прав не хватает — разные вещи)."""
     if key.role != ApiKeyRole.admin:
         raise HTTPException(status_code=403, detail="Требуется ключ с ролью admin")
     return key

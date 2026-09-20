@@ -78,21 +78,16 @@ async function updateRolePill() {
     pill.className = "role-pill";
     return;
   }
+  let me;
   try {
-    await api("/api/nodes");
+    me = await api("/api/whoami");
   } catch (e) {
     pill.textContent = "неверный ключ";
     pill.className = "role-pill bad";
     return;
   }
-  try {
-    await api("/api/api-keys");
-    pill.textContent = "admin";
-    pill.className = "role-pill ok";
-  } catch (e) {
-    pill.textContent = "viewer";
-    pill.className = "role-pill";
-  }
+  pill.textContent = me.role;
+  pill.className = me.role === "admin" ? "role-pill ok" : "role-pill";
 }
 
 function initTopbar() {
