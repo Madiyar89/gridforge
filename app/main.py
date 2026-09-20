@@ -32,6 +32,7 @@ from app.db import get_session, init_db
 from app.ad_audit_engine import run_ad_audit
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
+from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
 from app.ip_lookup import extract_hints
@@ -432,6 +433,13 @@ def list_probe_watches(probe_id: int, db: Session = Depends(_db), key: Principal
     return result
 
 
+@api_read.get("/api/dashboard")
+def dashboard(db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Всё для главной страницы одним запросом — она обновляется каждые
+    5 секунд, и десяток отдельных вызовов на виджет тут заметен."""
+    return build_dashboard(db, key)
+
+
 @api_read.get("/api/incidents")
 def list_incidents(
     include_resolved: bool = False,
@@ -454,6 +462,11 @@ def list_incidents(
             {
                 "id": i.id,
                 "watch_id": i.watch_id,
+                # Без имени узла список инцидентов отвечал на вопрос «что
+                # сломалось», но не «где» — а на дашборде нужно именно это.
+                "node_id": i.watch.probe.node_id,
+                "node_name": i.watch.probe.node.name,
+                "node_address": i.watch.probe.node.address,
                 "severity": i.watch.severity.value,
                 "label": i.watch.label,
                 "detail": i.detail,
