@@ -120,6 +120,10 @@ a{color:var(--accent);}
   .topbar .brand b::after{opacity:1;}
   .topbar .keybox{pointer-events:auto;}
   .topbar .nav-group-title{opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;}
+  /* Пальцем в пункт высотой 32px попадать неудобно: рекомендуемый
+     минимум для касания — 44px. Для мыши это было бы лишним, поэтому
+     увеличиваем только там, где нет наведения. */
+  .topbar .nav a{padding:12px 10px;}
   .nav-toggle{display:block;}
 }
 
