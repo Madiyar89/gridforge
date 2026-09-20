@@ -465,5 +465,31 @@ class Incident(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     detail: Mapped[str] = mapped_column(Text, nullable=False)
+    # Максимальный delay_minutes уже отправленного EscalationStep для этого
+    # Incident (0 = ни одного шага эскалации ещё не было, только исходная
+    # рассылка при открытии). Шаги применяются по возрастанию delay_minutes,
+    # поэтому одного числа достаточно — не нужна отдельная таблица "что уже
+    # отправлено", см. escalation_engine.py.
+    last_escalated_minutes: Mapped[int] = mapped_column(Integer, default=0)
 
     watch: Mapped["Watch"] = relationship()
+
+
+class EscalationStep(Base):
+    """Один шаг многоступенчатой эскалации: если Incident остаётся
+    открытым дольше `delay_minutes`, уходит повторное уведомление через
+    указанный `channel` — независимо от того, подтвердили инцидент или
+    нет (подтверждения/acknowledge в GridForge пока не реализованы, см.
+    HANDOFF.md). `channel` сохраняет свои собственные сужения по
+    severity/node/watch (см. Channel) — шаг эскалации их не обходит,
+    только добавляет отправку с задержкой поверх обычной рассылки при
+    открытии."""
+
+    __tablename__ = "escalation_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    delay_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id"), nullable=False)
+    enabled: Mapped[bool] = mapped_column(default=True)
+
+    channel: Mapped["Channel"] = relationship()

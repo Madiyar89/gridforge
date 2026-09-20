@@ -35,6 +35,7 @@ from app.models import (
     Capture,
     CaptureStatus,
     Channel,
+    EscalationStep,
     Group,
     Incident,
     Node,
@@ -57,6 +58,7 @@ from app.schemas import (
     BackupTriggerIn,
     CaptureIn,
     ChannelIn,
+    EscalationStepIn,
     GroupIn,
     NodeIn,
     ProbeIn,
@@ -362,6 +364,36 @@ def delete_channel(channel_id: int, db: Session = Depends(_db)):
     if channel is None:
         raise HTTPException(status_code=404, detail="Channel не найден")
     db.delete(channel)
+    db.commit()
+
+
+@api_write.post("/api/escalation-steps", status_code=201)
+def create_escalation_step(payload: EscalationStepIn, db: Session = Depends(_db)):
+    if payload.delay_minutes <= 0:
+        raise HTTPException(status_code=422, detail="delay_minutes должен быть положительным")
+    if db.get(Channel, payload.channel_id) is None:
+        raise HTTPException(status_code=404, detail="Channel не найден")
+    step = EscalationStep(delay_minutes=payload.delay_minutes, channel_id=payload.channel_id)
+    db.add(step)
+    db.commit()
+    db.refresh(step)
+    return {"id": step.id}
+
+
+@api_read.get("/api/escalation-steps")
+def list_escalation_steps(db: Session = Depends(_db)):
+    return [
+        {"id": s.id, "delay_minutes": s.delay_minutes, "channel_id": s.channel_id, "enabled": s.enabled}
+        for s in db.query(EscalationStep).order_by(EscalationStep.delay_minutes).all()
+    ]
+
+
+@api_write.delete("/api/escalation-steps/{step_id}", status_code=204)
+def delete_escalation_step(step_id: int, db: Session = Depends(_db)):
+    step = db.get(EscalationStep, step_id)
+    if step is None:
+        raise HTTPException(status_code=404, detail="Шаг эскалации не найден")
+    db.delete(step)
     db.commit()
 
 

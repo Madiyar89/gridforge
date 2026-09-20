@@ -59,6 +59,9 @@ def _migrate_missing_columns() -> None:
             ("node_id", "INTEGER"),
             ("watch_id", "INTEGER"),
         ],
+        "incidents": [
+            ("last_escalated_minutes", "INTEGER DEFAULT 0"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

@@ -51,6 +51,11 @@ class ChannelIn(BaseModel):
     watch_id: int | None = None
 
 
+class EscalationStepIn(BaseModel):
+    delay_minutes: int
+    channel_id: int
+
+
 class ApiKeyIn(BaseModel):
     label: str
     role: ApiKeyRole = ApiKeyRole.viewer

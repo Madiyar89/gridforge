@@ -46,6 +46,21 @@
   </div>
 </div>
 
+<div class="page-head">
+  <h1>Эскалация</h1>
+  <p>Если Incident остаётся открытым дольше указанного времени — уходит повторное уведомление через выбранный канал (шаги применяются в порядке возрастания задержки, каждый — не более одного раза на инцидент).</p>
+</div>
+
+<div class="panel">
+  <h2>Шаги эскалации <span class="count" id="escalation-steps-count"></span></h2>
+  <div class="body" id="escalation-steps-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <input id="new-step-delay" type="number" min="1" placeholder="через N минут">
+    <select id="new-step-channel"></select>
+    <button id="add-escalation-step">+ шаг</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="common.js"></script>

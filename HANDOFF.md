@@ -82,17 +82,23 @@ Samba4 AD DC, клики в headless Chromium (CDP). Юнит-тестов (pyte
 
 Приоритет — сверху вниз.
 
-1. **Закоммитить незакоммиченное**: SNMPv3 в `probes.py`, шифрование
-   `auth_password`/`priv_password` в `main.py`, поля v3 и порта SNMP в
-   форме проверки (`inventory.html`/`inventory.js`). Всё проверено вживую,
-   но в git ещё не лежит.
-2. **Автотесты.** Сейчас их нет. Минимум: pytest на `ip_lookup.extract_hints`,
-   `secrets_crypto`, `audit_engine`, `templates_engine.validate_probe_defs`,
-   `backups_engine.diff_backups`, парсер PRI в `syslog_server`, и
-   API-тесты (FastAPI `TestClient`) на авторизацию/роли.
-3. **Привязка `Channel` к конкретным `Node`/`Watch`** — сейчас канал
-   глобальный, получает все инциденты выше своего `min_severity`.
-4. **Многошаговая эскалация** — сейчас один шаг (алерт + отправка).
+1. ~~**Закоммитить незакоммиченное**: SNMPv3...~~ — сделано 2026-09-20
+   (`bad4cb4`, `ac88761`).
+2. ~~**Автотесты.**~~ — сделано 2026-09-20 (`b06daf8`, `77d8957`): 58
+   тестов (`ip_lookup`, `secrets_crypto`, `audit_engine`,
+   `templates_engine`, `backups_engine`, PRI-парсер, API auth/roles,
+   signal dispatch). Также в этой сессии: миграция основной БД на
+   MySQL/MariaDB (`GRIDFORGE_DATABASE_URL`, SQLite — fallback), найден и
+   исправлен баг потери bootstrap admin-ключа при выводе в файл. Детали —
+   `project-journal/gridforge/`.
+3. ~~**Привязка `Channel` к конкретным `Node`/`Watch`**~~ — сделано
+   2026-09-20 (`77d8957`): опциональные `node_id`/`watch_id` на `Channel`
+   (оба `None` = без сужения, старое поведение не меняется), фильтр в
+   `signal.dispatch()`, форма выбора узла в `channels.html`/`channels.js`.
+   Привязки к конкретному `Watch` пока нет в UI (API поддерживает, но
+   форма даёт выбрать только узел — точнее не запрашивалось).
+4. **Многошаговая эскалация** — сейчас один шаг (алерт + отправка). Сейчас
+   в работе.
 5. **Более тонкий RBAC** — сейчас только `admin`/`viewer` на всё сразу;
    в NetOpsHub права по группам (`SiteRole`) и по функциям.
 6. **Хранение секретов шире**: SSH-ключи лежат как путь на диске; пароль

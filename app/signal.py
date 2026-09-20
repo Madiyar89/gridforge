@@ -32,11 +32,12 @@ def register(kind: ChannelKind) -> Callable[[ChannelSender], ChannelSender]:
     return decorator
 
 
-def _format_message(incident: Incident) -> str:
+def format_message(incident: Incident, *, prefix: str | None = None) -> str:
     watch = incident.watch
     node_name = watch.probe.node.name
     severity_label = {"critical": "КРИТИЧНО", "warning": "предупреждение", "info": "инфо"}[watch.severity.value]
-    return f"[{severity_label}] {node_name}: {incident.detail}"
+    label = f"[{severity_label}]" if prefix is None else f"[{prefix}/{severity_label}]"
+    return f"{label} {node_name}: {incident.detail}"
 
 
 @register(ChannelKind.webhook)
@@ -71,6 +72,31 @@ async def _send_telegram(client: httpx.AsyncClient, channel: Channel, incident: 
     )
 
 
+def channel_matches_incident(channel: Channel, incident: Incident) -> bool:
+    """Общая проверка охвата канала — используется и обычной рассылкой
+    при открытии Incident (dispatch), и эскалацией (escalation_engine),
+    чтобы шаг эскалации не мог обойти сужение по severity/node/watch,
+    заданное на самом канале."""
+    watch = incident.watch
+    if _SEVERITY_RANK[watch.severity] < _SEVERITY_RANK[channel.min_severity]:
+        return False
+    if channel.watch_id is not None:
+        return channel.watch_id == watch.id
+    if channel.node_id is not None:
+        return channel.node_id == watch.probe.node.id
+    return True
+
+
+async def send_to_channel(client: httpx.AsyncClient, channel: Channel, incident: Incident, message: str) -> None:
+    sender = _REGISTRY.get(channel.kind)
+    if sender is None:
+        return
+    try:
+        await sender(client, channel, incident, message)
+    except httpx.HTTPError as exc:
+        logger.warning("channel_id=%s: доставка не удалась: %s", channel.id, exc)
+
+
 async def dispatch(client: httpx.AsyncClient, db: Session, incidents: list[Incident]) -> None:
     if not incidents:
         return
@@ -78,20 +104,8 @@ async def dispatch(client: httpx.AsyncClient, db: Session, incidents: list[Incid
     if not channels:
         return
     for incident in incidents:
-        message = _format_message(incident)
-        watch = incident.watch
-        rank = _SEVERITY_RANK[watch.severity]
+        message = format_message(incident)
         for channel in channels:
-            if rank < _SEVERITY_RANK[channel.min_severity]:
+            if not channel_matches_incident(channel, incident):
                 continue
-            if channel.watch_id is not None and channel.watch_id != watch.id:
-                continue
-            if channel.watch_id is None and channel.node_id is not None and channel.node_id != watch.probe.node.id:
-                continue
-            sender = _REGISTRY.get(channel.kind)
-            if sender is None:
-                continue
-            try:
-                await sender(client, channel, incident, message)
-            except httpx.HTTPError as exc:
-                logger.warning("channel_id=%s: доставка не удалась: %s", channel.id, exc)
+            await send_to_channel(client, channel, incident, message)

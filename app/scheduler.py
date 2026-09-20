@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app import actions_engine, signal as signal_module
 from app.db import get_session
+from app.escalation_engine import run_escalations
 from app.models import Probe, ProbeKind, Sample
 from app.probes import run_probe
 from app.watch_engine import evaluate_probe
@@ -76,10 +77,11 @@ class Scheduler:
             finally:
                 db.close()
 
-    async def run_forever(self, reload_interval_seconds: float = 5.0) -> None:
+    async def run_forever(self, reload_interval_seconds: float = 5.0, escalation_interval_seconds: float = 30.0) -> None:
         self._http_client = httpx.AsyncClient()
         try:
             last_reload = 0.0
+            last_escalation_check = 0.0
             while not self._stop.is_set():
                 now = time.monotonic()
                 if now - last_reload >= reload_interval_seconds:
@@ -89,6 +91,15 @@ class Scheduler:
                     finally:
                         db.close()
                     last_reload = now
+                if now - last_escalation_check >= escalation_interval_seconds:
+                    db = get_session()
+                    try:
+                        await run_escalations(self._http_client, db)
+                    except Exception:
+                        logger.exception("сбой проверки эскалации")
+                    finally:
+                        db.close()
+                    last_escalation_check = now
                 await self._run_due()
                 sleep_for = 0.5
                 if self._heap:
