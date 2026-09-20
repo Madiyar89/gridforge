@@ -59,6 +59,7 @@ from app.models import (
     Template,
     Watch,
 )
+from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
 from app.scan_engine import ScanValidationError, run_scan
 from app.scheduler import Scheduler
@@ -74,6 +75,7 @@ from app.schemas import (
     EscalationStepIn,
     GroupIn,
     NodeIn,
+    NodeUpdateIn,
     ProbeIn,
     ScanHostToNodeIn,
     ScanIn,
@@ -221,6 +223,51 @@ def list_nodes(
         }
         for n in query.order_by(Node.name).all()
     ]
+
+
+@api_write.patch("/api/nodes/{node_id}")
+def update_node(
+    node_id: int,
+    payload: NodeUpdateIn,
+    db: Session = Depends(_db),
+    key: ApiKey = Depends(require_api_key),
+):
+    node = require_node_access(db, key, node_id)
+    fields = payload.model_dump(exclude_unset=True)
+    if "group_id" in fields:
+        if fields["group_id"] is not None and db.get(Group, fields["group_id"]) is None:
+            raise HTTPException(status_code=404, detail="Group не найдена")
+        # Перенос узла в группу, которой ключ не видит, увёл бы узел из-под
+        # собственного доступа — и вернуть его назад было бы уже нечем.
+        if not key_sees_group(key, fields["group_id"]):
+            raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    for field, value in fields.items():
+        setattr(node, field, value)
+    db.commit()
+    return {"id": node.id}
+
+
+@api_write.delete("/api/nodes/{node_id}")
+def delete_node_endpoint(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    """Возвращает, что именно удалено: узел тянет за собой проверки,
+    измерения, инциденты и бэкапы — делать это молча неправильно."""
+    node = require_node_access(db, key, node_id)
+    return delete_node(db, node)
+
+
+@api_write.delete("/api/probes/{probe_id}", status_code=204)
+def delete_probe_endpoint(probe_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    probe = require_probe_access(db, key, probe_id)
+    delete_probe(db, probe)
+
+
+@api_write.delete("/api/watches/{watch_id}", status_code=204)
+def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+    watch = db.get(Watch, watch_id)
+    if watch is None:
+        raise HTTPException(status_code=404, detail="Watch не найден")
+    require_probe_access(db, key, watch.probe_id)
+    delete_watch(db, watch)
 
 
 @api_write.post("/api/probes", status_code=201)

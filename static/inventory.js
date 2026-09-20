@@ -111,6 +111,50 @@ async function refreshNodes() {
   body.querySelectorAll(".add-action").forEach((btn) => {
     btn.addEventListener("click", () => openActionModal(btn.dataset.watchId, btn.dataset.watchLabel));
   });
+  body.querySelectorAll(".del-node").forEach((btn) => {
+    btn.addEventListener("click", () => deleteNode(btn.dataset.nodeId, btn.dataset.nodeName));
+  });
+  body.querySelectorAll(".del-probe").forEach((btn) => {
+    btn.addEventListener("click", () => deleteProbe(btn.dataset.probeId, btn.dataset.probeKind));
+  });
+  body.querySelectorAll(".del-watch").forEach((btn) => {
+    btn.addEventListener("click", () => deleteWatch(btn.dataset.watchId, btn.dataset.watchLabel));
+  });
+}
+
+async function deleteNode(nodeId, nodeName) {
+  if (!confirm(`Удалить узел «${nodeName}»?\n\nВместе с ним удалятся его проверки, история измерений, инциденты, бэкапы и результаты аудита. Syslog-сообщения останутся, но потеряют привязку к узлу.`)) return;
+  try {
+    const removed = await api(`/api/nodes/${nodeId}`, { method: "DELETE" });
+    // Показываем, что именно ушло: удаление узла задевает многое, и
+    // молчаливое "готово" тут выглядело бы подозрительно.
+    toast(`Узел удалён: проверок ${removed.probes}, измерений ${removed.samples}, инцидентов ${removed.incidents}, бэкапов ${removed.backups}`);
+    refreshNodes();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteProbe(probeId, kind) {
+  if (!confirm(`Удалить проверку «${kind}» вместе с её историей и условиями?`)) return;
+  try {
+    await api(`/api/probes/${probeId}`, { method: "DELETE" });
+    toast("Проверка удалена");
+    refreshNodes();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteWatch(watchId, label) {
+  if (!confirm(`Удалить условие «${label}» вместе с его инцидентами и действиями?`)) return;
+  try {
+    await api(`/api/watches/${watchId}`, { method: "DELETE" });
+    toast("Условие удалено");
+    refreshNodes();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function renderNodeItem(n) {
@@ -132,6 +176,7 @@ function renderNodeItem(n) {
                 <span class="chip-actions">
                   ${w.action_count > 0 ? `<span style="color:var(--text-dim)">${w.action_count} действ.</span>` : ""}
                   <button type="button" class="add-action" data-watch-id="${w.id}" data-watch-label="${escapeHtml(w.label)}">+ действие</button>
+                  <button type="button" class="del-watch" data-watch-id="${w.id}" data-watch-label="${escapeHtml(w.label)}">×</button>
                 </span>
               </div>`
             )
@@ -139,7 +184,10 @@ function renderNodeItem(n) {
           return `<div class="probe-chip">
             <span><span class="ok-dot ${dotClass}"></span>${escapeHtml(p.kind)}</span>
             <span>${escapeHtml(String(label))}</span>
-            <span class="chip-actions"><button type="button" class="add-watch" data-probe-id="${p.id}" data-probe-kind="${escapeHtml(p.kind)}">+ условие</button></span>
+            <span class="chip-actions">
+              <button type="button" class="add-watch" data-probe-id="${p.id}" data-probe-kind="${escapeHtml(p.kind)}">+ условие</button>
+              <button type="button" class="del-probe" data-probe-id="${p.id}" data-probe-kind="${escapeHtml(p.kind)}">×</button>
+            </span>
           </div>${watchRows}`;
         })
         .join("")
@@ -152,6 +200,7 @@ function renderNodeItem(n) {
         <span class="actions">
           <span class="addr">${escapeHtml(n.address)}</span>
           <button type="button" class="icon-btn add-probe" data-node-id="${n.id}" data-node-name="${escapeHtml(n.name)}">+ проверка</button>
+          <button type="button" class="icon-btn del-node" data-node-id="${n.id}" data-node-name="${escapeHtml(n.name)}">удалить узел</button>
         </span>
       </div>
       <div class="probe-list">${probeChips}</div>

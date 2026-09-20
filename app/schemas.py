@@ -26,6 +26,21 @@ class NodeIn(BaseModel):
     vendor: Vendor | None = None
 
 
+class NodeUpdateIn(BaseModel):
+    """Частичное обновление: указываются только меняемые поля. Отличать
+    «поле не прислали» от «прислали null» нужно, потому что для group_id и
+    vendor null — осмысленное значение (убрать из группы, забыть вендора),
+    поэтому эндпоинт читает model_dump(exclude_unset=True), а не значения
+    по умолчанию."""
+
+    name: str | None = None
+    address: str | None = None
+    tags: str | None = None
+    group_id: int | None = None
+    vendor: Vendor | None = None
+    active: bool | None = None
+
+
 class ProbeIn(BaseModel):
     node_id: int
     kind: ProbeKind
