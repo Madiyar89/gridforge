@@ -172,11 +172,18 @@ function openProbeModal(nodeId, nodeName) {
   probeModal.showModal();
 }
 
+// Все SNMP-проверки делят один блок полей доступа (версия, community/USM,
+// порт, OID) — различаются только свёрткой у walk и разрядностью у rate.
+const SNMP_KINDS = ["snmp_get", "snmp_walk", "snmp_counter_rate"];
+
 function onProbeKindChange() {
   const kind = document.getElementById("probe-kind").value;
+  const paramsBlock = SNMP_KINDS.includes(kind) ? "snmp_get" : kind;
   document.querySelectorAll(".probe-params").forEach((el) => {
-    el.hidden = el.id !== `probe-params-${kind}`;
+    el.hidden = el.id !== `probe-params-${paramsBlock}`;
   });
+  document.getElementById("snmp-walk-fields").hidden = kind !== "snmp_walk";
+  document.getElementById("snmp-rate-fields").hidden = kind !== "snmp_counter_rate";
   onSnmpVersionChange();
 }
 document.getElementById("probe-kind").addEventListener("change", onProbeKindChange);
@@ -203,12 +210,13 @@ function buildProbeParams(kind) {
       expect_numeric: document.getElementById("p-ssh-numeric").checked,
     };
   }
-  if (kind === "snmp_get") {
+  if (SNMP_KINDS.includes(kind)) {
     const version = document.getElementById("p-snmp-version").value;
     const oid = document.getElementById("p-snmp-oid").value.trim();
     const port = Number(document.getElementById("p-snmp-port").value) || 161;
+    let params;
     if (version === "3") {
-      return {
+      params = {
         version,
         oid,
         port,
@@ -218,13 +226,24 @@ function buildProbeParams(kind) {
         priv_protocol: document.getElementById("p-snmp-priv-proto").value,
         priv_password: document.getElementById("p-snmp-priv-pass").value || undefined,
       };
+    } else {
+      params = {
+        community: document.getElementById("p-snmp-community").value.trim() || "public",
+        version,
+        oid,
+        port,
+      };
     }
-    return {
-      community: document.getElementById("p-snmp-community").value.trim() || "public",
-      version,
-      oid,
-      port,
-    };
+    if (kind === "snmp_walk") {
+      params.aggregate = document.getElementById("p-snmp-aggregate").value;
+      params.max_rows = Number(document.getElementById("p-snmp-maxrows").value) || 500;
+    }
+    if (kind === "snmp_counter_rate") {
+      params.counter_bits = Number(document.getElementById("p-snmp-bits").value) || 32;
+      const maxRate = Number(document.getElementById("p-snmp-maxrate").value);
+      if (maxRate > 0) params.max_rate = maxRate;
+    }
+    return params;
   }
   return {};
 }

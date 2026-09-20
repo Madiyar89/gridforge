@@ -67,6 +67,8 @@
         <option value="tcp_port">tcp_port — TCP-порт</option>
         <option value="ssh_command">ssh_command — команда по SSH</option>
         <option value="snmp_get">snmp_get — SNMP OID</option>
+        <option value="snmp_walk">snmp_walk — обход таблицы OID</option>
+        <option value="snmp_counter_rate">snmp_counter_rate — счётчик → скорость</option>
       </select>
     </label>
     <label>Интервал опроса, с <input id="probe-interval" type="number" min="1" value="60"></label>
@@ -113,6 +115,27 @@
           </select>
         </label>
         <label>Пароль шифрования (пусто — authNoPriv) <input id="p-snmp-priv-pass" type="password"></label>
+      </div>
+      <div id="snmp-walk-fields" hidden>
+        <label>Свёртка в одно число
+          <select id="p-snmp-aggregate">
+            <option value="count">count — сколько строк</option>
+            <option value="sum">sum — сумма значений</option>
+            <option value="max">max — наибольшее</option>
+            <option value="min">min — наименьшее</option>
+            <option value="avg">avg — среднее</option>
+          </select>
+        </label>
+        <label>Максимум строк <input id="p-snmp-maxrows" type="number" value="500"></label>
+      </div>
+      <div id="snmp-rate-fields" hidden>
+        <label>Разрядность счётчика
+          <select id="p-snmp-bits">
+            <option value="32">32 бита (ifInOctets)</option>
+            <option value="64">64 бита (ifHCInOctets — для гигабита и выше)</option>
+          </select>
+        </label>
+        <label>Потолок скорости, единиц/с <input id="p-snmp-maxrate" type="number" placeholder="не ограничивать"></label>
       </div>
     </div>
 

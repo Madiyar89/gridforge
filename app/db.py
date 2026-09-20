@@ -65,6 +65,9 @@ def _migrate_missing_columns() -> None:
         "api_keys": [
             ("group_id", "INTEGER"),
         ],
+        "samples": [
+            ("raw_value", "FLOAT"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

@@ -27,11 +27,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_aware(dt: datetime) -> datetime:
+    """SQLite не хранит tzinfo нативно (в отличие от MySQL/MariaDB): при
+    чтении обратно приходит naive datetime, хотя записывался aware (UTC).
+    Любое вычитание дат, где одна сторона из БД, обязано пройти через эту
+    нормализацию — иначе на SQLite-варианте будет TypeError."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 class ProbeKind(str, enum.Enum):
     icmp_ping = "icmp_ping"
     tcp_port = "tcp_port"
     ssh_command = "ssh_command"
     snmp_get = "snmp_get"
+    snmp_walk = "snmp_walk"          # обход поддерева OID со сверткой в одно число
+    snmp_counter_rate = "snmp_counter_rate"  # счётчик → скорость (см. rate_engine.py)
 
 
 class Vendor(str, enum.Enum):
@@ -116,6 +126,11 @@ class Sample(Base):
     ok: Mapped[bool] = mapped_column(nullable=False)
     value: Mapped[float | None] = mapped_column(Float, nullable=True)
     detail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Только для snmp_counter_rate: сырое показание счётчика, по которому
+    # вычислена скорость в value. Нужно именно хранить, а не пересчитывать:
+    # следующий опрос считает дельту относительно этого числа, а value к
+    # тому моменту — уже скорость, из неё счётчик не восстановить.
+    raw_value: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     probe: Mapped["Probe"] = relationship(back_populates="samples")
 

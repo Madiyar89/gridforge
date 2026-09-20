@@ -23,8 +23,9 @@ from sqlalchemy.orm import Session
 from app import actions_engine, signal as signal_module
 from app.db import get_session
 from app.escalation_engine import run_escalations
-from app.models import Probe, ProbeKind, Sample
+from app.models import Probe, ProbeKind, Sample, _now
 from app.probes import run_probe
+from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
 from app.watch_engine import evaluate_probe
 
@@ -63,6 +64,11 @@ class Scheduler:
                     continue
                 outcome = await run_probe(probe.kind, probe.node.address, probe.params, probe.timeout_seconds)
                 sample = Sample(probe_id=probe.id, ok=outcome.ok, value=outcome.value, detail=outcome.detail)
+                if probe.kind is ProbeKind.snmp_counter_rate:
+                    # Счётчик сам по себе не метрика — превращаем в скорость по
+                    # предыдущему измерению (ищем его ДО добавления текущего).
+                    sample.taken_at = sample.taken_at or _now()
+                    apply_rate(previous_rate_sample(db, probe.id), sample, probe)
                 db.add(sample)
                 db.commit()
                 db.refresh(sample)
