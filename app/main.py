@@ -187,8 +187,9 @@ def create_probe(payload: ProbeIn, db: Session = Depends(_db)):
     if db.get(Node, payload.node_id) is None:
         raise HTTPException(status_code=404, detail="Node не найден")
     params = dict(payload.params)
-    if params.get("password"):
-        params["password"] = encrypt_secret(params["password"])
+    for secret_field in ("password", "auth_password", "priv_password"):
+        if params.get(secret_field):
+            params[secret_field] = encrypt_secret(params[secret_field])
     probe = Probe(
         node_id=payload.node_id,
         kind=payload.kind,

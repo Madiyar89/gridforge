@@ -83,11 +83,37 @@
       <label><input id="p-ssh-numeric" type="checkbox"> вывод — число (для Watch с gt/lt)</label>
     </div>
     <div id="probe-params-snmp_get" class="probe-params" hidden>
-      <label>Community <input id="p-snmp-community" value="public"></label>
       <label>Версия
-        <select id="p-snmp-version"><option value="2c">2c</option><option value="1">1</option></select>
+        <select id="p-snmp-version">
+          <option value="2c">2c</option>
+          <option value="1">1</option>
+          <option value="3">3 (USM)</option>
+        </select>
       </label>
       <label>OID <input id="p-snmp-oid" placeholder="1.3.6.1.2.1.1.3.0"></label>
+      <label>Порт <input id="p-snmp-port" type="number" value="161"></label>
+      <div id="snmp-v2-fields">
+        <label>Community <input id="p-snmp-community" value="public"></label>
+      </div>
+      <div id="snmp-v3-fields" hidden>
+        <label>Пользователь <input id="p-snmp-user" placeholder="gftest"></label>
+        <label>Протокол аутентификации
+          <select id="p-snmp-auth-proto">
+            <option value="sha">SHA</option>
+            <option value="sha224">SHA224</option>
+            <option value="sha256">SHA256</option>
+            <option value="md5">MD5</option>
+          </select>
+        </label>
+        <label>Пароль аутентификации (пусто — noAuthNoPriv) <input id="p-snmp-auth-pass" type="password"></label>
+        <label>Протокол шифрования
+          <select id="p-snmp-priv-proto">
+            <option value="aes">AES</option>
+            <option value="des">DES</option>
+          </select>
+        </label>
+        <label>Пароль шифрования (пусто — authNoPriv) <input id="p-snmp-priv-pass" type="password"></label>
+      </div>
     </div>
 
     <div class="modal-actions">

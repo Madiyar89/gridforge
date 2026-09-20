@@ -177,8 +177,16 @@ function onProbeKindChange() {
   document.querySelectorAll(".probe-params").forEach((el) => {
     el.hidden = el.id !== `probe-params-${kind}`;
   });
+  onSnmpVersionChange();
 }
 document.getElementById("probe-kind").addEventListener("change", onProbeKindChange);
+
+function onSnmpVersionChange() {
+  const isV3 = document.getElementById("p-snmp-version").value === "3";
+  document.getElementById("snmp-v2-fields").hidden = isV3;
+  document.getElementById("snmp-v3-fields").hidden = !isV3;
+}
+document.getElementById("p-snmp-version").addEventListener("change", onSnmpVersionChange);
 document.getElementById("probe-cancel").addEventListener("click", () => probeModal.close());
 
 function buildProbeParams(kind) {
@@ -196,10 +204,26 @@ function buildProbeParams(kind) {
     };
   }
   if (kind === "snmp_get") {
+    const version = document.getElementById("p-snmp-version").value;
+    const oid = document.getElementById("p-snmp-oid").value.trim();
+    const port = Number(document.getElementById("p-snmp-port").value) || 161;
+    if (version === "3") {
+      return {
+        version,
+        oid,
+        port,
+        username: document.getElementById("p-snmp-user").value.trim(),
+        auth_protocol: document.getElementById("p-snmp-auth-proto").value,
+        auth_password: document.getElementById("p-snmp-auth-pass").value || undefined,
+        priv_protocol: document.getElementById("p-snmp-priv-proto").value,
+        priv_password: document.getElementById("p-snmp-priv-pass").value || undefined,
+      };
+    }
     return {
       community: document.getElementById("p-snmp-community").value.trim() || "public",
-      version: document.getElementById("p-snmp-version").value,
-      oid: document.getElementById("p-snmp-oid").value.trim(),
+      version,
+      oid,
+      port,
     };
   }
   return {};

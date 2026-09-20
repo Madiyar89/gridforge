@@ -19,7 +19,15 @@ from pysnmp.hlapi.v3arch.asyncio import (
     ObjectType,
     SnmpEngine,
     UdpTransportTarget,
+    UsmUserData,
     get_cmd,
+    usmAesCfb128Protocol,
+    usmDESPrivProtocol,
+    usmHMAC128SHA224AuthProtocol,
+    usmHMAC192SHA256AuthProtocol,
+    usmHMACMD5AuthProtocol,
+    usmHMACSHAAuthProtocol,
+    usmNoPrivProtocol,
 )
 
 from app.models import ProbeKind
@@ -163,35 +171,90 @@ async def _ssh_command(address: str, params: dict, timeout_seconds: float) -> Pr
         return ProbeOutcome(ok=False, value=None, detail=f"вывод не число: {first_line[:100]!r}")
 
 
+_SNMP_AUTH_PROTOCOLS = {
+    "md5": usmHMACMD5AuthProtocol,
+    "sha": usmHMACSHAAuthProtocol,
+    "sha224": usmHMAC128SHA224AuthProtocol,
+    "sha256": usmHMAC192SHA256AuthProtocol,
+}
+_SNMP_PRIV_PROTOCOLS = {
+    "des": usmDESPrivProtocol,
+    "aes": usmAesCfb128Protocol,
+    "aes128": usmAesCfb128Protocol,
+}
+
+
+def _build_snmp_v3_auth(params: dict) -> UsmUserData | str:
+    """Возвращает UsmUserData или текст ошибки (str) при некорректных
+    params — вызывающая сторона отличает по типу."""
+    username = params.get("username")
+    if not username:
+        return "params.username обязателен для version=3"
+
+    auth_password = params.get("auth_password")
+    auth_password = decrypt_secret(auth_password) if auth_password else None
+    priv_password = params.get("priv_password")
+    priv_password = decrypt_secret(priv_password) if priv_password else None
+
+    auth_protocol = None
+    if auth_password:
+        proto_name = str(params.get("auth_protocol", "sha")).lower()
+        auth_protocol = _SNMP_AUTH_PROTOCOLS.get(proto_name)
+        if auth_protocol is None:
+            return f"params.auth_protocol={proto_name!r} — допустимо: {', '.join(_SNMP_AUTH_PROTOCOLS)}"
+
+    priv_protocol = usmNoPrivProtocol
+    if priv_password:
+        proto_name = str(params.get("priv_protocol", "aes")).lower()
+        priv_protocol = _SNMP_PRIV_PROTOCOLS.get(proto_name)
+        if priv_protocol is None:
+            return f"params.priv_protocol={proto_name!r} — допустимо: {', '.join(_SNMP_PRIV_PROTOCOLS)}"
+
+    return UsmUserData(
+        username,
+        authKey=auth_password,
+        privKey=priv_password if priv_password else None,
+        authProtocol=auth_protocol,
+        privProtocol=priv_protocol,
+    )
+
+
 @register(ProbeKind.snmp_get)
 async def _snmp_get(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
     """GET одного OID. OID — открытые данные вендора (см. MIB/документацию
     Cisco/Juniper/H3C/PA-450), не тащим их из чужих Zabbix-шаблонов — см.
     GridForge Rewrite Ledger, раздел «Шаблоны мониторинга».
 
-    params:
-      oid (str, обязателен) — например "1.3.6.1.2.1.1.3.0" (sysUpTime)
-      community (str, default "public") — только SNMPv1/v2c на этом этапе,
-        v3 (USM, авторизация+шифрование) не реализован — не годится для
-        сети, где это принципиально (см. TODO в README)
-      version (str, "1" | "2c", default "2c")
-      port (int, default 161)
+    params (v1/v2c):
+      oid, community (default "public"), version ("1"|"2c", default "2c"), port
+    params (v3, version="3") — USM, авторизация + опционально шифрование:
+      oid, username (обязателен), auth_password (опц. — noAuthNoPriv, если
+      не задан), auth_protocol ("sha"|"sha224"|"sha256"|"md5", default sha),
+      priv_password (опц. — authNoPriv, если не задан), priv_protocol
+      ("aes"|"des", default aes), port
     """
     oid = params.get("oid")
     if not oid:
         return ProbeOutcome(ok=False, value=None, detail="params.oid обязателен")
 
-    community = params.get("community", "public")
     version = str(params.get("version", "2c"))
     port = int(params.get("port", 161))
-    mp_model = 0 if version == "1" else 1  # 0=SNMPv1, 1=SNMPv2c
+
+    if version == "3":
+        auth = _build_snmp_v3_auth(params)
+        if isinstance(auth, str):
+            return ProbeOutcome(ok=False, value=None, detail=auth)
+    else:
+        community = params.get("community", "public")
+        mp_model = 0 if version == "1" else 1  # 0=SNMPv1, 1=SNMPv2c
+        auth = CommunityData(community, mpModel=mp_model)
 
     engine = SnmpEngine()
     try:
         error_indication, error_status, _error_index, var_binds = await asyncio.wait_for(
             get_cmd(
                 engine,
-                CommunityData(community, mpModel=mp_model),
+                auth,
                 await UdpTransportTarget.create((address, port), timeout=timeout_seconds, retries=0),
                 ContextData(),
                 ObjectType(ObjectIdentity(oid)),
