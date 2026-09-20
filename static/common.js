@@ -6,43 +6,71 @@
 const KEY_STORAGE = "gridforge_api_key";
 const REFRESH_MS = 5000;
 
+// Иконки рисуем сами, без библиотеки: сторонние скрипты и шрифты сюда
+// всё равно не загрузить (страница отдаётся с локального сервера без
+// интернета), а тринадцати простых значков это не стоит.
+// Один стиль на все: контур 1.6px, сетка 20x20, без заливки.
+const NAV_ICONS = {
+  dashboard: '<rect x="3" y="3" width="6.5" height="6.5" rx="1"/><rect x="10.5" y="3" width="6.5" height="6.5" rx="1"/><rect x="3" y="10.5" width="6.5" height="6.5" rx="1"/><rect x="10.5" y="10.5" width="6.5" height="6.5" rx="1"/>',
+  inventory: '<rect x="3" y="3.5" width="14" height="4.5" rx="1"/><rect x="3" y="12" width="14" height="4.5" rx="1"/><circle cx="6" cy="5.75" r=".6"/><circle cx="6" cy="14.25" r=".6"/>',
+  templates: '<path d="M10 2.5 17 6l-7 3.5L3 6z"/><path d="M3 10l7 3.5L17 10"/><path d="M3 14l7 3.5L17 14"/>',
+  rubka: '<rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M5.5 8.5l2.5 2-2.5 2"/><path d="M10 12.5h4.5"/>',
+  console: '<rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M6 7.5l3 2.5-3 2.5"/>',
+  backups: '<path d="M3 6.5h14v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M2 3.5h16v3H2z"/><path d="M8 10h4"/>',
+  audit: '<path d="M10 2.5 16.5 5v5c0 4-3 6.5-6.5 7.5C6.5 16.5 3.5 14 3.5 10V5z"/><path d="M7.5 9.8l1.8 1.8 3.2-3.4"/>',
+  syslog: '<path d="M4 4.5h12"/><path d="M4 8h12"/><path d="M4 11.5h8"/><path d="M4 15h10"/>',
+  scan: '<circle cx="9" cy="9" r="5.5"/><path d="M13.2 13.2 17 17"/>',
+  capture: '<path d="M2.5 10.5h3l2-5 3 9 2.5-6 1.5 2h3"/>',
+  adaudit: '<circle cx="7.5" cy="7" r="2.8"/><path d="M2.5 16c0-2.8 2.2-4.5 5-4.5s5 1.7 5 4.5"/><path d="M13.5 8.5l1.6 1.6 2.4-2.6"/>',
+  channels: '<path d="M10 3a4.5 4.5 0 0 1 4.5 4.5c0 3.5 1.5 5 1.5 5H4s1.5-1.5 1.5-5A4.5 4.5 0 0 1 10 3z"/><path d="M8.3 15.5a1.8 1.8 0 0 0 3.4 0"/>',
+  users: '<circle cx="10" cy="6.5" r="3"/><path d="M4 16.5c0-3.2 2.7-5 6-5s6 1.8 6 5"/>',
+};
+
+function navIcon(name) {
+  return (
+    `<svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" ` +
+    `stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    `${NAV_ICONS[name] || ""}</svg>`
+  );
+}
+
 // Разделы сгруппированы по смыслу: плоский список из 13 пунктов
 // приходится перечитывать целиком, чтобы найти нужный.
 const NAV_GROUPS = [
   {
     title: null, // Дашборд — без заголовка, он один
-    items: [{ href: "index.html", label: "Дашборд" }],
+    items: [{ href: "index.html", label: "Дашборд", icon: "dashboard" }],
   },
   {
     title: "Сеть",
     items: [
-      { href: "inventory.html", label: "Инвентарь" },
-      { href: "templates.html", label: "Шаблоны" },
-      { href: "rubka.html", label: "Рубка" },
-      { href: "console.html", label: "Консоль" },
+      { href: "inventory.html", label: "Инвентарь", icon: "inventory" },
+      { href: "templates.html", label: "Шаблоны", icon: "templates" },
+      { href: "rubka.html", label: "Рубка", icon: "rubka" },
+      { href: "console.html", label: "Консоль", icon: "console" },
     ],
   },
   {
     title: "Состояние",
     items: [
-      { href: "backups.html", label: "Бэкапы" },
-      { href: "audit.html", label: "Аудит" },
-      { href: "syslog.html", label: "Syslog" },
+      { href: "backups.html", label: "Бэкапы", icon: "backups" },
+      { href: "audit.html", label: "Аудит", icon: "audit" },
+      { href: "syslog.html", label: "Syslog", icon: "syslog" },
     ],
   },
   {
     title: "Разведка",
     items: [
-      { href: "scan.html", label: "Скан" },
-      { href: "capture.html", label: "Трафик" },
-      { href: "ad-audit.html", label: "AD-аудит" },
+      { href: "scan.html", label: "Скан", icon: "scan" },
+      { href: "capture.html", label: "Трафик", icon: "capture" },
+      { href: "ad-audit.html", label: "AD-аудит", icon: "adaudit" },
     ],
   },
   {
     title: "Настройки",
     items: [
-      { href: "channels.html", label: "Каналы" },
-      { href: "users.html", label: "Пользователи" },
+      { href: "channels.html", label: "Каналы", icon: "channels" },
+      { href: "users.html", label: "Пользователи", icon: "users" },
     ],
   },
 ];
@@ -194,13 +222,22 @@ function initTopbar() {
           ${group.items
             .map(
               (item) =>
-                `<a href="${item.href}" class="${item.href === here ? "active" : ""}">${item.label}</a>`
+                `<a href="${item.href}" class="${item.href === here ? "active" : ""}" title="${item.label}">` +
+                `${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`
             )
             .join("")}
         </div>`
     ).join("");
   }
   setupNavToggle();
+
+  // Название режем на первую букву и хвост: в свёрнутой панели виден
+  // только «G», при наведении дорисовывается остальное.
+  const brandName = document.querySelector(".brand b");
+  if (brandName && !brandName.querySelector(".brand-rest")) {
+    const full = brandName.textContent;
+    brandName.innerHTML = `${full.slice(0, 1)}<span class="brand-rest">${full.slice(1)}</span>`;
+  }
 
   const saveBtn = document.getElementById("save-key");
   if (saveBtn) {
