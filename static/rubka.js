@@ -150,7 +150,7 @@ function renderResults(data) {
       }
       const head = r.ok
         ? `<span class="ok-dot up"></span><b>${escapeHtml(r.node_name)}</b>`
-        : `<span class="ok-dot down"></span><b>${escapeHtml(r.node_name)}</b> <span style="color:var(--bad)">${escapeHtml(r.error || "ошибка")}</span>`;
+        : `<span class="ok-dot down"></span><b>${escapeHtml(r.node_name)}</b> <span style="color:var(--crit)">${escapeHtml(r.error || "ошибка")}</span>`;
       const body = r.ok && r.output ? `<pre>${escapeHtml(r.output)}</pre>` : "";
       return `<div class="result-row">${head} <span class="addr">${escapeHtml(r.command)}</span>${body}</div>`;
     })
@@ -176,7 +176,7 @@ async function refreshHistory() {
       <div class="channel-row">
         <span>
           <b>${escapeHtml(s.label)}</b> · ${s.total} узл.
-          ${s.failed ? `· <span style="color:var(--bad)">ошибок ${s.failed}</span>` : ""}
+          ${s.failed ? `· <span style="color:var(--crit)">ошибок ${s.failed}</span>` : ""}
           <br><span class="addr">${escapeHtml(s.started_by)} · ${timeAgo(s.started_at)}</span>
         </span>
         <button data-id="${s.id}" class="show-sweep">открыть</button>

@@ -6,20 +6,45 @@
 const KEY_STORAGE = "gridforge_api_key";
 const REFRESH_MS = 5000;
 
-const NAV_ITEMS = [
-  { href: "index.html", label: "Дашборд" },
-  { href: "inventory.html", label: "Инвентарь" },
-  { href: "templates.html", label: "Шаблоны" },
-  { href: "backups.html", label: "Бэкапы" },
-  { href: "audit.html", label: "Аудит" },
-  { href: "scan.html", label: "Скан" },
-  { href: "console.html", label: "Консоль" },
-  { href: "rubka.html", label: "Рубка" },
-  { href: "ad-audit.html", label: "AD-аудит" },
-  { href: "syslog.html", label: "Syslog" },
-  { href: "capture.html", label: "Трафик" },
-  { href: "channels.html", label: "Каналы" },
-  { href: "users.html", label: "Пользователи" },
+// Разделы сгруппированы по смыслу: плоский список из 13 пунктов
+// приходится перечитывать целиком, чтобы найти нужный.
+const NAV_GROUPS = [
+  {
+    title: null, // Дашборд — без заголовка, он один
+    items: [{ href: "index.html", label: "Дашборд" }],
+  },
+  {
+    title: "Сеть",
+    items: [
+      { href: "inventory.html", label: "Инвентарь" },
+      { href: "templates.html", label: "Шаблоны" },
+      { href: "rubka.html", label: "Рубка" },
+      { href: "console.html", label: "Консоль" },
+    ],
+  },
+  {
+    title: "Состояние",
+    items: [
+      { href: "backups.html", label: "Бэкапы" },
+      { href: "audit.html", label: "Аудит" },
+      { href: "syslog.html", label: "Syslog" },
+    ],
+  },
+  {
+    title: "Разведка",
+    items: [
+      { href: "scan.html", label: "Скан" },
+      { href: "capture.html", label: "Трафик" },
+      { href: "ad-audit.html", label: "AD-аудит" },
+    ],
+  },
+  {
+    title: "Настройки",
+    items: [
+      { href: "channels.html", label: "Каналы" },
+      { href: "users.html", label: "Пользователи" },
+    ],
+  },
 ];
 
 function apiKey() {
@@ -138,14 +163,44 @@ function showDefaultPasswordWarning() {
   document.body.insertBefore(banner, document.body.firstChild);
 }
 
+// На узком экране панель уезжает за край и открывается кнопкой —
+// фиксированная колонка съела бы пол-экрана телефона.
+function setupNavToggle() {
+  if (document.getElementById("nav-toggle")) return;
+  const bar = document.querySelector(".topbar");
+  if (!bar) return;
+  const btn = document.createElement("button");
+  btn.id = "nav-toggle";
+  btn.className = "nav-toggle";
+  btn.textContent = "☰";
+  btn.setAttribute("aria-label", "Меню");
+  btn.addEventListener("click", () => bar.classList.toggle("open"));
+  document.body.appendChild(btn);
+  // Клик по ссылке закрывает меню: иначе оно остаётся поверх страницы,
+  // на которую только что перешли.
+  bar.querySelectorAll(".nav a").forEach((a) =>
+    a.addEventListener("click", () => bar.classList.remove("open"))
+  );
+}
+
 function initTopbar() {
   const nav = document.getElementById("nav");
   if (nav) {
     const here = location.pathname.split("/").pop() || "index.html";
-    nav.innerHTML = NAV_ITEMS.map(
-      (item) => `<a href="${item.href}" class="${item.href === here ? "active" : ""}">${item.label}</a>`
+    nav.innerHTML = NAV_GROUPS.map(
+      (group) => `
+        <div class="nav-group">
+          ${group.title ? `<div class="nav-group-title">${group.title}</div>` : ""}
+          ${group.items
+            .map(
+              (item) =>
+                `<a href="${item.href}" class="${item.href === here ? "active" : ""}">${item.label}</a>`
+            )
+            .join("")}
+        </div>`
     ).join("");
   }
+  setupNavToggle();
 
   const saveBtn = document.getElementById("save-key");
   if (saveBtn) {

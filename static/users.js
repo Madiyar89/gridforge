@@ -30,7 +30,7 @@ async function refreshUsers() {
     .map((u) => {
       const scope = u.group_id ? `группа: ${escapeHtml(_groupsById[u.group_id] || `#${u.group_id}`)}` : "все группы";
       const lastLogin = u.last_login_at ? timeAgo(u.last_login_at) : "ни разу";
-      const inactive = u.active ? "" : ` · <span style="color:var(--bad)">отключён</span>`;
+      const inactive = u.active ? "" : ` · <span style="color:var(--crit)">отключён</span>`;
       // Источник важен: у доменной учётки пароль в AD, менять его здесь нечем.
       const source = u.source === "ad" ? " · из AD" : "";
       return `
