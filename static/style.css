@@ -29,6 +29,22 @@ body{
 }
 a{color:var(--accent);}
 
+/* Полосы прокрутки по всему сайту. Системная светлая полоса на тёмной
+   странице выглядит как чужеродная деталь и притягивает взгляд сильнее
+   содержимого. Задаётся один раз для всех прокручиваемых областей —
+   страницы, списков узлов, вывода команд.
+   Ширина 10px, а не «как можно тоньше»: слишком узкую полосу трудно
+   схватить мышью, и прокрутка перестаёт работать привычно. */
+*{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{
+  background:var(--border);border-radius:5px;
+  border:2px solid var(--bg);  /* отступ от края — полоса не липнет к содержимому */
+}
+::-webkit-scrollbar-thumb:hover{background:var(--text-dim);}
+::-webkit-scrollbar-corner{background:transparent;}
+
 /* Боковая панель вместо строки вкладок (2026-09-20, по запросу
    владельца: 13 разделов в строку не читались и переносились на вторую
    строку). Разделы сгруппированы по смыслу — плоский список такой длины
@@ -52,10 +68,9 @@ a{color:var(--accent);}
 /* Полоса прокрутки панели: системная на тёмном фоне выглядит инородно и
    бросается в глаза сильнее, чем сами пункты. Оставляем тонкую и
    приглушённую — на невысоком экране прокрутка всё равно нужна. */
-.topbar{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
 .topbar::-webkit-scrollbar{width:6px;}
 .topbar::-webkit-scrollbar-track{background:transparent;}
-.topbar::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+.topbar::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;border:none;}
 .topbar::-webkit-scrollbar-thumb:hover{background:var(--text-dim);}
 
 /* В столбик: рядом с названием подпись не помещается в 196px и
