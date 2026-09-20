@@ -68,6 +68,9 @@ def _migrate_missing_columns() -> None:
         "samples": [
             ("raw_value", "FLOAT"),
         ],
+        "users": [
+            ("source", "VARCHAR(16) DEFAULT 'local'"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

@@ -31,15 +31,19 @@ async function refreshUsers() {
       const scope = u.group_id ? `группа: ${escapeHtml(_groupsById[u.group_id] || `#${u.group_id}`)}` : "все группы";
       const lastLogin = u.last_login_at ? timeAgo(u.last_login_at) : "ни разу";
       const inactive = u.active ? "" : ` · <span style="color:var(--bad)">отключён</span>`;
+      // Источник важен: у доменной учётки пароль в AD, менять его здесь нечем.
+      const source = u.source === "ad" ? " · из AD" : "";
       return `
       <div class="channel-row">
-        <span><b>${escapeHtml(u.username)}</b> · ${escapeHtml(u.role)} · ${scope} · вход: ${escapeHtml(lastLogin)}${inactive}</span>
+        <span><b>${escapeHtml(u.username)}</b>${source} · ${escapeHtml(u.role)} · ${scope} · вход: ${escapeHtml(lastLogin)}${inactive}</span>
         <button data-id="${u.id}" data-name="${escapeHtml(u.username)}" class="del-user">удалить</button>
       </div>`;
     })
     .join("");
 
+  // Доменные учётки сюда не попадают: их пароль меняется в AD.
   document.getElementById("pw-user").innerHTML = users
+    .filter((u) => u.source !== "ad")
     .map((u) => `<option value="${u.id}">${escapeHtml(u.username)}</option>`)
     .join("");
 

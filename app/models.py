@@ -246,7 +246,11 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # У доменных пользователей (source="ad") здесь пустая строка: их пароль
+    # живёт в AD и проверяется bind'ом, локального хеша нет — утечка нашей
+    # базы не должна давать доменных учёток.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), default="local")  # "local" | "ad"
     role: Mapped[ApiKeyRole] = mapped_column(Enum(ApiKeyRole), default=ApiKeyRole.viewer)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
     active: Mapped[bool] = mapped_column(default=True)
