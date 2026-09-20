@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Пользователи</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Пользователи</h1>
+  <p>Вход в интерфейс по логину и паролю. Роли те же, что у API-ключей: viewer только смотрит, operator запускает проверки на оборудовании, admin меняет настройки. Группа сужает видимость до своих узлов.</p>
+</div>
+
+<div class="panel">
+  <h2>Учётные записи <span class="count" id="users-count"></span></h2>
+  <div class="body" id="users-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <input id="new-user-name" placeholder="логин">
+    <input id="new-user-password" type="password" placeholder="пароль (от 10 символов)">
+    <select id="new-user-role">
+      <option value="viewer">viewer — только смотреть</option>
+      <option value="operator">operator — запускать проверки</option>
+      <option value="admin">admin — полный доступ</option>
+    </select>
+    <select id="new-user-group">
+      <option value="">все группы</option>
+    </select>
+    <button id="add-user">+ пользователь</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Сменить пароль</h2>
+  <div class="form-row">
+    <select id="pw-user"></select>
+    <input id="pw-password" type="password" placeholder="новый пароль (от 10 символов)">
+    <button id="change-password">Сменить</button>
+  </div>
+  <div class="body" style="color:var(--text-dim);font-size:13px;">
+    Смена пароля закрывает все открытые сессии этого пользователя — ему придётся войти заново.
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="users.js"></script>
+</body>
+</html>

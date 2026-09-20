@@ -66,6 +66,22 @@ class ChannelIn(BaseModel):
     watch_id: int | None = None
 
 
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+    role: ApiKeyRole = ApiKeyRole.viewer
+    group_id: int | None = None
+
+
+class PasswordChangeIn(BaseModel):
+    password: str
+
+
 class EscalationStepIn(BaseModel):
     delay_minutes: int
     channel_id: int

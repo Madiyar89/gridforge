@@ -231,6 +231,49 @@ class ApiKey(Base):
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
 
 
+class User(Base):
+    """Человек, входящий в веб-интерфейс по логину и паролю.
+
+    Отдельно от ApiKey намеренно: ключ — это учётка для программы
+    (скрипт, интеграция), её не «забывают» и не вводят руками. Роль и
+    ограничение по группе устроены так же, как у ключа (см. ApiKeyRole),
+    чтобы права не разъезжались между двумя способами входа.
+
+    Пароль хранится только как scrypt-хеш (см. passwords.py) — в отличие
+    от API-ключей, где достаточно быстрого SHA-256."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[ApiKeyRole] = mapped_column(Enum(ApiKeyRole), default=ApiKeyRole.viewer)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Session(Base):
+    """Вход, живущий в куке. Хранится хеш токена, не сам токен — кука у
+    пользователя равносильна паролю, и утёкшая копия БД не должна давать
+    возможность войти чужими сессиями.
+
+    Сессии в таблице, а не в подписанной куке, ради отзыва: выход,
+    смена пароля или блокировка пользователя должны немедленно закрывать
+    уже открытые сессии, а подписанную куку отозвать нечем."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    user: Mapped["User"] = relationship()
+
+
 class ChannelKind(str, enum.Enum):
     webhook = "webhook"
     telegram = "telegram"

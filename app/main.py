@@ -5,11 +5,12 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, WebSocket
+from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     bootstrap_first_key,
     generate_key,
+    Principal,
     key_sees_group,
     require_admin_key,
     require_api_key,
@@ -32,7 +34,23 @@ from app.audit_engine import run_audit
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
 from app.ip_lookup import extract_hints
+from app.passwords import (
+    DEFAULT_ADMIN_PASSWORD,
+    DEFAULT_ADMIN_USERNAME,
+    hash_password,
+    is_default_password,
+    password_problem,
+    verify_password,
+)
 from app.secrets_crypto import encrypt_secret
+from app.sessions import (
+    COOKIE_NAME,
+    SESSION_TTL,
+    bootstrap_first_user,
+    create_session,
+    revoke_all_for_user,
+    revoke_session,
+)
 from app.signal import encrypt_channel_config, mask_channel_config
 from app.backups_engine import diff_backups, run_backup
 from app.models import (
@@ -57,6 +75,7 @@ from app.models import (
     ScanHost,
     SyslogMessage,
     Template,
+    User,
     Watch,
 )
 from app.inventory_engine import delete_node, delete_probe, delete_watch
@@ -74,18 +93,27 @@ from app.schemas import (
     ChannelIn,
     EscalationStepIn,
     GroupIn,
+    LoginIn,
     NodeIn,
     NodeUpdateIn,
+    PasswordChangeIn,
     ProbeIn,
     ScanHostToNodeIn,
     ScanIn,
     TemplateApplyIn,
     TemplateIn,
+    UserIn,
     WatchIn,
 )
 from app.templates_engine import TemplateValidationError, apply_template, validate_probe_defs
 
 _scheduler = Scheduler()
+
+# Хеш заведомо недостижимого пароля. Нужен, чтобы вход с НЕсуществующим
+# логином занимал столько же времени, сколько с существующим: иначе по
+# скорости ответа перебором выясняются заведённые логины, не зная ни
+# одного пароля. Считается один раз при импорте — scrypt небесплатный.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 def _db() -> Session:
@@ -102,8 +130,30 @@ async def lifespan(_app: FastAPI):
     db = get_session()
     try:
         raw_key = bootstrap_first_key(db)
+        created_admin = bootstrap_first_user(db)
+        default_password_still_set = any(
+            is_default_password(u.password_hash)
+            for u in db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).all()
+        )
     finally:
         db.close()
+    if created_admin:
+        print(
+            "\n"
+            "=================================================================\n"
+            f"  Вход в веб-интерфейс: логин {DEFAULT_ADMIN_USERNAME}, пароль {DEFAULT_ADMIN_PASSWORD}\n"
+            "  СМЕНИ ПАРОЛЬ СРАЗУ ПОСЛЕ ПЕРВОГО ВХОДА — он общеизвестен.\n"
+            "=================================================================\n",
+            flush=True,
+        )
+    elif default_password_still_set:
+        # Напоминаем при каждом старте, пока пароль не сменён: одно
+        # сообщение при установке слишком легко пролистать, а учётка с
+        # общеизвестным паролем — это открытая дверь в сеть.
+        print(
+            f"\n  ВНИМАНИЕ: у пользователя {DEFAULT_ADMIN_USERNAME} всё ещё стоит пароль по умолчанию. Смени его.\n",
+            flush=True,
+        )
     if raw_key:
         # Реальный найденный баг (2026-09-20): под nohup/systemd/Docker
         # (stdout не TTY) print() без flush=True может не долетать до
@@ -181,7 +231,7 @@ def delete_group(group_id: int, db: Session = Depends(_db)):
 
 
 @api_write.post("/api/nodes", status_code=201)
-def create_node(payload: NodeIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def create_node(payload: NodeIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     if payload.group_id is not None and db.get(Group, payload.group_id) is None:
         raise HTTPException(status_code=404, detail="Group не найдена")
     if not key_sees_group(key, payload.group_id):
@@ -205,7 +255,7 @@ def create_node(payload: NodeIn, db: Session = Depends(_db), key: ApiKey = Depen
 def list_nodes(
     group_id: int | None = None,
     db: Session = Depends(_db),
-    key: ApiKey = Depends(require_api_key),
+    key: Principal = Depends(require_api_key),
 ):
     query = scope_nodes(db.query(Node), key)
     if group_id is not None:
@@ -230,7 +280,7 @@ def update_node(
     node_id: int,
     payload: NodeUpdateIn,
     db: Session = Depends(_db),
-    key: ApiKey = Depends(require_api_key),
+    key: Principal = Depends(require_api_key),
 ):
     node = require_node_access(db, key, node_id)
     fields = payload.model_dump(exclude_unset=True)
@@ -248,7 +298,7 @@ def update_node(
 
 
 @api_write.delete("/api/nodes/{node_id}")
-def delete_node_endpoint(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def delete_node_endpoint(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Возвращает, что именно удалено: узел тянет за собой проверки,
     измерения, инциденты и бэкапы — делать это молча неправильно."""
     node = require_node_access(db, key, node_id)
@@ -256,13 +306,13 @@ def delete_node_endpoint(node_id: int, db: Session = Depends(_db), key: ApiKey =
 
 
 @api_write.delete("/api/probes/{probe_id}", status_code=204)
-def delete_probe_endpoint(probe_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def delete_probe_endpoint(probe_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     probe = require_probe_access(db, key, probe_id)
     delete_probe(db, probe)
 
 
 @api_write.delete("/api/watches/{watch_id}", status_code=204)
-def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     watch = db.get(Watch, watch_id)
     if watch is None:
         raise HTTPException(status_code=404, detail="Watch не найден")
@@ -271,7 +321,7 @@ def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: ApiKey
 
 
 @api_write.post("/api/probes", status_code=201)
-def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_node_access(db, key, payload.node_id)
     params = dict(payload.params)
     for secret_field in ("password", "auth_password", "priv_password"):
@@ -291,7 +341,7 @@ def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: ApiKey = Dep
 
 
 @api_read.get("/api/nodes/{node_id}/probes")
-def list_node_probes(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def list_node_probes(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Для веб-интерфейса (static/app.js) — Probe каждого Node вместе с
     последней Sample, чтобы не делать по отдельному запросу на probe."""
     require_node_access(db, key, node_id)
@@ -325,7 +375,7 @@ def probe_samples(
     probe_id: int,
     limit: int = 50,
     db: Session = Depends(_db),
-    key: ApiKey = Depends(require_api_key),
+    key: Principal = Depends(require_api_key),
 ):
     require_probe_access(db, key, probe_id)
     rows = (
@@ -342,7 +392,7 @@ def probe_samples(
 
 
 @api_write.post("/api/watches", status_code=201)
-def create_watch(payload: WatchIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def create_watch(payload: WatchIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_probe_access(db, key, payload.probe_id)
     watch = Watch(
         probe_id=payload.probe_id,
@@ -359,7 +409,7 @@ def create_watch(payload: WatchIn, db: Session = Depends(_db), key: ApiKey = Dep
 
 
 @api_read.get("/api/probes/{probe_id}/watches")
-def list_probe_watches(probe_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def list_probe_watches(probe_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Для инвентаря на сайте (static/inventory.js) — список условий под
     каждой проверкой, с количеством уже настроенных действий (Action), не
     только сам факт существования Watch."""
@@ -385,7 +435,7 @@ def list_probe_watches(probe_id: int, db: Session = Depends(_db), key: ApiKey = 
 def list_incidents(
     include_resolved: bool = False,
     db: Session = Depends(_db),
-    key: ApiKey = Depends(require_api_key),
+    key: Principal = Depends(require_api_key),
 ):
     query = db.query(Incident)
     if not include_resolved:
@@ -415,7 +465,7 @@ def list_incidents(
 
 
 @api_write.post("/api/channels", status_code=201)
-def create_channel(payload: ChannelIn, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def create_channel(payload: ChannelIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     if payload.node_id is not None:
         require_node_access(db, key, payload.node_id)
     if payload.watch_id is not None:
@@ -589,7 +639,7 @@ async def trigger_backup(
     node_id: int,
     payload: BackupTriggerIn,
     db: Session = Depends(_db),
-    key: ApiKey = Depends(require_api_key),
+    key: Principal = Depends(require_api_key),
 ):
     node = require_node_access(db, key, node_id)
     backup = await run_backup(
@@ -601,7 +651,7 @@ async def trigger_backup(
 
 
 @api_read.get("/api/nodes/{node_id}/backups")
-def list_backups(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def list_backups(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_node_access(db, key, node_id)
     rows = (
         db.query(Backup)
@@ -616,13 +666,13 @@ def list_backups(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends
 
 
 @api_read.get("/api/backups/{backup_id}")
-def get_backup(backup_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def get_backup(backup_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     backup = require_backup_access(db, key, backup_id)
     return {"id": backup.id, "node_id": backup.node_id, "taken_at": backup.taken_at.isoformat(), "content": backup.content, "changed": backup.changed, "error": backup.error}
 
 
 @api_read.get("/api/backups/{backup_id}/diff")
-def get_backup_diff(backup_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def get_backup_diff(backup_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Diff против предыдущего УСПЕШНОГО снимка того же узла (см.
     backups_engine.run_backup — та же логика поиска "previous")."""
     backup = require_backup_access(db, key, backup_id)
@@ -671,7 +721,7 @@ def delete_audit_rule(rule_id: int, db: Session = Depends(_db)):
 
 
 @api_operate.post("/api/nodes/{node_id}/audit")
-def trigger_audit(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def trigger_audit(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     node = require_node_access(db, key, node_id)
     findings = run_audit(db, node)
     rules_by_id = {r.id: r for r in db.query(AuditRule).all()}
@@ -689,7 +739,7 @@ def trigger_audit(node_id: int, db: Session = Depends(_db), key: ApiKey = Depend
 
 
 @api_read.get("/api/nodes/{node_id}/audit")
-def get_audit_findings(node_id: int, db: Session = Depends(_db), key: ApiKey = Depends(require_api_key)):
+def get_audit_findings(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_node_access(db, key, node_id)
     findings = db.query(AuditFinding).filter(AuditFinding.node_id == node_id).order_by(AuditFinding.checked_at.desc()).all()
     rules_by_id = {r.id: r for r in db.query(AuditRule).all()}
@@ -803,13 +853,126 @@ def trigger_retention(db: Session = Depends(_db)):
     return run_retention(db)
 
 
+@app.post("/api/login")
+def login(payload: LoginIn, response: Response, db: Session = Depends(_db)):
+    """Вход по логину и паролю. Намеренно НЕ на api_read: чтобы войти,
+    ещё нечем авторизоваться."""
+    user = db.query(User).filter(User.username == payload.username).first()
+    # Проверяем пароль даже для несуществующего пользователя — иначе по
+    # времени ответа можно было бы перебором выяснить, какие логины
+    # заведены, не зная ни одного пароля.
+    stored_hash = user.password_hash if user else _DUMMY_PASSWORD_HASH
+    password_ok = verify_password(payload.password, stored_hash)
+    if user is None or not password_ok or not user.active:
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    raw_token = create_session(db, user)
+    response.set_cookie(
+        COOKIE_NAME,
+        raw_token,
+        httponly=True,   # недоступна JavaScript: XSS не сможет украсть сессию
+        samesite="lax",  # не уходит на сторонние сайты — защита от CSRF
+        max_age=int(SESSION_TTL.total_seconds()),
+        path="/",
+    )
+    return {"username": user.username, "role": user.role.value, "group_id": user.group_id}
+
+
+@app.post("/api/logout")
+def logout(response: Response, gridforge_session: str | None = Cookie(default=None), db: Session = Depends(_db)):
+    revoke_session(db, gridforge_session)
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"status": "logged_out"}
+
+
+@api_write.post("/api/users", status_code=201)
+def create_user(payload: UserIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if db.query(User).filter(User.username == payload.username).first() is not None:
+        raise HTTPException(status_code=409, detail="Пользователь с таким логином уже есть")
+    problem = password_problem(payload.password)
+    if problem:
+        raise HTTPException(status_code=422, detail=f"Пароль не принят: {problem}")
+    if payload.group_id is not None and db.get(Group, payload.group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    if not key_sees_group(key, payload.group_id):
+        # Иначе admin, ограниченный группой, завёл бы пользователя с
+        # доступом шире собственного.
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+
+    user = User(
+        username=payload.username,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        group_id=payload.group_id,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "username": user.username, "role": user.role.value}
+
+
+@api_read.get("/api/users")
+def list_users(db: Session = Depends(_db), admin: Principal = Depends(require_admin_key)):
+    """Без хешей паролей — наружу они не нужны никогда."""
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role.value,
+            "group_id": u.group_id,
+            "active": u.active,
+            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+        }
+        for u in db.query(User).order_by(User.username).all()
+    ]
+
+
+@api_write.post("/api/users/{user_id}/password")
+def change_user_password(user_id: int, payload: PasswordChangeIn, db: Session = Depends(_db)):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    problem = password_problem(payload.password)
+    if problem:
+        raise HTTPException(status_code=422, detail=f"Пароль не принят: {problem}")
+    user.password_hash = hash_password(payload.password)
+    db.commit()
+    # Смена пароля обязана выгнать уже открытые сессии — иначе тот, из-за
+    # кого пароль меняют, остался бы внутри.
+    closed = revoke_all_for_user(db, user.id)
+    return {"status": "updated", "sessions_closed": closed}
+
+
+@api_write.delete("/api/users/{user_id}", status_code=204)
+def delete_user(user_id: int, db: Session = Depends(_db)):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    revoke_all_for_user(db, user.id)
+    db.delete(user)
+    db.commit()
+
+
 @api_read.get("/api/whoami")
-def whoami(key: ApiKey = Depends(require_api_key)):
+def whoami(key: Principal = Depends(require_api_key), db: Session = Depends(_db)):
     """Роль текущего ключа. Нужен интерфейсу: раньше роль угадывалась по
     тому, прошёл ли GET /api/api-keys (получилось → admin, иначе viewer)
     — с появлением operator такое угадывание врало бы, показывая
     operator как viewer."""
-    return {"label": key.label, "role": key.role.value, "group_id": key.group_id}
+    # Интерфейс показывает предупреждение, пока встроенный пароль не
+    # сменён: видеть его должен любой вошедший, а не только тот, кто
+    # читал логи при установке.
+    default_password = False
+    if key.kind == "user":
+        user = db.query(User).filter(User.username == key.label).first()
+        default_password = bool(user and is_default_password(user.password_hash))
+    return {
+        "label": key.label,
+        "role": key.role.value,
+        "group_id": key.group_id,
+        "kind": key.kind,
+        "default_password": default_password,
+    }
 
 
 @api_write.post("/api/api-keys", status_code=201)
@@ -829,7 +992,7 @@ def create_api_key(payload: ApiKeyIn, db: Session = Depends(_db)):
 
 
 @api_read.get("/api/api-keys")
-def list_api_keys(admin: ApiKey = Depends(require_admin_key), db: Session = Depends(_db)):
+def list_api_keys(admin: Principal = Depends(require_admin_key), db: Session = Depends(_db)):
     """Список без самих ключей (необратимо хешированы) — только метаданные.
     Явный Depends(require_admin_key) поверх api_read: viewer видит другие
     эндпоинты этого роутера, но не список ключей доступа."""
@@ -862,7 +1025,7 @@ def list_syslog(
     source_ip: str | None = None,
     limit: int = 100,
     db: Session = Depends(_db),
-    key: ApiKey = Depends(require_api_key),
+    key: Principal = Depends(require_api_key),
 ):
     query = db.query(SyslogMessage)
     if key.group_id is not None:

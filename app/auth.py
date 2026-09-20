@@ -1,18 +1,26 @@
-"""Авторизация по API-ключу (заголовок `X-API-Key`). Минимальный уровень —
-один ключ = полный доступ, ролей/пользователей нет (см. README «Что
-дальше»). Достаточно, чтобы закрыть API от произвольного доступа, пока не
-понадобится настоящая RBAC-модель."""
+"""Вход и права.
+
+Два способа войти: API-ключ в заголовке `X-API-Key` (программы,
+интеграции) и логин с паролем через куку сессии (люди в браузере, см.
+passwords.py и sessions.py). Оба сводятся к одному объекту Principal,
+чтобы права не разъезжались между путями входа.
+
+Две оси прав: роль (viewer < operator < admin, см. ROLE_RANK) и
+необязательное ограничение области одной группой узлов (нижняя половина
+файла)."""
 
 from __future__ import annotations
 
 import hashlib
 import secrets
+from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import ApiKey, ApiKeyRole, Backup, Node, Probe
+from app.sessions import resolve_session
 
 
 def _hash_key(raw_key: str) -> str:
@@ -43,22 +51,46 @@ def bootstrap_first_key(db: Session) -> str | None:
     return generate_key(db, label="bootstrap", role=ApiKeyRole.admin)
 
 
-async def require_api_key(x_api_key: str | None = Header(default=None)) -> ApiKey:
-    """Любой действующий ключ — для чтения (GET). См. require_admin_key
-    ниже для операций записи."""
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="Заголовок X-API-Key обязателен")
+@dataclass
+class Principal:
+    """Кто выполняет запрос — независимо от того, как он вошёл.
+
+    Войти можно двумя способами: API-ключом в заголовке (программы,
+    интеграции) и логином с паролем через куку сессии (люди в браузере).
+    Права при этом обязаны быть одни и те же, поэтому всё, что дальше
+    решает о доступе, работает с этим объектом, а не с ApiKey или User по
+    отдельности — иначе два пути неизбежно разъехались бы в правах.
+    """
+
+    label: str               # метка ключа или имя пользователя — для сообщений и whoami
+    role: ApiKeyRole
+    group_id: int | None
+    kind: str                # "api_key" | "user"
+
+
+async def require_api_key(
+    x_api_key: str | None = Header(default=None),
+    gridforge_session: str | None = Cookie(default=None),
+) -> Principal:
+    """Действующий API-ключ ИЛИ живая сессия входа — для чтения (GET).
+    См. require_admin_key ниже для операций записи."""
     db = get_session()
     try:
-        key = (
-            db.query(ApiKey)
-            .filter(ApiKey.key_hash == _hash_key(x_api_key), ApiKey.revoked.is_(False))
-            .first()
-        )
-        if key is None:
-            raise HTTPException(status_code=401, detail="Неверный или отозванный API-ключ")
-        db.expunge(key)  # использовать после закрытия сессии (см. finally), без ленивой подгрузки
-        return key
+        if x_api_key:
+            key = (
+                db.query(ApiKey)
+                .filter(ApiKey.key_hash == _hash_key(x_api_key), ApiKey.revoked.is_(False))
+                .first()
+            )
+            if key is None:
+                raise HTTPException(status_code=401, detail="Неверный или отозванный API-ключ")
+            return Principal(label=key.label, role=key.role, group_id=key.group_id, kind="api_key")
+
+        user = resolve_session(db, gridforge_session)
+        if user is not None:
+            return Principal(label=user.username, role=user.role, group_id=user.group_id, kind="user")
+
+        raise HTTPException(status_code=401, detail="Нужен заголовок X-API-Key или вход в систему")
     finally:
         db.close()
 
@@ -66,7 +98,7 @@ async def require_api_key(x_api_key: str | None = Header(default=None)) -> ApiKe
 ROLE_RANK = {ApiKeyRole.viewer: 0, ApiKeyRole.operator: 1, ApiKeyRole.admin: 2}
 
 
-async def require_operator_key(key: ApiKey = Depends(require_api_key)) -> ApiKey:
+async def require_operator_key(key: Principal = Depends(require_api_key)) -> Principal:
     """operator и выше — запуск операций на узлах (бэкап, аудит, скан,
     захват трафика). Сами операции ничего не меняют в конфигурации
     GridForge, поэтому не требуют admin; но и viewer их запускать не
@@ -76,7 +108,7 @@ async def require_operator_key(key: ApiKey = Depends(require_api_key)) -> ApiKey
     return key
 
 
-async def require_admin_key(key: ApiKey = Depends(require_api_key)) -> ApiKey:
+async def require_admin_key(key: Principal = Depends(require_api_key)) -> Principal:
     """Только role=admin — изменение инвентаря/правил/каналов и выдача
     ключей. viewer/operator здесь получают 403, не 401 (ключ валиден,
     прав не хватает — разные вещи)."""
@@ -92,7 +124,7 @@ async def require_admin_key(key: ApiKey = Depends(require_api_key)) -> ApiKey:
 # нет все остальные, поэтому точка принятия решения должна быть одна.
 
 
-def key_sees_group(key: ApiKey, group_id: int | None) -> bool:
+def key_sees_group(key: Principal, group_id: int | None) -> bool:
     """Ключ без группы видит всё. Ключ с группой видит ТОЛЬКО свою — узлы
     без группы для него тоже закрыты (иначе «общая» группа стала бы
     дырой в изоляции)."""
@@ -101,14 +133,14 @@ def key_sees_group(key: ApiKey, group_id: int | None) -> bool:
     return group_id == key.group_id
 
 
-def scope_nodes(query, key: ApiKey):
+def scope_nodes(query, key: Principal):
     """Сужение любого запроса, отбирающего Node, до области ключа."""
     if key.group_id is None:
         return query
     return query.filter(Node.group_id == key.group_id)
 
 
-def require_node_access(db: Session, key: ApiKey, node_id: int) -> Node:
+def require_node_access(db: Session, key: Principal, node_id: int) -> Node:
     """Достать Node с проверкой области ключа.
 
     Узел вне области отдаёт 404, а не 403 — сознательно: 403 подтвердил бы
@@ -121,7 +153,7 @@ def require_node_access(db: Session, key: ApiKey, node_id: int) -> Node:
     return node
 
 
-def require_probe_access(db: Session, key: ApiKey, probe_id: int) -> Probe:
+def require_probe_access(db: Session, key: Principal, probe_id: int) -> Probe:
     """Probe принадлежит узлу — доступ наследуется от узла. Иначе
     ограничение по группам обходилось бы заходом «сбоку», через probe_id."""
     probe = db.get(Probe, probe_id)
@@ -130,7 +162,7 @@ def require_probe_access(db: Session, key: ApiKey, probe_id: int) -> Probe:
     return probe
 
 
-def require_backup_access(db: Session, key: ApiKey, backup_id: int) -> Backup:
+def require_backup_access(db: Session, key: Principal, backup_id: int) -> Backup:
     """То же для Backup — в нём лежит конфиг устройства, самое чувствительное
     из того, что хранит GridForge."""
     backup = db.get(Backup, backup_id)

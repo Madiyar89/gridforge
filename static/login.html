@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — вход</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .login-wrap { max-width: 380px; margin: 12vh auto; padding: 0 16px; }
+  .login-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
+  .login-card h1 { margin: 0 0 4px; font-size: 20px; }
+  .login-card .sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .login-card label { display: block; margin-bottom: 14px; font-size: 13px; color: var(--text-dim); }
+  .login-card input { width: 100%; margin-top: 5px; padding: 9px 10px; font-size: 15px; box-sizing: border-box; }
+  .login-card button { width: 100%; padding: 10px; font-size: 15px; }
+  .login-error { color: var(--bad); font-size: 13px; margin-bottom: 12px; min-height: 18px; }
+  .login-hint { margin-top: 18px; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <h1>GridForge</h1>
+    <div class="sub">сеть · опрос · триггеры</div>
+    <div class="login-error" id="login-error"></div>
+    <form id="login-form">
+      <label>Логин
+        <input id="login-username" autocomplete="username" autofocus required>
+      </label>
+      <label>Пароль
+        <input id="login-password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" id="login-submit">Войти</button>
+    </form>
+    <div class="login-hint">
+      Первый вход — логин <b>Admin</b>, пароль <b>gridforge</b>.
+      Смени пароль сразу после входа: он общеизвестен.
+    </div>
+  </div>
+</div>
+
+<script src="login.js"></script>
+</body>
+</html>

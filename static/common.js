@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: "syslog.html", label: "Syslog" },
   { href: "capture.html", label: "Трафик" },
   { href: "channels.html", label: "Каналы" },
+  { href: "users.html", label: "Пользователи" },
 ];
 
 function apiKey() {
@@ -86,8 +87,46 @@ async function updateRolePill() {
     pill.className = "role-pill bad";
     return;
   }
-  pill.textContent = me.role;
+  pill.textContent = me.kind === "user" ? `${me.label} · ${me.role}` : me.role;
   pill.className = me.role === "admin" ? "role-pill ok" : "role-pill";
+  if (me.kind === "user") showLogoutButton();
+  if (me.default_password) showDefaultPasswordWarning();
+}
+
+// Вход по паролю и вход по API-ключу существуют параллельно: ключ нужен
+// программам, пароль — людям. Поэтому на страницу не выкидываем, если
+// ключ введён вручную, — только когда нет вообще ничего.
+async function requireAuth() {
+  if (apiKey()) return;
+  try {
+    await api("/api/whoami");
+  } catch (e) {
+    if (e.status === 401) window.location.href = "login.html";
+  }
+}
+
+function showLogoutButton() {
+  if (document.getElementById("logout-btn")) return;
+  const keybox = document.querySelector(".keybox");
+  if (!keybox) return;
+  // Вошли по паролю — поле для ручного ключа только мешает.
+  keybox.innerHTML = `<button id="logout-btn">Выйти</button>`;
+  document.getElementById("logout-btn").addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "login.html";
+  });
+}
+
+function showDefaultPasswordWarning() {
+  if (document.getElementById("default-password-warning")) return;
+  const banner = document.createElement("div");
+  banner.id = "default-password-warning";
+  banner.style.cssText =
+    "background:#7a2d2d;color:#fff;padding:10px 16px;font-size:13px;text-align:center;";
+  banner.innerHTML =
+    "Стоит пароль по умолчанию (<b>Admin</b>/<b>gridforge</b>) — он общеизвестен. " +
+    "Смени его: <b>Пользователи → сменить пароль</b>.";
+  document.body.insertBefore(banner, document.body.firstChild);
 }
 
 function initTopbar() {
@@ -117,6 +156,7 @@ function initTopbar() {
     input.placeholder = "ключ сохранён — заменить?";
   }
   updateRolePill();
+  requireAuth();
 }
 
 document.addEventListener("DOMContentLoaded", initTopbar);
