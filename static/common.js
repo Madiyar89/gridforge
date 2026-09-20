@@ -23,6 +23,7 @@ const NAV_ICONS = {
   capture: '<path d="M2.5 10.5h3l2-5 3 9 2.5-6 1.5 2h3"/>',
   adaudit: '<circle cx="7.5" cy="7" r="2.8"/><path d="M2.5 16c0-2.8 2.2-4.5 5-4.5s5 1.7 5 4.5"/><path d="M13.5 8.5l1.6 1.6 2.4-2.6"/>',
   channels: '<path d="M10 3a4.5 4.5 0 0 1 4.5 4.5c0 3.5 1.5 5 1.5 5H4s1.5-1.5 1.5-5A4.5 4.5 0 0 1 10 3z"/><path d="M8.3 15.5a1.8 1.8 0 0 0 3.4 0"/>',
+  ports: '<rect x="2.5" y="5.5" width="15" height="9" rx="1.5"/><path d="M6 8.5v3"/><path d="M10 8.5v3"/><path d="M14 8.5v3"/>',
   users: '<circle cx="10" cy="6.5" r="3"/><path d="M4 16.5c0-3.2 2.7-5 6-5s6 1.8 6 5"/>',
 };
 
@@ -47,6 +48,7 @@ const NAV_GROUPS = [
       { href: "inventory.html", label: "Инвентарь", icon: "inventory" },
       { href: "templates.html", label: "Шаблоны", icon: "templates" },
       { href: "rubka.html", label: "Рубка", icon: "rubka" },
+      { href: "ports.html", label: "Порты", icon: "ports" },
       { href: "console.html", label: "Консоль", icon: "console" },
     ],
   },

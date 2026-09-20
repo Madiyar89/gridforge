@@ -134,6 +134,20 @@ class BackupTriggerIn(BaseModel):
     port: int = 22
 
 
+class PortRefreshIn(BaseModel):
+    """Снятие состояния портов. Команду НЕ принимаем от клиента: она
+    определяется вендором узла на сервере (см. ports_engine.STATUS_COMMANDS),
+    иначе через это поле можно было бы выполнить произвольную.
+
+    Учётка, как и у бэкапа, живёт только в пределах запроса."""
+
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+    port: int = 22
+    timeout_seconds: float = 20.0
+
+
 class CaptureIn(BaseModel):
     interface: str
     bpf_filter: str | None = None

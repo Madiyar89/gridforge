@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Порты</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Сетка портов: 12 в ряд — как физически расположены на коммутаторе
+     с 48 портами (4 ряда по 12). */
+  .port-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:5px;max-width:760px;}
+  .port{
+    position:relative;aspect-ratio:1;border-radius:4px;border:1px solid var(--border);
+    background:var(--surface-2);cursor:pointer;display:flex;align-items:center;
+    justify-content:center;font-size:11px;color:var(--text-dim);
+  }
+  .port:hover{outline:2px solid var(--accent);outline-offset:1px;}
+  .port.up{background:#1d3a28;border-color:#2f6b45;color:#9fd9b4;}
+  .port.notconnect{background:var(--surface-2);}
+  .port.disabled{background:#3a1f1d;border-color:#6b2f2f;color:#e0a9a4;}
+  .port.err-disabled{background:#4a1a16;border-color:#a33a2f;color:#ffb3a7;}
+  .port.unknown{background:#2a2214;border-color:#6b5a2f;color:#d9c48e;}
+  .port.selected{outline:2px solid var(--accent);outline-offset:1px;}
+  /* Уголок у trunk-порта: цветом состояние уже занято, нужен отдельный
+     признак, который читается поверх любого фона. */
+  .port.trunk::after{
+    content:"";position:absolute;top:2px;right:2px;
+    border:3px solid transparent;border-top-color:var(--info);border-right-color:var(--info);
+  }
+  .port-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-dim);margin-top:10px;}
+  .port-legend i{display:inline-block;width:11px;height:11px;border-radius:3px;
+    border:1px solid var(--border);vertical-align:-1px;margin-right:4px;}
+  .port-row-label{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin:12px 0 5px;}
+  .port-detail{margin-top:14px;font-size:13px;}
+  .port-detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:6px 0 0;}
+  .port-detail dt{color:var(--text-dim);}
+  .stale{color:var(--warn);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Порты</h1>
+  <p>Схема портов коммутатора по последнему снимку. Снимок не обновляется сам — состояние всегда показывается вместе с временем, когда его сняли.</p>
+</div>
+
+<div class="panel">
+  <h2>Узел</h2>
+  <div class="form-row">
+    <select id="node-select"></select>
+    <button id="refresh-ports">Снять состояние</button>
+    <span id="snapshot-age" style="color:var(--text-dim);font-size:13px;"></span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Схема <span class="count" id="ports-summary"></span></h2>
+  <div class="body" id="ports-body"><div class="empty">Выбери узел</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="ports.js"></script>
+</body>
+</html>

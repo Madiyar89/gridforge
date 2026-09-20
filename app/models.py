@@ -278,6 +278,30 @@ class Session(Base):
     user: Mapped["User"] = relationship()
 
 
+class PortSnapshot(Base):
+    """Снимок состояния портов узла на момент опроса.
+
+    Снимок, а не «текущее состояние»: данные живут ровно столько, сколько
+    прошло с опроса, и на схеме обязательно показывается, когда их сняли.
+    Иначе выключенный вчера порт выглядел бы как выключенный сейчас."""
+
+    __tablename__ = "port_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), nullable=False, index=True)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    command: Mapped[str] = mapped_column(String(255), nullable=False)
+    ok: Mapped[bool] = mapped_column(default=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Разобранные порты: [{name, state, description, vlan, speed, is_trunk}].
+    # JSON, а не отдельная таблица на каждый порт: снимок читается и
+    # пишется целиком, по одному порту его не обновляют, а 48 строк на
+    # каждый опрос каждого узла — лишний рост таблицы без пользы.
+    ports: Mapped[list] = mapped_column(JSON, default=list)
+
+    node: Mapped["Node"] = relationship()
+
+
 class SweepStatus(str, enum.Enum):
     running = "running"
     done = "done"

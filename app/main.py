@@ -84,6 +84,7 @@ from app.models import (
 )
 from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
+from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
 from app.sweep_engine import run_sweep, sweep_progress
@@ -103,6 +104,7 @@ from app.schemas import (
     NodeIn,
     NodeUpdateIn,
     PasswordChangeIn,
+    PortRefreshIn,
     ProbeIn,
     ScanHostToNodeIn,
     ScanIn,
@@ -987,6 +989,80 @@ def delete_user(user_id: int, db: Session = Depends(_db)):
     revoke_all_for_user(db, user.id)
     db.delete(user)
     db.commit()
+
+
+@api_operate.post("/api/nodes/{node_id}/ports/refresh", status_code=201)
+async def refresh_ports(
+    node_id: int,
+    payload: PortRefreshIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """Снять состояние портов узла. Читающая команда, права operator —
+    как у бэкапа: лезет на оборудование, ничего не меняет.
+
+    Команда сюда не передаётся — её выбирает сервер по вендору узла,
+    иначе через это поле можно было бы выполнить произвольную."""
+    node = require_node_access(db, key, node_id)
+    snapshot = await collect_ports(
+        db,
+        node,
+        username=payload.username,
+        password=payload.password,
+        key_path=payload.key_path,
+        port=payload.port,
+        timeout_seconds=payload.timeout_seconds,
+    )
+    return {"id": snapshot.id, "ok": snapshot.ok, "ports": len(snapshot.ports), "error": snapshot.error}
+
+
+@api_read.get("/api/nodes/{node_id}/ports")
+def get_ports(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Последний снимок портов узла, сгруппированный по модулям."""
+    require_node_access(db, key, node_id)
+    snapshot = latest_snapshot(db, node_id)
+    if snapshot is None:
+        return {"taken_at": None, "ok": None, "groups": [], "error": None, "summary": {}}
+
+    ports = [
+        Port(
+            name=p.get("name", ""),
+            state=p.get("state", "unknown"),
+            description=p.get("description", ""),
+            vlan=p.get("vlan", ""),
+            speed=p.get("speed", ""),
+            is_trunk=bool(p.get("is_trunk")),
+        )
+        for p in (snapshot.ports or [])
+    ]
+    summary: dict[str, int] = {}
+    for port in ports:
+        summary[port.state] = summary.get(port.state, 0) + 1
+
+    return {
+        "taken_at": snapshot.taken_at.isoformat(),
+        "ok": snapshot.ok,
+        "error": snapshot.error,
+        "command": snapshot.command,
+        "summary": summary,
+        "groups": [
+            {
+                "prefix": group["prefix"],
+                "ports": [
+                    {
+                        "name": p.name,
+                        "state": p.state,
+                        "description": p.description,
+                        "vlan": p.vlan,
+                        "speed": p.speed,
+                        "is_trunk": p.is_trunk,
+                    }
+                    for p in group["ports"]
+                ],
+            }
+            for group in group_ports(ports)
+        ],
+    }
 
 
 @api_read.get("/api/sweep-presets")
