@@ -27,6 +27,13 @@
     content:"";position:absolute;top:2px;right:2px;
     border:3px solid transparent;border-top-color:var(--info);border-right-color:var(--info);
   }
+  /* Замок — Port Security включён. Значок, а не цвет: цветом уже
+     показано состояние линка, и смешивать два разных смысла в одном
+     признаке нельзя. */
+  .port .lock{position:absolute;bottom:1px;left:2px;font-size:9px;line-height:1;opacity:.9;}
+  /* Пунктир — защита выключена, но её настройки остались в конфигурации.
+     Не «защищён», но и не «чисто»: такие порты стоит дочистить. */
+  .port.leftover{border-style:dashed;border-color:var(--warn);}
   .port-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-dim);margin-top:10px;}
   .port-legend i{display:inline-block;width:11px;height:11px;border-radius:3px;
     border:1px solid var(--border);vertical-align:-1px;margin-right:4px;}

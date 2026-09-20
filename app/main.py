@@ -84,6 +84,7 @@ from app.models import (
 )
 from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
+from app.port_security import parse_port_protection, parse_stp_global, protection_summary
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
@@ -1062,6 +1063,51 @@ def get_ports(node_id: int, db: Session = Depends(_db), key: Principal = Depends
             }
             for group in group_ports(ports)
         ],
+    }
+
+
+@api_read.get("/api/nodes/{node_id}/protection")
+def get_protection(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Port Security и защита STP по последнему снимку конфигурации.
+
+    Читается сохранённый бэкап, а не живое устройство: конфигурации и так
+    снимаются регулярно, а лишний поход на старый коммутатор ради того же
+    текста — лишняя нагрузка."""
+    require_node_access(db, key, node_id)
+    backup = (
+        db.query(Backup)
+        .filter(Backup.node_id == node_id, Backup.error.is_(None))
+        .order_by(desc(Backup.taken_at))
+        .first()
+    )
+    if backup is None:
+        return {"taken_at": None, "ports": {}, "summary": None,
+                "detail": "нет снимка конфигурации — сначала сними бэкап"}
+
+    ports = parse_port_protection(backup.content)
+    stp = parse_stp_global(backup.content)
+    return {
+        "taken_at": backup.taken_at.isoformat(),
+        "summary": protection_summary(ports, stp),
+        "ports": {
+            name: {
+                "port_security": p.port_security,
+                "max_mac": p.max_mac,
+                "violation": p.violation,
+                "sticky": p.sticky,
+                "bpdu_guard": p.bpdu_guard,
+                "bpdu_filter": p.bpdu_filter,
+                "portfast": p.portfast,
+                "guard_root": p.guard_root,
+                "guard_loop": p.guard_loop,
+                "is_trunk": p.is_trunk,
+                # Защита выключена, но настройки остались в конфигурации.
+                # Показываем явно: это не «защищён», но и не «чисто».
+                "leftover_settings": (not p.port_security)
+                and (p.max_mac is not None or p.sticky or bool(p.violation)),
+            }
+            for name, p in ports.items()
+        },
     }
 
 

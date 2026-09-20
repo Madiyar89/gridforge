@@ -1,5 +1,7 @@
 // Схема портов коммутатора по последнему снимку.
 
+let _protection = { ports: {}, summary: null };
+
 const STATE_LABEL = {
   up: "линк есть",
   notconnect: "кабель не подключён",
@@ -31,13 +33,19 @@ async function loadPorts() {
   const body = document.getElementById("ports-body");
   if (!nodeId) return;
 
-  let data;
+  let data, protection;
   try {
-    data = await api(`/api/nodes/${nodeId}/ports`);
+    // Защита приходит из последнего бэкапа, схема — из снимка портов:
+    // это разные источники, и один может быть, когда другого нет.
+    [data, protection] = await Promise.all([
+      api(`/api/nodes/${nodeId}/ports`),
+      api(`/api/nodes/${nodeId}/protection`).catch(() => ({ ports: {}, summary: null })),
+    ]);
   } catch (e) {
     body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
     return;
   }
+  _protection = protection;
 
   const age = document.getElementById("snapshot-age");
   if (!data.taken_at) {
@@ -73,10 +81,15 @@ async function loadPorts() {
         }</div>
         <div class="port-grid">
           ${group.ports
-            .map((p, i) => {
+            .map((p) => {
               const num = p.name.split("/").pop();
-              const cls = `port ${p.state}${p.is_trunk ? " trunk" : ""}`;
-              return `<div class="${cls}" data-name="${escapeHtml(p.name)}" title="${escapeHtml(p.name)}">${escapeHtml(num)}</div>`;
+              const prot = findProtection(p.name);
+              const cls =
+                `port ${p.state}` +
+                (p.is_trunk ? " trunk" : "") +
+                (prot && prot.leftover_settings ? " leftover" : "");
+              const lock = prot && prot.port_security ? '<span class="lock">🔒</span>' : "";
+              return `<div class="${cls}" data-name="${escapeHtml(p.name)}" title="${escapeHtml(p.name)}">${escapeHtml(num)}${lock}</div>`;
             })
             .join("")}
         </div>`
@@ -89,6 +102,8 @@ async function loadPorts() {
       <span><i style="background:#3a1f1d;border-color:#6b2f2f"></i>выключен вручную</span>
       <span><i style="background:#4a1a16;border-color:#a33a2f"></i>отключён защитой</span>
       <span><i style="background:var(--surface-2);border-color:var(--info)"></i>уголок — trunk</span>
+      <span>🔒 Port Security</span>
+      <span><i style="background:var(--surface-2);border-color:var(--warn);border-style:dashed"></i>остались настройки защиты</span>
     </div>
     <div class="port-detail" id="port-detail"><span style="color:var(--text-dim)">Выбери порт на схеме</span></div>`;
 
@@ -103,6 +118,20 @@ async function loadPorts() {
   });
 }
 
+// В `show interfaces status` имена сокращённые (Gi1/0/1), а в
+// конфигурации полные (GigabitEthernet1/0/1) — сопоставляем по числовой
+// части и первой букве.
+const IFACE_PREFIX = { Gi: "GigabitEthernet", Fa: "FastEthernet", Te: "TenGigabitEthernet", Eth: "Ethernet" };
+
+function findProtection(shortName) {
+  const ports = _protection.ports || {};
+  if (ports[shortName]) return ports[shortName];
+  const match = shortName.match(/^([A-Za-z]+)(.*)$/);
+  if (!match) return null;
+  const full = IFACE_PREFIX[match[1]];
+  return full ? ports[full + match[2]] || null : null;
+}
+
 function showPortDetail(port) {
   if (!port) return;
   document.getElementById("port-detail").innerHTML = `
@@ -112,7 +141,32 @@ function showPortDetail(port) {
       <dt>Описание</dt><dd>${escapeHtml(port.description || "—")}</dd>
       <dt>VLAN</dt><dd>${escapeHtml(port.vlan || "—")}${port.is_trunk ? " (trunk)" : ""}</dd>
       <dt>Скорость</dt><dd>${escapeHtml(port.speed || "—")}</dd>
+      ${protectionRows(findProtection(port.name))}
     </dl>`;
+}
+
+function protectionRows(prot) {
+  if (!prot) return `<dt>Защита</dt><dd>нет снимка конфигурации</dd>`;
+  const bits = [];
+  if (prot.port_security) {
+    bits.push(
+      `Port Security включён` +
+        (prot.max_mac ? `, максимум MAC: ${prot.max_mac}` : "") +
+        (prot.violation ? `, при нарушении: ${escapeHtml(prot.violation)}` : "") +
+        (prot.sticky ? ", запоминание MAC (sticky)" : "")
+    );
+  } else if (prot.leftover_settings) {
+    // Важное различие: настройки есть, а защиты нет.
+    bits.push(`<span style="color:var(--warn)">Port Security выключен, но его настройки остались в конфигурации</span>`);
+  } else {
+    bits.push("Port Security выключен");
+  }
+  if (prot.bpdu_guard) bits.push("BPDU Guard");
+  if (prot.bpdu_filter) bits.push(`<span style="color:var(--crit)">BPDU Filter — обработка BPDU отключена, петля не будет замечена</span>`);
+  if (prot.portfast) bits.push("PortFast");
+  if (prot.guard_root) bits.push("Guard Root");
+  if (prot.guard_loop) bits.push("Guard Loop");
+  return `<dt>Защита</dt><dd>${bits.join("<br>")}</dd>`;
 }
 
 document.getElementById("refresh-ports").addEventListener("click", async () => {
