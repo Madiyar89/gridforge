@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "audit.html", label: "Аудит" },
   { href: "scan.html", label: "Скан" },
   { href: "console.html", label: "Консоль" },
+  { href: "rubka.html", label: "Рубка" },
   { href: "ad-audit.html", label: "AD-аудит" },
   { href: "syslog.html", label: "Syslog" },
   { href: "capture.html", label: "Трафик" },

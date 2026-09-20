@@ -75,6 +75,8 @@ from app.models import (
     Sample,
     Scan,
     ScanHost,
+    Sweep,
+    SweepResult,
     SyslogMessage,
     Template,
     User,
@@ -83,6 +85,8 @@ from app.models import (
 from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
 from app.scan_engine import ScanValidationError, run_scan
+from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
+from app.sweep_engine import run_sweep, sweep_progress
 from app.scheduler import Scheduler
 from app.syslog_server import DEFAULT_SYSLOG_PORT, start_syslog_server
 from app.schemas import (
@@ -102,6 +106,7 @@ from app.schemas import (
     ProbeIn,
     ScanHostToNodeIn,
     ScanIn,
+    SweepIn,
     TemplateApplyIn,
     TemplateIn,
     UserIn,
@@ -982,6 +987,134 @@ def delete_user(user_id: int, db: Session = Depends(_db)):
     revoke_all_for_user(db, user.id)
     db.delete(user)
     db.commit()
+
+
+@api_read.get("/api/sweep-presets")
+def list_sweep_presets():
+    """Кнопки готовых команд. Сами строки команд наружу не отдаются —
+    какая уйдёт на устройство, решается по вендору узла в момент запуска,
+    иначе клиент мог бы подменить её на произвольную."""
+    return preset_catalog()
+
+
+@api_operate.post("/api/sweeps", status_code=201)
+async def create_sweep(
+    payload: SweepIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """Запускает читающую команду сразу на наборе узлов.
+
+    Права operator, как у бэкапа и аудита: команда лезет на боевое
+    оборудование, но ничего в нём не меняет (см. белый список в
+    sweep_commands — туда не попадает ничего изменяющего)."""
+    if bool(payload.preset_key) == bool(payload.command):
+        raise HTTPException(status_code=422, detail="Нужно указать либо готовую команду, либо свой запрос")
+    if not payload.node_ids:
+        raise HTTPException(status_code=422, detail="Не выбрано ни одного узла")
+
+    # Каждый узел проверяется на доступность этому ключу отдельно: иначе
+    # массовый запуск стал бы дырой в ограничении по группам.
+    nodes = [require_node_access(db, key, node_id) for node_id in payload.node_ids]
+
+    custom_command = None
+    if payload.command:
+        try:
+            custom_command = validate_custom_command(payload.command)
+        except CommandRejected as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        label = custom_command
+    else:
+        try:
+            command_for_node(payload.preset_key, None)  # проверяем, что такая кнопка существует
+        except CommandRejected as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        label = next(p["label"] for p in preset_catalog() if p["key"] == payload.preset_key)
+
+    sweep = Sweep(preset_key=payload.preset_key, label=label, started_by=key.label)
+    db.add(sweep)
+    db.commit()
+    db.refresh(sweep)
+
+    tasks = []
+    for node in nodes:
+        command = custom_command or command_for_node(payload.preset_key, node.vendor)
+        result = SweepResult(sweep_id=sweep.id, node_id=node.id, command=command)
+        db.add(result)
+        db.commit()
+        db.refresh(result)
+        tasks.append({"result_id": result.id, "address": node.address, "command": command})
+
+    # Прогон уходит в фон: десятки SSH-сессий не должны держать HTTP-запрос
+    # открытым, интерфейс опрашивает прогресс отдельно.
+    asyncio.create_task(
+        run_sweep(
+            sweep.id,
+            tasks,
+            username=payload.username,
+            password=payload.password,
+            key_path=payload.key_path,
+            port=payload.port,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    )
+    return {"id": sweep.id, "label": sweep.label, "nodes": len(tasks)}
+
+
+@api_read.get("/api/sweeps")
+def list_sweeps(limit: int = 20, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    sweeps = db.query(Sweep).order_by(desc(Sweep.started_at)).limit(min(limit, 100)).all()
+    visible = []
+    for sweep in sweeps:
+        # Прогон показываем, только если ключу доступен хоть один его узел —
+        # иначе journal выдавал бы имена чужих узлов.
+        if key.group_id is not None and not any(
+            key_sees_group(key, r.node.group_id) for r in sweep.results
+        ):
+            continue
+        progress = sweep_progress(db, sweep)
+        visible.append(
+            {
+                "id": sweep.id,
+                "label": sweep.label,
+                "status": sweep.status.value,
+                "started_at": sweep.started_at.isoformat(),
+                "started_by": sweep.started_by,
+                **progress,
+            }
+        )
+    return visible
+
+
+@api_read.get("/api/sweeps/{sweep_id}")
+def get_sweep(sweep_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    sweep = db.get(Sweep, sweep_id)
+    if sweep is None:
+        raise HTTPException(status_code=404, detail="Прогон не найден")
+    results = [r for r in sweep.results if key_sees_group(key, r.node.group_id)]
+    if not results and sweep.results:
+        raise HTTPException(status_code=404, detail="Прогон не найден")
+    return {
+        "id": sweep.id,
+        "label": sweep.label,
+        "status": sweep.status.value,
+        "started_at": sweep.started_at.isoformat(),
+        "started_by": sweep.started_by,
+        **sweep_progress(db, sweep),
+        "results": [
+            {
+                "node_id": r.node_id,
+                "node_name": r.node.name,
+                "node_address": r.node.address,
+                "command": r.command,
+                "ok": r.ok,
+                "output": r.output,
+                "error": r.error,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            }
+            for r in sorted(results, key=lambda r: r.node.name)
+        ],
+    }
 
 
 @api_read.get("/api/whoami")

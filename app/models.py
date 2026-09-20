@@ -278,6 +278,58 @@ class Session(Base):
     user: Mapped["User"] = relationship()
 
 
+class SweepStatus(str, enum.Enum):
+    running = "running"
+    done = "done"
+
+
+class Sweep(Base):
+    """Прогон одной читающей команды сразу по набору узлов.
+
+    Своя реализация: у NetOpsHub похожая задача решалась очередью заданий
+    в файлах и внешним Ansible-раннером. Здесь узлы опрашиваются прямо из
+    приложения тем же asyncssh, что уже используется для бэкапов, — без
+    второго исполнителя и без промежуточных файлов на диске.
+
+    Команда хранится уже проверенной (см. sweep_commands): в БД не
+    попадает ничего, что не прошло белый список."""
+
+    __tablename__ = "sweeps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    preset_key: Mapped[str | None] = mapped_column(String(64), nullable=True)  # None = произвольный запрос
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[SweepStatus] = mapped_column(Enum(SweepStatus), default=SweepStatus.running)
+    # Кто запустил — метка ключа или имя пользователя (см. auth.Principal).
+    # Важно для боевой сети: по журналу должно быть видно, чей это был прогон.
+    started_by: Mapped[str] = mapped_column(String(128), default="")
+
+    results: Mapped[list["SweepResult"]] = relationship(
+        back_populates="sweep", cascade="all, delete-orphan"
+    )
+
+
+class SweepResult(Base):
+    """Результат по одному узлу. Команда своя у каждого узла: она зависит
+    от вендора, поэтому хранится здесь, а не в Sweep."""
+
+    __tablename__ = "sweep_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sweep_id: Mapped[int] = mapped_column(ForeignKey("sweeps.id"), nullable=False)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), nullable=False)
+    command: Mapped[str] = mapped_column(String(255), nullable=False)
+    ok: Mapped[bool | None] = mapped_column(nullable=True)  # None = ещё выполняется
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    sweep: Mapped["Sweep"] = relationship(back_populates="results")
+    node: Mapped["Node"] = relationship()
+
+
 class ChannelKind(str, enum.Enum):
     webhook = "webhook"
     telegram = "telegram"

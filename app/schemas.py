@@ -66,6 +66,23 @@ class ChannelIn(BaseModel):
     watch_id: int | None = None
 
 
+class SweepIn(BaseModel):
+    """Запуск массовой команды. Либо preset_key (кнопка), либо command
+    (свой запрос) — ровно одно из двух, см. проверку в эндпоинте.
+
+    Учётка приходит в запросе и НЕ сохраняется — тот же принцип, что у
+    бэкапа и SSH-консоли."""
+
+    node_ids: list[int]
+    preset_key: str | None = None
+    command: str | None = None
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+    port: int = 22
+    timeout_seconds: float = 20.0
+
+
 class LoginIn(BaseModel):
     username: str
     password: str
