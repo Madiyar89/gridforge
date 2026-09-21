@@ -71,6 +71,9 @@ def _migrate_missing_columns() -> None:
         "users": [
             ("source", "VARCHAR(16) DEFAULT 'local'"),
         ],
+        "credentials": [
+            ("node_id", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:
