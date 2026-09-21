@@ -31,15 +31,16 @@ async function refreshGroups() {
 
 document.getElementById("group-select").addEventListener("change", (e) => {
   _groupFilter = e.target.value;
-  renderNodeList();
   if (_groupFilter) {
-    // Выбор группы сразу отмечает все её узлы — не нужно ещё раз жать
-    // "выбрать все" после того, как уже сузил список группой.
-    _allNodes
-      .filter((n) => String(n.group_id ?? "") === _groupFilter)
-      .forEach((n) => _selected.add(n.id));
-    renderNodeList();
+    // Выбор группы заменяет отметку — только узлы этой группы, а не
+    // добавляет к уже стоящей (реальный баг: после "выбрать все" выбор
+    // группы оставлял отмеченными ВСЕ узлы, прогон уходил не на ту
+    // группу, а на все 24 разом).
+    _selected = new Set(
+      _allNodes.filter((n) => String(n.group_id ?? "") === _groupFilter).map((n) => n.id)
+    );
   }
+  renderNodeList();
 });
 
 async function refreshNodes() {

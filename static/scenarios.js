@@ -39,13 +39,14 @@ async function refreshGroups() {
 
 document.getElementById("group-select").addEventListener("change", (e) => {
   _groupFilter = e.target.value;
-  renderNodeList();
   if (_groupFilter) {
-    _allNodes
-      .filter((n) => String(n.group_id ?? "") === _groupFilter)
-      .forEach((n) => _selected.add(n.id));
-    renderNodeList();
+    // Выбор группы заменяет отметку — только узлы этой группы, а не
+    // добавляет к уже стоящей (см. тот же фикс в rubka.js).
+    _selected = new Set(
+      _allNodes.filter((n) => String(n.group_id ?? "") === _groupFilter).map((n) => n.id)
+    );
   }
+  renderNodeList();
 });
 
 async function refreshNodes() {
