@@ -5,7 +5,7 @@ const SEV_ICON = { 0: "🔴", 1: "🔴", 2: "🔴", 3: "🟠", 4: "🟡", 5: "�
 async function loadNodeFilter() {
   const select = document.getElementById("syslog-node-filter");
   try {
-    const nodes = await api("/api/nodes");
+    const nodes = sortNodesNatural(await api("/api/nodes"));
     const prev = select.value;
     select.innerHTML = `<option value="">все узлы</option>` + nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("");
     select.value = prev;

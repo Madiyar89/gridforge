@@ -10,27 +10,7 @@ let _pollTimer = null;
 let _allNodes = [];
 let _groupFilter = "";
 
-// Естественная сортировка: "LAB-2" перед "LAB-10" — обычное
-// лексикографическое сравнение ставит "LAB-10" раньше "LAB-2", здесь
-// строка режется на числовые/нечисловые куски и числа сравниваются как
-// числа, а не как строки посимвольно.
-function naturalCompare(a, b) {
-  const ax = String(a).match(/\d+|\D+/g) || [];
-  const bx = String(b).match(/\d+|\D+/g) || [];
-  const len = Math.max(ax.length, bx.length);
-  for (let i = 0; i < len; i++) {
-    const av = ax[i] ?? "";
-    const bv = bx[i] ?? "";
-    if (av === bv) continue;
-    const an = Number(av);
-    const bn = Number(bv);
-    if (!Number.isNaN(an) && !Number.isNaN(bn) && av !== "" && bv !== "") {
-      if (an !== bn) return an - bn;
-    }
-    return av < bv ? -1 : 1;
-  }
-  return 0;
-}
+// naturalCompare/sortNodesNatural — см. common.js, общие для всех страниц.
 
 async function refreshGroups() {
   const select = document.getElementById("group-select");
@@ -70,7 +50,7 @@ async function refreshNodes() {
     body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
     return;
   }
-  _allNodes.sort((a, b) => naturalCompare(a.name, b.name));
+  _allNodes = sortNodesNatural(_allNodes);
   renderNodeList();
 }
 

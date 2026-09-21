@@ -14,7 +14,7 @@ async function refreshNodeList() {
   const select = document.getElementById("node-select");
   let nodes;
   try {
-    nodes = await api("/api/nodes");
+    nodes = sortNodesNatural(await api("/api/nodes"));
   } catch (e) {
     return;
   }

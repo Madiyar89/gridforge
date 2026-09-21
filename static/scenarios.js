@@ -10,23 +10,63 @@ let _selected = new Set();
 let _scenarios = [];
 let _activeScenario = null;
 let _pollTimer = null;
+let _allNodes = [];
+let _groupFilter = "";
 
 const CATEGORY_LABELS = {
   config: "Конфигурация",
   security: "Безопасность",
 };
 
+// naturalCompare/sortNodesNatural — см. common.js, общие для всех страниц.
+
+async function refreshGroups() {
+  const select = document.getElementById("group-select");
+  let groups;
+  try {
+    groups = await api("/api/groups");
+  } catch (e) {
+    return;
+  }
+  const current = select.value;
+  select.innerHTML =
+    `<option value="">Все группы</option>` +
+    groups
+      .map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (${g.node_count})</option>`)
+      .join("");
+  select.value = current;
+}
+
+document.getElementById("group-select").addEventListener("change", (e) => {
+  _groupFilter = e.target.value;
+  renderNodeList();
+  if (_groupFilter) {
+    _allNodes
+      .filter((n) => String(n.group_id ?? "") === _groupFilter)
+      .forEach((n) => _selected.add(n.id));
+    renderNodeList();
+  }
+});
+
 async function refreshNodes() {
   const body = document.getElementById("nodes-body");
-  let nodes;
   try {
-    nodes = await api("/api/nodes");
+    _allNodes = sortNodesNatural(await api("/api/nodes"));
   } catch (e) {
     body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
     return;
   }
+  renderNodeList();
+}
+
+function renderNodeList() {
+  const body = document.getElementById("nodes-body");
+  const nodes = _groupFilter
+    ? _allNodes.filter((n) => String(n.group_id ?? "") === _groupFilter)
+    : _allNodes;
   if (nodes.length === 0) {
-    body.innerHTML = `<div class="empty">Узлов нет — заведи их в Инвентаре</div>`;
+    body.innerHTML = `<div class="empty">${_allNodes.length === 0 ? "Узлов нет — заведи их в Инвентаре" : "В этой группе узлов нет"}</div>`;
+    updatePickedCount();
     return;
   }
   body.innerHTML = nodes
@@ -252,10 +292,12 @@ async function refreshHistory() {
 
 function onKeySaved() {
   refreshNodes();
+  refreshGroups();
   refreshScenarios();
   refreshHistory();
 }
 
 refreshNodes();
+refreshGroups();
 refreshScenarios();
 refreshHistory();

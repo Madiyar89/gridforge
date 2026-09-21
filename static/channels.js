@@ -6,7 +6,7 @@ async function refreshNodeOptions() {
   const select = document.getElementById("new-channel-node");
   let nodes;
   try {
-    nodes = await api("/api/nodes");
+    nodes = sortNodesNatural(await api("/api/nodes"));
   } catch (e) {
     return;
   }

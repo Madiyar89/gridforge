@@ -48,7 +48,7 @@ async function refreshNodes() {
   const body = document.getElementById("nodes-body");
   let nodes;
   try {
-    nodes = await api("/api/nodes");
+    nodes = sortNodesNatural(await api("/api/nodes"));
   } catch (e) {
     body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
     return;

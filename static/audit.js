@@ -70,7 +70,7 @@ document.getElementById("add-rule").addEventListener("click", async () => {
 async function loadNodePicker() {
   const select = document.getElementById("audit-node-select");
   try {
-    const nodes = await api("/api/nodes");
+    const nodes = sortNodesNatural(await api("/api/nodes"));
     select.innerHTML = `<option value="">выбери узел…</option>` + nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("");
   } catch (e) {
     select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;

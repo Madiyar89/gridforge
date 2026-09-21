@@ -79,7 +79,7 @@ async function openApplyModal(tplId, tplName) {
   const select = document.getElementById("apply-node");
   select.innerHTML = `<option>загрузка…</option>`;
   try {
-    const nodes = await api("/api/nodes");
+    const nodes = sortNodesNatural(await api("/api/nodes"));
     select.innerHTML = nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)} (${escapeHtml(n.address)})</option>`).join("");
   } catch (e) {
     select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
