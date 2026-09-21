@@ -20,6 +20,15 @@ PRIVILEGED_GROUP_NAMES = ("Domain Admins", "Enterprise Admins")
 
 _WINDOWS_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
 
+# Не в каждой схеме AD есть эти атрибуты — LAPS (ms-Mcs-AdmPwd) и
+# msDS-SupportedEncryptionTypes требуют отдельного расширения схемы,
+# которое не всегда установлено. Запрос неизвестного атрибута ldap3
+# не игнорирует молча, а роняет весь search LDAPAttributeError'ом —
+# поэтому при такой ошибке _entries() повторяет запрос без
+# необязательных атрибутов (их отсутствие само по себе валидный факт,
+# например для AN3 — LAPS не развёрнут).
+_OPTIONAL_SCHEMA_ATTRS = {"ms-Mcs-AdmPwd", "msDS-SupportedEncryptionTypes", "ms-DS-MachineAccountQuota"}
+
 
 def filetime_to_datetime(value) -> datetime | None:
     """Windows FILETIME (100-нс интервалы с 1601-01-01) -> datetime.
@@ -48,7 +57,13 @@ def _connect(dc_host: str, port: int, use_ssl: bool, user: str, password: str) -
 
 
 def _entries(conn: ldap3.Connection, base_dn: str, filt: str, attrs: list[str], scope=ldap3.SUBTREE) -> list:
-    conn.search(base_dn, filt, search_scope=scope, attributes=attrs)
+    try:
+        conn.search(base_dn, filt, search_scope=scope, attributes=attrs)
+    except ldap3.core.exceptions.LDAPException:
+        safe_attrs = [a for a in attrs if a not in _OPTIONAL_SCHEMA_ATTRS]
+        if safe_attrs == attrs:
+            raise
+        conn.search(base_dn, filt, search_scope=scope, attributes=safe_attrs)
     return list(conn.entries)
 
 
