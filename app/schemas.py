@@ -116,7 +116,14 @@ class ScenarioRunIn(BaseModel):
     password: str | None = None
     key_path: str | None = None
     port: int = 22
-    timeout_seconds: float = 20.0
+    # Многострочные конфигурирующие команды (configure/set.../commit,
+    # write memory) идут через интерактивную PTY-сессию (см.
+    # ssh_client.run_ssh_config_lines) - реально дольше, чем один exec с
+    # "show ..." (реальный случай: write memory на боевом железе +
+    # построчные паузы вместе перевалили за старые 20с, хотя сама
+    # конфигурация успешно применилась - результат ошибочно помечался
+    # ok=false/timeout).
+    timeout_seconds: float = 40.0
 
 
 
@@ -201,7 +208,7 @@ class PortApplyIn(BaseModel):
     password: str | None = None
     key_path: str | None = None
     port: int = 22
-    timeout_seconds: float = 20.0
+    timeout_seconds: float = 40.0  # интерактивная сессия, см. комментарий у ScenarioRunIn
 
 
 class PortBounceIn(BaseModel):
@@ -211,7 +218,7 @@ class PortBounceIn(BaseModel):
     password: str | None = None
     key_path: str | None = None
     port: int = 22
-    timeout_seconds: float = 20.0
+    timeout_seconds: float = 40.0
     delay_seconds: float = 5.0
 
 
@@ -229,7 +236,7 @@ class StpProtectionApplyIn(BaseModel):
     password: str | None = None
     key_path: str | None = None
     port: int = 22
-    timeout_seconds: float = 20.0
+    timeout_seconds: float = 40.0
 
 
 class CaptureIn(BaseModel):
