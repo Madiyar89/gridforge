@@ -28,27 +28,30 @@ function riskRadarSvg(categories) {
   const n = categories.length;
   if (n < 3) return ""; // радар нечитаем меньше чем на 3 осях
   const cx = 200, cy = 165, R = 90;
-  let rings = "", axes = "", labels = "", pts = [];
-  [0.25, 0.5, 0.75, 1].forEach((frac) => {
-    const ringPts = [];
-    for (let i = 0; i < n; i++) {
-      const a = -Math.PI / 2 + i * ((2 * Math.PI) / n);
-      ringPts.push(`${cx + R * frac * Math.cos(a)},${cy + R * frac * Math.sin(a)}`);
-    }
-    rings += `<polygon points="${ringPts.join(" ")}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
-  });
+  // Без "рамки" сетки (полноценных колец-диамантов) — при низких баллах
+  // почти по всем осям (частый случай) толстая внешняя рамка визуально
+  // забивала едва заметный многоугольник данных, отчёт читался как
+  // "пустая рамка", а не как диаграмма. Вместо колец — только тонкие
+  // спицы-оси и подписанные баллом точки на каждой вершине, так число
+  // видно даже когда сама фигура почти не видна у центра.
+  let axes = "", labels = "", dots = "", pts = [];
   categories.forEach((c, i) => {
     const a = -Math.PI / 2 + i * ((2 * Math.PI) / n);
     const x2 = cx + R * Math.cos(a), y2 = cy + R * Math.sin(a);
-    axes += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="var(--border)" stroke-width="1"/>`;
+    axes += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="var(--border)" stroke-width="1" stroke-dasharray="2 3"/>`;
     const lx = cx + (R + 40) * Math.cos(a), ly = cy + (R + 40) * Math.sin(a);
     const anchor = Math.abs(Math.cos(a)) < 0.2 ? "middle" : Math.cos(a) > 0 ? "start" : "end";
     labels += `<text x="${lx}" y="${ly}" class="risk-radar-label" text-anchor="${anchor}" dominant-baseline="middle">${escapeHtml(c.name.split(" ")[0])}</text>`;
     const ratio = c.score / 100;
-    pts.push(`${cx + R * ratio * Math.cos(a)},${cy + R * ratio * Math.sin(a)}`);
+    const px = cx + R * ratio * Math.cos(a), py = cy + R * ratio * Math.sin(a);
+    pts.push(`${px},${py}`);
+    const bandColor = `var(--${riskBandKey(riskBandOf(c.score)) === "low" ? "ok" : riskBandKey(riskBandOf(c.score)) === "medium" ? "warn" : "crit"})`;
+    dots += `<circle cx="${px}" cy="${py}" r="4" fill="${bandColor}"/>`;
+    const sx = cx + (R * ratio + 16) * Math.cos(a), sy = cy + (R * ratio + 16) * Math.sin(a);
+    dots += `<text x="${sx}" y="${sy}" class="risk-radar-score" text-anchor="${anchor}" dominant-baseline="middle" fill="${bandColor}">${c.score}</text>`;
   });
-  const poly = `<polygon points="${pts.join(" ")}" fill="var(--accent)" fill-opacity="0.18" stroke="var(--accent)" stroke-width="2"/>`;
-  return `<svg class="risk-radar" viewBox="0 0 400 340">${rings}${axes}${poly}${labels}</svg>`;
+  const poly = `<polygon points="${pts.join(" ")}" fill="var(--accent)" fill-opacity="0.22" stroke="var(--accent)" stroke-width="2.5"/>`;
+  return `<svg class="risk-radar" viewBox="0 0 400 340">${axes}${poly}${dots}${labels}</svg>`;
 }
 
 // idPrefix — общая часть id элементов на странице ("ad" / "net"), ожидает
