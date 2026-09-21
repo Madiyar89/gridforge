@@ -97,21 +97,26 @@ class Credential(Base):
     По прямому запросу пользователя (2026-09-21): раньше учётку спрашивал
     prompt() перед КАЖДЫМ действием на узле (бэкап/консоль/Рубка/
     Сценарии/порты) — неудобно на парке в десятки коммутаторов с общей
-    учёткой. group_id=None и node_id=None — учётка по умолчанию,
-    group_id=<N> — своя для группы, node_id=<M> — своя для конкретного
-    узла (2026-09-21, тот же день: "у меня зоопарк" — парк смешанного
-    оборудования, где у части коммутаторов логин/пароль не совпадает
-    даже внутри одной группы). Порядок поиска в
-    credentials_engine.resolve_credential: node -> group -> по умолчанию.
-    Явно переданная учётка в самом запросе (username в теле, как раньше)
-    всё ещё имеет приоритет — центральная учётка это откат для запросов
-    БЕЗ явной учётки, не единственный путь."""
+    учёткой. group_id=None и node_id=None и vendor=None — учётка по
+    умолчанию, group_id=<N> — своя для группы, node_id=<M> — своя для
+    конкретного узла (2026-09-21, тот же день: "у меня зоопарк" — парк
+    смешанного оборудования). vendor=<V> — своя для вендора (2026-09-21,
+    тот же день: группы здесь смешанные — в "Группа-А"/"Группа-Б · Интернет" есть и
+    cisco_ios, и junos одновременно, так что логин реально зависит от
+    вендора устройства, а не от того, в какую сетевую группу оно попало
+    — "метка cisco или juniper... применяется на том оборудовании, где
+    указана"). Порядок поиска в credentials_engine.resolve_credential:
+    node -> group -> vendor -> по умолчанию. Явно переданная учётка в
+    самом запросе (username в теле, как раньше) всё ещё имеет приоритет
+    — центральная учётка это откат для запросов БЕЗ явной учётки, не
+    единственный путь."""
 
     __tablename__ = "credentials"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
     node_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id"), nullable=True)
+    vendor: Mapped[Vendor | None] = mapped_column(Enum(Vendor), nullable=True)
     label: Mapped[str] = mapped_column(String(128), default="")
     username: Mapped[str] = mapped_column(String(128), nullable=False)
     # Ровно одно из password/key_path обычно задано — как и везде в

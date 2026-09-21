@@ -277,18 +277,22 @@ def delete_group(group_id: int, db: Session = Depends(_db)):
 @api_write.post("/api/credentials", status_code=201)
 def upsert_credential(payload: CredentialIn, db: Session = Depends(_db)):
     """Заводит или заменяет центральную учётку — на конкретный узел
-    (node_id), на группу (group_id) или по умолчанию (оба None). Ровно
-    одна учётка на каждую область — новый POST с тем же node_id/group_id
-    заменяет старую, а не плодит дубликаты (иначе resolve_credential
-    получал бы неоднозначный выбор между несколькими записями)."""
-    if payload.node_id is not None and payload.group_id is not None:
-        raise HTTPException(status_code=422, detail="Укажи либо node_id, либо group_id, не оба сразу")
+    (node_id), на группу (group_id), на вендор (vendor) или по умолчанию
+    (все три None). Ровно одна учётка на каждую область — новый POST с
+    теми же node_id/group_id/vendor заменяет старую, а не плодит
+    дубликаты (иначе resolve_credential получал бы неоднозначный выбор
+    между несколькими записями)."""
+    scopes_set = sum(x is not None for x in (payload.node_id, payload.group_id, payload.vendor))
+    if scopes_set > 1:
+        raise HTTPException(status_code=422, detail="Укажи только одно из node_id/group_id/vendor")
     if payload.node_id is not None and db.get(Node, payload.node_id) is None:
         raise HTTPException(status_code=404, detail="Узел не найден")
     if payload.group_id is not None and db.get(Group, payload.group_id) is None:
         raise HTTPException(status_code=404, detail="Группа не найдена")
     existing = db.query(Credential).filter(
-        Credential.node_id == payload.node_id, Credential.group_id == payload.group_id
+        Credential.node_id == payload.node_id,
+        Credential.group_id == payload.group_id,
+        Credential.vendor == payload.vendor,
     ).first()
     if existing is not None:
         db.delete(existing)
@@ -296,6 +300,7 @@ def upsert_credential(payload: CredentialIn, db: Session = Depends(_db)):
     cred = Credential(
         group_id=payload.group_id,
         node_id=payload.node_id,
+        vendor=payload.vendor,
         label=payload.label,
         username=payload.username,
         password=encrypt_password(payload.password),

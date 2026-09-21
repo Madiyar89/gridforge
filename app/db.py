@@ -73,6 +73,7 @@ def _migrate_missing_columns() -> None:
         ],
         "credentials": [
             ("node_id", "INTEGER"),
+            ("vendor", "VARCHAR(32)"),
         ],
     }
     inspector = inspect(engine)
