@@ -52,6 +52,8 @@ async function loadPorts() {
   _lastPortsData = data;
   document.getElementById("stp-body").hidden = true;
   document.getElementById("stp-toggle").textContent = "Открыть форму";
+  document.getElementById("port-detail-body").innerHTML =
+    `<span style="color:var(--text-dim)">Выбери порт на схеме</span>`;
 
   const age = document.getElementById("snapshot-age");
   if (!data.taken_at) {
@@ -110,8 +112,7 @@ async function loadPorts() {
       <span><i style="background:var(--surface-2);border-color:var(--info)"></i>уголок — trunk</span>
       <span>🔒 Port Security</span>
       <span><i style="background:var(--surface-2);border-color:var(--warn);border-style:dashed"></i>остались настройки защиты</span>
-    </div>
-    <div class="port-detail" id="port-detail"><span style="color:var(--text-dim)">Выбери порт на схеме</span></div>`;
+    </div>`;
 
   const byName = {};
   data.groups.forEach((g) => g.ports.forEach((p) => (byName[p.name] = p)));
@@ -143,7 +144,7 @@ let _detailPort = null;
 function showPortDetail(port) {
   if (!port) return;
   _detailPort = port;
-  document.getElementById("port-detail").innerHTML = `
+  document.getElementById("port-detail-body").innerHTML = `
     <b>${escapeHtml(port.name)}</b>
     <dl>
       <dt>Состояние</dt><dd>${escapeHtml(STATE_LABEL[port.state] || port.state)}</dd>

@@ -38,10 +38,15 @@
   .port-legend i{display:inline-block;width:11px;height:11px;border-radius:3px;
     border:1px solid var(--border);vertical-align:-1px;margin-right:4px;}
   .port-row-label{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin:12px 0 5px;}
-  .port-detail{margin-top:14px;font-size:13px;}
+  .port-detail{font-size:13px;}
   .port-detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:6px 0 0;}
   .port-detail dt{color:var(--text-dim);}
   .stale{color:var(--warn);}
+  /* Панель с деталями порта не должна делить лимит высоты и прокрутку
+     со схемой (Схема — большая сетка, у неё своя прокрутка) — иначе на
+     коммутаторе с 48+ портами форма редактирования оказывалась обрезана
+     снизу общим max-height панели "Схема". */
+  #port-detail-body{max-height:none;overflow:visible;}
 </style>
 </head>
 <body>
@@ -75,6 +80,11 @@
 <div class="panel">
   <h2>Схема <span class="count" id="ports-summary"></span></h2>
   <div class="body" id="ports-body"><div class="empty">Выбери узел</div></div>
+</div>
+
+<div class="panel">
+  <h2>Порт</h2>
+  <div class="body port-detail" id="port-detail-body"><span style="color:var(--text-dim)">Выбери порт на схеме</span></div>
 </div>
 
 <div class="panel">
