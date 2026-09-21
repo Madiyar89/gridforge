@@ -90,6 +90,7 @@ from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
 from app.port_security import parse_port_protection, parse_stp_global, protection_summary
 from app.port_commands import PortCommandError, apply_port, bounce_port
+from app.stp_protection import StpProtectionError, apply_stp_protection
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
@@ -119,6 +120,7 @@ from app.schemas import (
     ScanIn,
     ScenarioIn,
     ScenarioRunIn,
+    StpProtectionApplyIn,
     SweepIn,
     TemplateApplyIn,
     TemplateIn,
@@ -1135,6 +1137,38 @@ async def bounce_port_endpoint(
         timeout_seconds=payload.timeout_seconds,
         delay_seconds=payload.delay_seconds,
     )
+
+
+@api_operate.post("/api/nodes/{node_id}/stp-protection/apply")
+async def apply_stp_protection_endpoint(
+    node_id: int,
+    payload: StpProtectionApplyIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """Root bridge + BPDU Guard (access) + Loop Guard (trunk) сразу на
+    группе портов — перенесено из stp_protection_cisco.yml/
+    stp_protection_juniper.yml NetOpsHub. access_ports/trunk_ports обычно
+    берутся из последнего снимка портов (GET /api/nodes/{id}/ports,
+    is_trunk на каждом порту), клиент может их поправить перед отправкой."""
+    node = require_node_access(db, key, node_id)
+    try:
+        return await apply_stp_protection(
+            node,
+            access_ports=payload.access_ports,
+            trunk_ports=payload.trunk_ports,
+            set_root_bridge=payload.set_root_bridge,
+            root_bridge_vlans=payload.root_bridge_vlans,
+            bpdu_guard=payload.bpdu_guard,
+            loop_guard=payload.loop_guard,
+            username=payload.username,
+            password=payload.password,
+            key_path=payload.key_path,
+            conn_port=payload.port,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    except StpProtectionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @api_read.get("/api/nodes/{node_id}/protection")

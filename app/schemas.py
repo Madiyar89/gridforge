@@ -197,6 +197,23 @@ class PortBounceIn(BaseModel):
     delay_seconds: float = 5.0
 
 
+class StpProtectionApplyIn(BaseModel):
+    """Root bridge + BPDU Guard (access) + Loop Guard (trunk) сразу на
+    группе портов узла — см. проверки в stp_protection.build_stp_lines."""
+
+    access_ports: list[str] = []
+    trunk_ports: list[str] = []
+    set_root_bridge: bool = False
+    root_bridge_vlans: list[str] = []
+    bpdu_guard: bool = True
+    loop_guard: bool = True
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+    port: int = 22
+    timeout_seconds: float = 20.0
+
+
 class CaptureIn(BaseModel):
     interface: str
     bpf_filter: str | None = None

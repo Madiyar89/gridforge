@@ -1,6 +1,8 @@
 // Схема портов коммутатора по последнему снимку.
 
 let _protection = { ports: {}, summary: null };
+let _lastPortsData = null;
+let _nodesById = {};
 
 const STATE_LABEL = {
   up: "линк есть",
@@ -18,6 +20,7 @@ async function refreshNodeList() {
   } catch (e) {
     return;
   }
+  _nodesById = Object.fromEntries(nodes.map((n) => [String(n.id), n]));
   const previous = select.value;
   select.innerHTML = nodes
     .map((n) => `<option value="${n.id}">${escapeHtml(n.name)} — ${escapeHtml(n.address)}</option>`)
@@ -46,6 +49,9 @@ async function loadPorts() {
     return;
   }
   _protection = protection;
+  _lastPortsData = data;
+  document.getElementById("stp-body").hidden = true;
+  document.getElementById("stp-toggle").textContent = "Открыть форму";
 
   const age = document.getElementById("snapshot-age");
   if (!data.taken_at) {
@@ -373,6 +379,114 @@ document.getElementById("refresh-ports").addEventListener("click", async () => {
     btn.textContent = "Снять состояние";
   }
 });
+
+document.getElementById("stp-toggle").addEventListener("click", () => {
+  const body = document.getElementById("stp-body");
+  const btn = document.getElementById("stp-toggle");
+  body.hidden = !body.hidden;
+  btn.textContent = body.hidden ? "Открыть форму" : "Скрыть форму";
+  if (!body.hidden) renderStpForm();
+});
+
+function renderStpForm() {
+  const body = document.getElementById("stp-body");
+  if (!_lastPortsData || !_lastPortsData.groups) {
+    body.innerHTML = `<div class="empty">Сначала сними состояние портов — список access/trunk берётся оттуда</div>`;
+    return;
+  }
+  const nodeId = document.getElementById("node-select").value;
+  const vendor = (_nodesById[nodeId] || {}).vendor;
+  const isJunos = vendor === "junos";
+
+  const allPorts = _lastPortsData.groups.flatMap((g) => g.ports);
+  const accessDefault = allPorts.filter((p) => !p.is_trunk).map((p) => p.name);
+  const trunkDefault = allPorts.filter((p) => p.is_trunk).map((p) => p.name);
+
+  body.innerHTML = `
+    <p style="color:var(--text-dim);font-size:12px;margin:0 0 10px;">
+      Список access/trunk портов предзаполнен по последнему снимку — поправь при необходимости
+      (через запятую). Root bridge выставляется только когда явно включён — не запускай на этажных
+      access-свитчах, только на ядре/распределении.
+    </p>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="stp-root-bridge">
+        Сделать этот коммутатор root bridge
+      </label>
+    </div>
+    ${
+      isJunos
+        ? `<p style="color:var(--text-dim);font-size:11px;margin:4px 0 0;">Junos: один общий spanning-tree instance на всё устройство — список VLAN не нужен.</p>`
+        : `<div class="form-row" style="margin-top:6px;">
+             <input id="stp-vlans" placeholder="VLAN для root primary, через запятую (напр. 10, 527)">
+           </div>`
+    }
+    <div class="form-row" style="margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="stp-bpdu-guard" checked>
+        BPDU Guard на access-портах
+      </label>
+    </div>
+    <textarea id="stp-access-ports" rows="2" style="width:100%;margin-top:4px;">${accessDefault.join(", ")}</textarea>
+    <div class="form-row" style="margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:6px;${isJunos ? "opacity:.5;" : ""}">
+        <input type="checkbox" id="stp-loop-guard" ${isJunos ? "disabled" : "checked"}>
+        Loop Guard на trunk-портах${isJunos ? " (не реализовано для Junos)" : ""}
+      </label>
+    </div>
+    <textarea id="stp-trunk-ports" rows="2" style="width:100%;margin-top:4px;" ${isJunos ? "disabled" : ""}>${trunkDefault.join(", ")}</textarea>
+
+    <button id="stp-apply" style="margin-top:12px;">Применить STP-защиту</button>
+    <div id="stp-result" style="margin-top:8px;font-size:12px;"></div>`;
+
+  document.getElementById("stp-apply").addEventListener("click", applyStpProtection);
+}
+
+function splitPortList(value) {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+async function applyStpProtection() {
+  const setRootBridge = document.getElementById("stp-root-bridge").checked;
+  const vlansInput = document.getElementById("stp-vlans");
+  const rootBridgeVlans = vlansInput ? splitPortList(vlansInput.value) : [];
+  const bpduGuard = document.getElementById("stp-bpdu-guard").checked;
+  const loopGuard = document.getElementById("stp-loop-guard").checked;
+  const accessPorts = splitPortList(document.getElementById("stp-access-ports").value);
+  const trunkPorts = splitPortList(document.getElementById("stp-trunk-ports").value);
+
+  const creds = askPortCredentials();
+  if (!creds) return;
+
+  const resultEl = document.getElementById("stp-result");
+  const btn = document.getElementById("stp-apply");
+  btn.disabled = true;
+  btn.textContent = "Применяю…";
+  try {
+    const result = await api(`/api/nodes/${creds.nodeId}/stp-protection/apply`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_ports: accessPorts,
+        trunk_ports: trunkPorts,
+        set_root_bridge: setRootBridge,
+        root_bridge_vlans: rootBridgeVlans,
+        bpdu_guard: bpduGuard,
+        loop_guard: loopGuard,
+        ...creds.auth,
+      }),
+    });
+    renderApplyResult(resultEl, result);
+    if (result.ok) loadPorts();
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Применить STP-защиту";
+  }
+}
 
 function onKeySaved() {
   refreshNodeList();
