@@ -46,7 +46,13 @@ SEED_SCENARIOS: list[dict] = [
             "cisco_ios": (
                 "configure terminal\n"
                 "logging host {syslog_host}\n"
-                "logging trap notice\n"
+                # "notice" — реальная ошибка ("% Invalid input detected"),
+                # найдена вживую на LAB-1 (2026-09-21): Cisco IOS требует
+                # полное имя ключевого слова severity — "notifications", не
+                # сокращение "notice" (тот же уровень 5, просто другое
+                # написание). Скопировано было из hub/ansible/playbooks/
+                # enable_syslog_cisco.yml NetOpsHub без проверки вживую.
+                "logging trap notifications\n"
                 "end\n"
                 "write memory"
             ),
