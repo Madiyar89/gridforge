@@ -34,6 +34,7 @@ from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
 from app.network_audit_engine import build_network_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
+from app.config_search import search_configs
 from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
@@ -1081,6 +1082,19 @@ def get_network_audit_report(db: Session = Depends(_db)):
     сетевого I/O — работает по уже снятым Backup.content), в отличие от
     AD-аудита не нужен await."""
     return build_network_audit_fleet_report(db)
+
+
+@api_read.get("/api/reports/search")
+def get_config_search(q: str, db: Session = Depends(_db)):
+    """Grep по самому свежему бэкапу каждого узла разом (перенесено из
+    NetOpsHub, см. app/config_search.py)."""
+    q = q.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Пустой запрос")
+    matches = search_configs(db, q)
+    for m in matches:
+        m["backup_taken_at"] = iso(m["backup_taken_at"])
+    return {"matches": matches}
 
 
 @api_write.post("/api/retention/run")

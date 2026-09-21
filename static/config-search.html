@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — поиск по конфигу</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Поиск по конфигурациям</h1>
+  <p>Ищет только в самом свежем бэкапе каждого узла (не по всей истории) — по всем узлам сразу.</p>
+</div>
+
+<div class="panel">
+  <div class="form-row" style="border-top:none">
+    <input id="cs-query" placeholder="например: VLAN 20 или 192.0.2.140">
+    <button id="cs-search">Найти</button>
+  </div>
+  <div class="body" id="cs-body"><div class="empty">Введи запрос и нажми «Найти»</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="config-search.js"></script>
+</body>
+</html>
