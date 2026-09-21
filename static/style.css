@@ -289,6 +289,22 @@ a{color:var(--accent);}
    заголовок реально прилипал к верху при прокрутке страницы. */
 #legacy-panel{overflow:visible;}
 #legacy-panel > h2{position:sticky;top:0;z-index:5;background:var(--surface);border-radius:10px 10px 0 0;}
+
+/* Отчёты риск-скора (AD/сеть) — без внутреннего скролла 560px: список
+   доменов/устройств и drill-down могут быть длиннее одного экрана,
+   должны разворачиваться на всю страницу (обычная прокрутка страницы),
+   а не жить в узком окошке внутри панели, по прямому запросу
+   пользователя. risk-sticky-head при этом продолжает липнуть уже к
+   прокрутке страницы, а не к этому .body (см. risk-sticky-head выше). */
+#ad-report-fleet-body,#ad-report-domain-body,#net-report-fleet-body,#net-report-domain-body{
+  max-height:none;overflow-y:visible;
+}
+/* Тот же overflow:hidden-у-предка ломает sticky (см. #legacy-panel выше) —
+   risk-sticky-head внутри report-domain-body должен липнуть к прокрутке
+   страницы, а не к границам своей .panel. */
+#ad-report-fleet,#ad-report-domain,#net-report-fleet,#net-report-domain{
+  overflow:visible;
+}
 .risk-dev-title-row{
   padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;
   align-items:center;gap:10px;flex-wrap:wrap;
