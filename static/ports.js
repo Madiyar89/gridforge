@@ -161,6 +161,21 @@ function showPortDetail(port) {
       </div>
       <button id="edit-apply" style="margin-top:8px;">Применить</button>
       <div id="edit-result" style="margin-top:8px;font-size:12px;"></div>
+
+      <h3 style="margin:16px 0 6px;font-size:13px;">Port Security</h3>
+      <div class="form-row" style="gap:8px;">
+        <button id="ps-on" class="btn-ghost">включить</button>
+        <button id="ps-off" class="btn-ghost">выключить</button>
+        <input id="ps-maximum" placeholder="максимум MAC (по умолчанию 2)" style="max-width:220px;">
+      </div>
+      <span id="ps-state" style="color:var(--text-dim);font-size:12px;">действие не выбрано</span>
+      <button id="ps-apply" style="margin-top:8px;">Применить Port Security</button>
+      <div id="ps-result" style="margin-top:8px;font-size:12px;"></div>
+
+      <h3 style="margin:16px 0 6px;font-size:13px;">Отбить порт</h3>
+      <p style="color:var(--text-dim);font-size:12px;margin:0 0 6px;">shutdown → пауза 5с → no shutdown.</p>
+      <button id="bounce-apply" class="btn-ghost">Отбить порт</button>
+      <div id="bounce-result" style="margin-top:8px;font-size:12px;"></div>
     </div>`;
 
   let pendingState = null;
@@ -175,6 +190,21 @@ function showPortDetail(port) {
   document.getElementById("edit-apply").addEventListener("click", () =>
     applyPortEdit(port, pendingState)
   );
+
+  let pendingPortSecurity = null;
+  document.getElementById("ps-on").addEventListener("click", () => {
+    pendingPortSecurity = "on";
+    document.getElementById("ps-state").textContent = "включить Port Security";
+  });
+  document.getElementById("ps-off").addEventListener("click", () => {
+    pendingPortSecurity = "off";
+    document.getElementById("ps-state").textContent = "выключить Port Security (и убрать настройки)";
+  });
+  document.getElementById("ps-apply").addEventListener("click", () =>
+    applyPortSecurity(port, pendingPortSecurity)
+  );
+
+  document.getElementById("bounce-apply").addEventListener("click", () => bouncePort(port));
 }
 
 async function applyPortEdit(port, state) {
@@ -187,35 +217,104 @@ async function applyPortEdit(port, state) {
     return toast("Нечего применять — ничего не изменилось", true);
   }
 
-  const username = prompt("Логин для подключения к узлу:");
-  if (!username) return;
-  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
+  const creds = askPortCredentials();
+  if (!creds) return;
 
-  const nodeId = document.getElementById("node-select").value;
   const resultEl = document.getElementById("edit-result");
   const btn = document.getElementById("edit-apply");
   btn.disabled = true;
   btn.textContent = "Применяю…";
   try {
     const result = await api(
-      `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
+      `/api/nodes/${creds.nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
       {
         method: "POST",
-        body: JSON.stringify({ description, vlan, state, username, password }),
+        body: JSON.stringify({ description, vlan, state, ...creds.auth }),
       }
     );
-    if (result.ok) {
-      toast("Применено");
-      resultEl.innerHTML = `<span style="color:var(--ok);">применено ✓</span> <code>${result.commands.map(escapeHtml).join(" · ")}</code>`;
-      loadPorts();
-    } else {
-      resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(result.error || "ошибка")}</span>`;
-    }
+    renderApplyResult(resultEl, result);
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Применить";
+  }
+}
+
+async function applyPortSecurity(port, portSecurity) {
+  const maximum = document.getElementById("ps-maximum").value.trim() || null;
+  if (!portSecurity && !maximum) {
+    return toast("Выбери включить/выключить или укажи максимум MAC", true);
+  }
+
+  const creds = askPortCredentials();
+  if (!creds) return;
+
+  const resultEl = document.getElementById("ps-result");
+  const btn = document.getElementById("ps-apply");
+  btn.disabled = true;
+  btn.textContent = "Применяю…";
+  try {
+    const result = await api(
+      `/api/nodes/${creds.nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          port_security: portSecurity,
+          port_security_maximum: maximum,
+          ...creds.auth,
+        }),
+      }
+    );
+    renderApplyResult(resultEl, result);
+    if (result.ok) loadPorts();
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Применить Port Security";
+  }
+}
+
+async function bouncePort(port) {
+  if (!confirm(`Отбить порт ${port.name}: shutdown → пауза 5с → no shutdown. Продолжить?`)) return;
+
+  const creds = askPortCredentials();
+  if (!creds) return;
+
+  const resultEl = document.getElementById("bounce-result");
+  const btn = document.getElementById("bounce-apply");
+  btn.disabled = true;
+  btn.textContent = "Отбиваю…";
+  try {
+    const result = await api(
+      `/api/nodes/${creds.nodeId}/ports/${encodeURIComponent(port.name)}/bounce`,
+      { method: "POST", body: JSON.stringify(creds.auth) }
+    );
+    renderApplyResult(resultEl, result);
+    if (result.ok) loadPorts();
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Отбить порт";
+  }
+}
+
+function askPortCredentials() {
+  const nodeId = document.getElementById("node-select").value;
+  const username = prompt("Логин для подключения к узлу:");
+  if (!username) return null;
+  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
+  return { nodeId, auth: { username, password } };
+}
+
+function renderApplyResult(resultEl, result) {
+  if (result.ok) {
+    toast("Применено");
+    resultEl.innerHTML = `<span style="color:var(--ok);">применено ✓</span> <code>${result.commands.map(escapeHtml).join(" · ")}</code>`;
+  } else {
+    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(result.error || "ошибка")}</span>`;
   }
 }
 

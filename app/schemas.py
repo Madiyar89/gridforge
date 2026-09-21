@@ -169,18 +169,32 @@ class PortRefreshIn(BaseModel):
 
 
 class PortApplyIn(BaseModel):
-    """Изменение одного порта (описание/VLAN/up-down) — хотя бы одно из
-    трёх полей обязательно, см. проверку в port_commands.build_port_lines.
-    Учётка, как и везде, живёт только в пределах запроса."""
+    """Изменение одного порта (описание/VLAN/up-down/Port Security) — хотя
+    бы одно из полей обязательно, см. проверку в
+    port_commands.build_port_lines. Учётка, как и везде, живёт только в
+    пределах запроса."""
 
     description: str | None = None
     vlan: str | None = None
     state: str | None = None  # "up" | "down" | None
+    port_security: str | None = None  # "on" | "off" | None
+    port_security_maximum: int | str | None = None
     username: str
     password: str | None = None
     key_path: str | None = None
     port: int = 22
     timeout_seconds: float = 20.0
+
+
+class PortBounceIn(BaseModel):
+    """Отбить порт: shutdown -> пауза -> no shutdown."""
+
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+    port: int = 22
+    timeout_seconds: float = 20.0
+    delay_seconds: float = 5.0
 
 
 class CaptureIn(BaseModel):
