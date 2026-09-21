@@ -340,6 +340,132 @@ def parse_mac_table(vendor: Vendor | None, output: str) -> list[dict]:
     return parse_cisco_mac_table(output)
 
 
+# === Down/Up Time (флаппинг) — перенесено из NetOpsHub
+# (app/port_overview_parser.py). Cisco: "show interfaces link" даёт
+# фиксированную таблицу Port/Name/Down Time/Up Time на ВСЕ порты разом
+# (в отличие от MAC-таблицы, эту команду нельзя ограничить одним портом),
+# нужная строка выбирается после разбора. Juniper: "show interfaces
+# {port} extensive" — ЭТУ команду, в отличие от NetOpsHub (там без
+# аргумента — сразу все порты), можно ограничить одним портом, так
+# дешевле для живого запроса по кнопке. Состояние линка (Up/Down) и
+# "Last flapped" видны в одном и том же блоке вывода."""
+
+DOWNUP_COMMANDS = {
+    Vendor.cisco_ios: "show interfaces link",
+    Vendor.cisco_ios_telnet: "show interfaces link",
+    Vendor.junos: "show interfaces {port} extensive",
+}
+
+_IFACE_PREFIXES = [
+    ("TenGigabitEthernet", "Te"),
+    ("GigabitEthernet", "Gi"),
+    ("FastEthernet", "Fa"),
+    ("AppGigabitEthernet", "Ap"),
+    ("Port-channel", "Po"),
+    ("Vlan", "Vl"),
+]
+
+
+def normalize_iface(name: str) -> str:
+    """"GigabitEthernet1/0/1" и "Gi1/0/1" -> одинаковый ключ "gi1/0/1"."""
+    name = name.strip()
+    for long, short in _IFACE_PREFIXES:
+        if name.startswith(long):
+            name = short + name[len(long):]
+            break
+    return name.lower()
+
+
+def parse_cisco_link_times(output: str, port_name: str) -> dict | None:
+    """Разбирает `show interfaces link`, возвращает Down/Up Time для
+    ОДНОГО запрошенного порта (или None, если порт не нашёлся в выводе —
+    например, устройство не поддерживает эту команду вообще, реальный
+    случай на старых 2950/2960)."""
+    lines = output.splitlines()
+    header_index = next(
+        (i for i, line in enumerate(lines) if "Port" in line and "Down Time" in line and "Up Time" in line),
+        None,
+    )
+    if header_index is None:
+        return None
+    header = lines[header_index]
+    bounds = _column_bounds(header, ["Port", "Name", "Down Time", "Up Time"])
+    if not bounds:
+        return None
+    target = normalize_iface(port_name)
+    for line in lines[header_index + 1:]:
+        if not line.strip() or set(line.strip()) <= {"-"}:
+            continue
+        port = _slice(line, bounds["Port"])
+        if normalize_iface(port) != target:
+            continue
+        return {"down_time": _slice(line, bounds["Down Time"]), "up_time": _slice(line, bounds["Up Time"])}
+    return None
+
+
+_JUNOS_PHYS_RE = re.compile(r"Physical link is (Up|Down)\b")
+_JUNOS_LAST_FLAPPED_RE = re.compile(r"Last flapped\s*:\s*(.+)")
+_JUNOS_AGO_RE = re.compile(r"\(([^)]*ago)\)")
+
+
+def parse_junos_link_time(output: str) -> dict | None:
+    """Разбирает `show interfaces <port> extensive` — не проверено на
+    живом Juniper (тот же статус, что и остальные Junos-парсеры в этом
+    файле)."""
+    link_match = _JUNOS_PHYS_RE.search(output)
+    if link_match is None:
+        return None
+    is_up = link_match.group(1) == "Up"
+    flap_match = _JUNOS_LAST_FLAPPED_RE.search(output)
+    duration = ""
+    if flap_match:
+        raw = flap_match.group(1).strip()
+        if raw.lower().startswith("never"):
+            duration = "never"
+        else:
+            ago_match = _JUNOS_AGO_RE.search(raw)
+            duration = re.sub(r"\s*ago\s*$", "", ago_match.group(1)).strip() if ago_match else raw
+    return {"down_time": "00:00:00" if is_up else duration, "up_time": duration if is_up else "00:00:00"}
+
+
+async def live_port_downup(
+    node,
+    port_name: str,
+    *,
+    username: str,
+    password: str | None = None,
+    key_path: str | None = None,
+    port: int = 22,
+    timeout_seconds: float = 20.0,
+) -> dict:
+    """Живой запрос Down/Up Time на конкретном порту — тот же принцип, что
+    live_port_mac выше: по кнопке, ничего не сохраняется."""
+    from app.device_client import default_port, run_device_command
+
+    template = DOWNUP_COMMANDS.get(node.vendor or Vendor.cisco_ios, DOWNUP_COMMANDS[Vendor.cisco_ios])
+    command = template.format(port=port_name)
+    result = await run_device_command(
+        vendor=node.vendor,
+        host=node.address,
+        command=command,
+        username=username,
+        password=password,
+        key_path=key_path,
+        port=port if port not in (0, 22) else default_port(node.vendor),
+        timeout_seconds=timeout_seconds,
+    )
+    if not result.ok:
+        return {"ok": False, "error": result.error, "down_time": None, "up_time": None}
+    times = (
+        parse_junos_link_time(result.stdout)
+        if node.vendor is Vendor.junos
+        else parse_cisco_link_times(result.stdout, port_name)
+    )
+    if times is None:
+        return {"ok": False, "error": "команда не поддержана устройством или порт не найден в выводе", "down_time": None, "up_time": None}
+    return {"ok": True, "error": None, "down_time": times["down_time"], "up_time": times["up_time"]}
+
+
 async def live_port_mac(
     node,
     port_name: str,
