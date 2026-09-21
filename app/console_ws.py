@@ -32,6 +32,7 @@ from app.auth import _hash_key  # переиспользуем ровно ту �
 from app.credentials_engine import resolve_credential
 from app.db import get_session
 from app.models import ApiKey, Node
+from app.ssh_client import ENCRYPTION_ALGS, KEX_ALGS
 
 
 async def _authenticate(payload: dict) -> str | None:
@@ -103,6 +104,8 @@ async def handle_console(ws: WebSocket) -> None:
         "username": username,
         "known_hosts": None,
         "connect_timeout": 10,
+        "kex_algs": KEX_ALGS,
+        "encryption_algs": ENCRYPTION_ALGS,
     }
     if key_path:
         connect_kwargs["client_keys"] = [key_path]

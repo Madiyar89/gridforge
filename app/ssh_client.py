@@ -10,6 +10,25 @@ import asyncio
 from dataclasses import dataclass
 
 import asyncssh
+from asyncssh.encryption import get_default_encryption_algs
+from asyncssh.kex import get_default_kex_algs
+
+# Часть парка — старые коммутаторы (реальный случай, LAB-7/LAB-11:
+# "No matching key exchange algorithm found... received
+# diffie-hellman-group1-sha1"), их SSH-стек не предлагает ни один
+# kex/шифр из современного дефолтного списка asyncssh (сознательно не
+# включает устаревшие как небезопасные). Тот же приём, что уже
+# использует NetOpsHub для paramiko (hub/backend/app/live_poll.py) —
+# дописываем legacy-алгоритмы В КОНЕЦ дефолтного списка asyncssh, а не
+# заменяем его: современные устройства как согласовывали свежие
+# алгоритмы, так и продолжат, старые получат шанс на устаревший, раз
+# другого у них нет.
+_LEGACY_KEX = (b"diffie-hellman-group1-sha1", b"diffie-hellman-group-exchange-sha1")
+_LEGACY_CIPHERS = (b"aes128-cbc", b"aes256-cbc", b"3des-cbc")
+KEX_ALGS = list(get_default_kex_algs()) + [a for a in _LEGACY_KEX if a not in get_default_kex_algs()]
+ENCRYPTION_ALGS = list(get_default_encryption_algs()) + [
+    a for a in _LEGACY_CIPHERS if a not in get_default_encryption_algs()
+]
 
 
 @dataclass
@@ -37,6 +56,8 @@ async def run_ssh_command(
         "username": username,
         "known_hosts": known_hosts,  # None => host key не проверяется
         "connect_timeout": timeout_seconds,
+        "kex_algs": KEX_ALGS,
+        "encryption_algs": ENCRYPTION_ALGS,
     }
     if key_path:
         connect_kwargs["client_keys"] = [key_path]
