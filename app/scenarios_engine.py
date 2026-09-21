@@ -12,7 +12,7 @@ import asyncio
 import logging
 
 from app.db import get_session
-from app.device_client import run_device_command
+from app.device_client import run_device_config
 from app.models import ScenarioResult, ScenarioRun, SweepStatus, _now
 
 logger = logging.getLogger("gridforge.scenarios")
@@ -47,10 +47,14 @@ async def _run_one(
     timeout_seconds: float,
 ) -> None:
     async with semaphore:
-        outcome = await run_device_command(
+        # Сценарии всегда меняют конфигурацию (см. scenario_catalog.py) —
+        # многострочный блок нельзя послать одним exec-запросом (реальный
+        # баг на боевых Cisco/Junos, см. ssh_client.run_ssh_config_lines),
+        # поэтому построчно через интерактивную сессию, не run_device_command.
+        outcome = await run_device_config(
             vendor=vendor,
             host=address,
-            command=command,
+            lines=command.split("\n"),
             username=username,
             password=password,
             key_path=key_path,

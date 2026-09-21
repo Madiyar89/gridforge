@@ -18,7 +18,7 @@ Junos: Loop Guard для trunk-портов НЕ реализован — тот
 
 from __future__ import annotations
 
-from app.device_client import run_device_command
+from app.device_client import run_device_config
 from app.models import Node, Vendor
 
 STP_BRIDGE_PRIORITY = 0  # 0 = максимальный приоритет (гарантированный root bridge)
@@ -77,10 +77,13 @@ def build_stp_lines(
     return lines
 
 
-def build_full_command(vendor: Vendor | None, lines: list[str]) -> str:
+def build_full_lines(vendor: Vendor | None, lines: list[str]) -> list[str]:
+    """Полная последовательность строк для интерактивной сессии — см.
+    подробный разбор в port_commands.build_full_lines (тот же реальный
+    баг с однократным exec на боевых Cisco/Junos)."""
     if vendor == Vendor.junos:
-        return "configure\n" + "\n".join(lines) + "\ncommit and-quit"
-    return "configure terminal\n" + "\n".join(lines) + "\nend\nwrite memory"
+        return ["configure", *lines, "commit and-quit"]
+    return ["configure terminal", *lines, "end", "write memory"]
 
 
 async def apply_stp_protection(
@@ -107,11 +110,10 @@ async def apply_stp_protection(
         bpdu_guard=bpdu_guard,
         loop_guard=loop_guard,
     )
-    command = build_full_command(node.vendor, lines)
-    outcome = await run_device_command(
+    outcome = await run_device_config(
         vendor=node.vendor,
         host=node.address,
-        command=command,
+        lines=build_full_lines(node.vendor, lines),
         username=username,
         password=password,
         key_path=key_path,

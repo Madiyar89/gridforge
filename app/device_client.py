@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.models import Vendor
-from app.ssh_client import run_ssh_command
+from app.ssh_client import run_ssh_command, run_ssh_config_lines
 from app.telnet_client import DEFAULT_TELNET_PORT, run_telnet_command
 
 # Вендоры, к которым ходим по Telnet. Узкий список, а не «всё, что не
@@ -68,6 +68,41 @@ async def run_device_command(
         port=port or 22,
         username=username,
         command=command,
+        timeout_seconds=timeout_seconds,
+        key_path=key_path,
+        password=password,
+    )
+    return DeviceResult(result.ok, result.exit_status, result.stdout, result.error, "ssh")
+
+
+async def run_device_config(
+    *,
+    vendor: Vendor | None,
+    host: str,
+    lines: list[str],
+    username: str,
+    password: str | None = None,
+    key_path: str | None = None,
+    port: int | None = None,
+    timeout_seconds: float = 20.0,
+) -> DeviceResult:
+    """Выполняет НЕСКОЛЬКО строк, меняющих конфигурацию (configure
+    terminal/.../end, set .../commit) — отдельно от run_device_command,
+    потому что многострочный блок нельзя послать одним exec-запросом
+    (см. подробный разбор в ssh_client.run_ssh_config_lines). Telnet
+    пока не поддержан (узкий список вендоров без него в этом парке) —
+    если понадобится, добавлять по тому же принципу, не через
+    run_telnet_command с "\\n" внутри одной команды (та же ошибка)."""
+    if uses_telnet(vendor):
+        return DeviceResult(
+            False, None, "", "многострочные команды по Telnet пока не поддержаны", "telnet"
+        )
+
+    result = await run_ssh_config_lines(
+        host=host,
+        port=port or 22,
+        username=username,
+        lines=lines,
         timeout_seconds=timeout_seconds,
         key_path=key_path,
         password=password,

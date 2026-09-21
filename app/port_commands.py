@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.device_client import run_device_command
+from app.device_client import run_device_config
 from app.models import Node, Vendor
 
 TELNET_VENDORS_WITH_CISCO_SYNTAX = {Vendor.cisco_ios_telnet}
@@ -111,10 +111,16 @@ def build_port_lines(
     return lines
 
 
-def build_full_command(vendor: Vendor | None, port: str, lines: list[str]) -> str:
+def build_full_lines(vendor: Vendor | None, port: str, lines: list[str]) -> list[str]:
+    """Полная последовательность строк для интерактивной сессии (см.
+    ssh_client.run_ssh_config_lines) — раньше это был один склеенный
+    '\\n'.join() под conn.run(), что ломалось на реальных устройствах
+    (Cisco: "Line has invalid autocommand", Junos: "syntax error,
+    expecting <command>: set") — оба воспринимали блок текста как одну
+    команду, а не последовательность построчного ввода."""
     if vendor == Vendor.junos:
-        return "configure\n" + "\n".join(lines) + "\ncommit and-quit"
-    return f"configure terminal\ninterface {port}\n" + "\n".join(lines) + "\nend\nwrite memory"
+        return ["configure", *lines, "commit and-quit"]
+    return ["configure terminal", f"interface {port}", *lines, "end", "write memory"]
 
 
 async def apply_port(
@@ -141,11 +147,10 @@ async def apply_port(
         port_security=port_security,
         port_security_maximum=port_security_maximum,
     )
-    command = build_full_command(node.vendor, port, lines)
-    outcome = await run_device_command(
+    outcome = await run_device_config(
         vendor=node.vendor,
         host=node.address,
-        command=command,
+        lines=build_full_lines(node.vendor, port, lines),
         username=username,
         password=password,
         key_path=key_path,
@@ -178,10 +183,10 @@ async def bounce_port(
     down_lines = build_port_lines(node.vendor, port, description=None, vlan=None, state="down")
     up_lines = build_port_lines(node.vendor, port, description=None, vlan=None, state="up")
 
-    down_outcome = await run_device_command(
+    down_outcome = await run_device_config(
         vendor=node.vendor,
         host=node.address,
-        command=build_full_command(node.vendor, port, down_lines),
+        lines=build_full_lines(node.vendor, port, down_lines),
         username=username,
         password=password,
         key_path=key_path,
@@ -193,10 +198,10 @@ async def bounce_port(
 
     await asyncio.sleep(delay_seconds)
 
-    up_outcome = await run_device_command(
+    up_outcome = await run_device_config(
         vendor=node.vendor,
         host=node.address,
-        command=build_full_command(node.vendor, port, up_lines),
+        lines=build_full_lines(node.vendor, port, up_lines),
         username=username,
         password=password,
         key_path=key_path,

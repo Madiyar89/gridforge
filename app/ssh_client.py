@@ -87,3 +87,86 @@ async def run_ssh_command(
     if result.exit_status != 0:
         return SshResult(ok=False, exit_status=result.exit_status, stdout=stdout, error=f"exit={result.exit_status}")
     return SshResult(ok=True, exit_status=result.exit_status, stdout=stdout, error=None)
+
+
+async def run_ssh_config_lines(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    lines: list[str],
+    timeout_seconds: float,
+    key_path: str | None = None,
+    password: str | None = None,
+    known_hosts: str | None = None,
+    line_delay: float = 0.4,
+    settle_seconds: float = 2.0,
+) -> SshResult:
+    """Многострочные конфигурирующие команды (configure terminal/...,
+    set .../commit) нельзя отправить одним conn.run() — реальный баг на
+    боевом сервере (2026-09-21): и Cisco IOS ("Line has invalid
+    autocommand"), и Junos ("syntax error, expecting <command>: set")
+    воспринимают весь текст с переводами строк как ОДНУ команду вместо
+    последовательности. run_ssh_command (один exec-запрос) отлично
+    работает для одиночных read-only команд (show .../ping — Probe,
+    Sweep), но не для этого.
+
+    Вместо exec — интерактивная PTY-сессия, та же техника, что уже
+    работает в SSH-консоли (console_ws.py): построчно пишем в stdin с
+    паузой между строками, как будто человек вставляет текст в
+    терминал, читаем весь вывод целиком."""
+    connect_kwargs: dict = {
+        "host": host,
+        "port": port,
+        "username": username,
+        "known_hosts": known_hosts,
+        "connect_timeout": timeout_seconds,
+        "kex_algs": KEX_ALGS,
+        "encryption_algs": ENCRYPTION_ALGS,
+    }
+    if key_path:
+        connect_kwargs["client_keys"] = [key_path]
+    elif password:
+        connect_kwargs["password"] = password
+        connect_kwargs["client_keys"] = None
+    else:
+        return SshResult(ok=False, exit_status=None, stdout="", error="нужен key_path или password")
+
+    output_chunks: list[str] = []
+
+    async def _run() -> None:
+        async with asyncssh.connect(**connect_kwargs) as conn:
+            async with conn.create_process(term_type="vt100", term_size=(200, 24)) as process:
+                async def _reader() -> None:
+                    try:
+                        while True:
+                            chunk = await process.stdout.read(4096)
+                            if not chunk:
+                                break
+                            output_chunks.append(chunk)
+                    except asyncssh.Error:
+                        pass
+
+                reader_task = asyncio.create_task(_reader())
+                await asyncio.sleep(0.3)  # дать приглашению/баннеру появиться
+                for line in lines:
+                    process.stdin.write(line + "\n")
+                    await asyncio.sleep(line_delay)
+                await asyncio.sleep(settle_seconds)
+                process.stdin.write_eof()
+                try:
+                    await asyncio.wait_for(reader_task, timeout=2)
+                except asyncio.TimeoutError:
+                    reader_task.cancel()
+
+    try:
+        await asyncio.wait_for(_run(), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        return SshResult(ok=False, exit_status=None, stdout="".join(output_chunks).strip(), error="timeout")
+    except (asyncssh.Error, OSError) as exc:
+        return SshResult(
+            ok=False, exit_status=None, stdout="".join(output_chunks).strip(),
+            error=str(exc) or exc.__class__.__name__,
+        )
+
+    return SshResult(ok=True, exit_status=0, stdout="".join(output_chunks).strip(), error=None)
