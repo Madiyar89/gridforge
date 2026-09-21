@@ -1,0 +1,19 @@
+services:
+  gridforge:
+    build: .
+    container_name: gridforge
+    restart: unless-stopped
+    # nmap (scan_engine.py) и dumpcap/tshark (capture_engine.py) нужны сырые
+    # сокеты — без этих capability оба работали бы только как root целиком,
+    # так безопаснее (точечные права, не полный root).
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    ports:
+      - "8100:8100"
+      - "5140:5140/udp"
+    volumes:
+      - gridforge_data:/app/data
+
+volumes:
+  gridforge_data:
