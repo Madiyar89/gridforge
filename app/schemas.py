@@ -83,6 +83,26 @@ class SweepIn(BaseModel):
     timeout_seconds: float = 20.0
 
 
+
+class ScenarioIn(BaseModel):
+    key: str
+    label: str
+    category: str | None = None
+    commands_by_vendor: dict[str, str]
+    params: list[str] = []
+
+
+class ScenarioRunIn(BaseModel):
+    node_ids: list[int]
+    params: dict[str, str] = {}
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+    port: int = 22
+    timeout_seconds: float = 20.0
+
+
+
 class LoginIn(BaseModel):
     username: str
     password: str

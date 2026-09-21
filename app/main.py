@@ -29,6 +29,7 @@ from app.auth import (
     scope_nodes,
 )
 from app.db import get_session, init_db
+from app.scenario_catalog import seed_default_scenarios
 from app.ad_audit_engine import run_ad_audit
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
@@ -75,6 +76,9 @@ from app.models import (
     Sample,
     Scan,
     ScanHost,
+    Scenario,
+    ScenarioResult,
+    ScenarioRun,
     Sweep,
     SweepResult,
     SyslogMessage,
@@ -89,6 +93,7 @@ from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
 from app.sweep_engine import run_sweep, sweep_progress
+from app.scenarios_engine import ScenarioParamError, render_command, run_scenario, scenario_run_progress
 from app.scheduler import Scheduler
 from app.syslog_server import DEFAULT_SYSLOG_PORT, start_syslog_server
 from app.schemas import (
@@ -109,6 +114,8 @@ from app.schemas import (
     ProbeIn,
     ScanHostToNodeIn,
     ScanIn,
+    ScenarioIn,
+    ScenarioRunIn,
     SweepIn,
     TemplateApplyIn,
     TemplateIn,
@@ -138,6 +145,7 @@ def _db() -> Session:
 async def lifespan(_app: FastAPI):
     init_db()
     db = get_session()
+    seed_default_scenarios(db)
     try:
         raw_key = bootstrap_first_key(db)
         created_admin = bootstrap_first_user(db)
@@ -1223,6 +1231,168 @@ def get_sweep(sweep_id: int, db: Session = Depends(_db), key: Principal = Depend
         "started_at": sweep.started_at.isoformat(),
         "started_by": sweep.started_by,
         **sweep_progress(db, sweep),
+        "results": [
+            {
+                "node_id": r.node_id,
+                "node_name": r.node.name,
+                "node_address": r.node.address,
+                "command": r.command,
+                "ok": r.ok,
+                "output": r.output,
+                "error": r.error,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            }
+            for r in sorted(results, key=lambda r: r.node.name)
+        ],
+    }
+
+
+@api_read.get("/api/scenarios")
+def list_scenarios(db: Session = Depends(_db)):
+    scenarios = db.query(Scenario).order_by(Scenario.category, Scenario.label).all()
+    return [
+        {
+            "id": s.id,
+            "key": s.key,
+            "label": s.label,
+            "category": s.category,
+            "vendors": list(s.commands_by_vendor.keys()),
+            "params": s.params,
+        }
+        for s in scenarios
+    ]
+
+
+@api_write.post("/api/scenarios", status_code=201)
+def create_scenario(payload: ScenarioIn, db: Session = Depends(_db)):
+    if db.query(Scenario).filter(Scenario.key == payload.key).first() is not None:
+        raise HTTPException(status_code=409, detail="Сценарий с таким key уже существует")
+    scenario = Scenario(
+        key=payload.key,
+        label=payload.label,
+        category=payload.category,
+        commands_by_vendor=payload.commands_by_vendor,
+        params=payload.params,
+    )
+    db.add(scenario)
+    db.commit()
+    db.refresh(scenario)
+    return {"id": scenario.id, "key": scenario.key}
+
+
+@api_write.delete("/api/scenarios/{scenario_id}", status_code=204)
+def delete_scenario(scenario_id: int, db: Session = Depends(_db)):
+    scenario = db.get(Scenario, scenario_id)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Сценарий не найден")
+    db.delete(scenario)
+    db.commit()
+
+
+@api_operate.post("/api/scenarios/{scenario_id}/run", status_code=201)
+async def run_scenario_endpoint(
+    scenario_id: int,
+    payload: ScenarioRunIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """Запускает меняющий конфигурацию сценарий сразу на наборе узлов —
+    аналог "рубки" NetOpsHub (выбор устройств + плейбук + запуск на всех),
+    но команды свои и без Ansible (см. Scenario в models.py). Права
+    operator, как у Sweep/Backup: команда реально меняет конфигурацию
+    боевого оборудования."""
+    scenario = db.get(Scenario, scenario_id)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Сценарий не найден")
+    if not payload.node_ids:
+        raise HTTPException(status_code=422, detail="Не выбрано ни одного узла")
+
+    nodes = [require_node_access(db, key, node_id) for node_id in payload.node_ids]
+
+    run = ScenarioRun(scenario_id=scenario.id, label=scenario.label, started_by=key.label)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    tasks = []
+    skipped = []
+    for node in nodes:
+        vendor_key = node.vendor.value if node.vendor else None
+        template = scenario.commands_by_vendor.get(vendor_key)
+        if template is None:
+            skipped.append(node.name)
+            continue
+        try:
+            command = render_command(template, payload.params)
+        except ScenarioParamError as exc:
+            db.delete(run)
+            db.commit()
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        result = ScenarioResult(run_id=run.id, node_id=node.id, command=command)
+        db.add(result)
+        db.commit()
+        db.refresh(result)
+        tasks.append({"result_id": result.id, "address": node.address, "command": command, "vendor": node.vendor})
+
+    if not tasks:
+        db.delete(run)
+        db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Ни один из выбранных узлов не подходит под сценарий (нет команды под вендор): {', '.join(skipped)}",
+        )
+
+    asyncio.create_task(
+        run_scenario(
+            run.id,
+            tasks,
+            username=payload.username,
+            password=payload.password,
+            key_path=payload.key_path,
+            port=payload.port,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    )
+    return {"id": run.id, "label": run.label, "nodes": len(tasks), "skipped": skipped}
+
+
+@api_read.get("/api/scenario-runs")
+def list_scenario_runs(limit: int = 20, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    runs = db.query(ScenarioRun).order_by(desc(ScenarioRun.started_at)).limit(min(limit, 100)).all()
+    visible = []
+    for run in runs:
+        if key.group_id is not None and not any(
+            key_sees_group(key, r.node.group_id) for r in run.results
+        ):
+            continue
+        visible.append(
+            {
+                "id": run.id,
+                "label": run.label,
+                "status": run.status.value,
+                "started_at": run.started_at.isoformat(),
+                "started_by": run.started_by,
+                **scenario_run_progress(run),
+            }
+        )
+    return visible
+
+
+@api_read.get("/api/scenario-runs/{run_id}")
+def get_scenario_run(run_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    run = db.get(ScenarioRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Прогон не найден")
+    results = [r for r in run.results if key_sees_group(key, r.node.group_id)]
+    if not results and run.results:
+        raise HTTPException(status_code=404, detail="Прогон не найден")
+    return {
+        "id": run.id,
+        "label": run.label,
+        "status": run.status.value,
+        "started_at": run.started_at.isoformat(),
+        "started_by": run.started_by,
+        **scenario_run_progress(run),
         "results": [
             {
                 "node_id": r.node_id,

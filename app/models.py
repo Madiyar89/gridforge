@@ -354,6 +354,82 @@ class SweepResult(Base):
     node: Mapped["Node"] = relationship()
 
 
+
+class Scenario(Base):
+    """Именованный, заранее определённый сценарий с командами, меняющими
+    конфигурацию устройства — аналог плейбука NetOpsHub (playbook_catalog.py),
+    но без Ansible: та же прямая SSH/Telnet-команда, что уже используют
+    Probe kind=ssh_command, Action и Sweep (см. device_client.py).
+
+    В отличие от Sweep (произвольная читающая команда из белого списка
+    глаголов show/display/ping/traceroute) здесь можно менять конфигурацию
+    устройства — поэтому набор сценариев не свободный пользовательский
+    ввод, а фиксированный каталог: заводит и правит его администратор
+    (POST/DELETE /api/scenarios, права admin), обычные операторы только
+    выбирают узлы и запускают уже готовый сценарий (POST
+    /api/scenarios/{id}/run, права operator — как у Sweep/Backup).
+
+    commands_by_vendor: {"cisco_ios": "configure terminal\n...", "junos": "configure\n..."}
+    — команда за вендор может быть многострочной (одна SSH/Telnet-сессия,
+    строки уходят как единый exec — тот же приём, что у Action.config.command).
+    params — имена плейсхолдеров вида {ntp_server} внутри команд, только
+    для формы в интерфейсе и проверки при запуске — сами значения приходят
+    в каждом запуске отдельно (ScenarioRun их не хранит), не в определении
+    сценария."""
+
+    __tablename__ = "scenarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    commands_by_vendor: Mapped[dict] = mapped_column(JSON, default=dict)
+    params: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    runs: Mapped[list["ScenarioRun"]] = relationship(back_populates="scenario", cascade="all, delete-orphan")
+
+
+class ScenarioRun(Base):
+    """Один запуск сценария на наборе узлов — журнал того, кто и когда
+    менял конфигурацию массово (важно на боевой сети не меньше, чем сам
+    факт изменения)."""
+
+    __tablename__ = "scenario_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("scenarios.id"), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[SweepStatus] = mapped_column(Enum(SweepStatus), default=SweepStatus.running)
+    started_by: Mapped[str] = mapped_column(String(128), default="")
+
+    scenario: Mapped["Scenario"] = relationship(back_populates="runs")
+    results: Mapped[list["ScenarioResult"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class ScenarioResult(Base):
+    """Результат сценария по одному узлу."""
+
+    __tablename__ = "scenario_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("scenario_runs.id"), nullable=False)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), nullable=False)
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    ok: Mapped[bool | None] = mapped_column(nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped["ScenarioRun"] = relationship(back_populates="results")
+    node: Mapped["Node"] = relationship()
+
+
+
 class ChannelKind(str, enum.Enum):
     webhook = "webhook"
     telegram = "telegram"

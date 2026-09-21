@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Сценарии</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .rubka{display:grid;grid-template-columns:minmax(260px,1fr) minmax(320px,1.4fr) minmax(280px,1fr);gap:16px;align-items:start;}
+  .scn-list{display:flex;flex-direction:column;gap:8px;}
+  .scn-cat{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin:10px 0 2px;}
+  .scn-btn{display:flex;flex-direction:column;gap:3px;padding:10px;text-align:left;cursor:pointer;width:100%;
+           background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);}
+  .scn-btn:hover{border-color:var(--accent);}
+  .scn-btn.active{border-color:var(--accent);background:var(--panel-2,var(--bg));}
+  .scn-btn b{font-size:13px;}
+  .scn-btn span{font-size:11px;color:var(--text-dim);}
+  .scn-form{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
+  .scn-form label{font-size:11px;color:var(--text-dim);}
+  .scn-form input{width:100%;}
+  .node-pick{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:13px;}
+  .node-pick .addr{color:var(--text-dim);font-size:11px;}
+  .node-list{max-height:320px;overflow-y:auto;}
+  .result-row{padding:8px;border-bottom:1px solid var(--border);}
+  .result-row pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-all;font-size:12px;
+                  max-height:220px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Сценарии</h1>
+  <p>Массовая смена конфигурации сразу на выбранном наборе узлов — NTP, баннер, логи, AAA и т.п. В отличие от Рубки эти команды меняют настройки устройства, поэтому список сценариев фиксированный (заводит администратор), не произвольный ввод.</p>
+</div>
+
+<div class="rubka">
+  <div class="panel">
+    <h2>1 · Цели <span class="count" id="picked-count">0 узлов</span></h2>
+    <div class="form-row" style="gap:8px;">
+      <button id="pick-all" class="btn-ghost">выбрать все</button>
+      <button id="pick-none" class="btn-ghost">сбросить</button>
+    </div>
+    <div class="body node-list" id="nodes-body"><div class="empty">Загрузка…</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>2 · Сценарий</h2>
+    <div class="body">
+      <div class="scn-list" id="scenarios-list"><div class="empty">Загрузка…</div></div>
+      <div id="scn-form-holder"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Последние прогоны</h2>
+    <div class="body" id="history-body"><div class="empty">Загрузка…</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Результат <span class="count" id="progress-label"></span></h2>
+  <div class="body" id="results-body"><div class="empty">Выбери узлы и сценарий выше</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="scenarios.js"></script>
+</body>
+</html>
