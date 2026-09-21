@@ -7,18 +7,81 @@
 let _selected = new Set();
 let _watchedSweepId = null;
 let _pollTimer = null;
+let _allNodes = [];
+let _groupFilter = "";
+
+// Естественная сортировка: "LAB-2" перед "LAB-10" — обычное
+// лексикографическое сравнение ставит "LAB-10" раньше "LAB-2", здесь
+// строка режется на числовые/нечисловые куски и числа сравниваются как
+// числа, а не как строки посимвольно.
+function naturalCompare(a, b) {
+  const ax = String(a).match(/\d+|\D+/g) || [];
+  const bx = String(b).match(/\d+|\D+/g) || [];
+  const len = Math.max(ax.length, bx.length);
+  for (let i = 0; i < len; i++) {
+    const av = ax[i] ?? "";
+    const bv = bx[i] ?? "";
+    if (av === bv) continue;
+    const an = Number(av);
+    const bn = Number(bv);
+    if (!Number.isNaN(an) && !Number.isNaN(bn) && av !== "" && bv !== "") {
+      if (an !== bn) return an - bn;
+    }
+    return av < bv ? -1 : 1;
+  }
+  return 0;
+}
+
+async function refreshGroups() {
+  const select = document.getElementById("group-select");
+  let groups;
+  try {
+    groups = await api("/api/groups");
+  } catch (e) {
+    return;
+  }
+  const current = select.value;
+  select.innerHTML =
+    `<option value="">Все группы</option>` +
+    groups
+      .map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (${g.node_count})</option>`)
+      .join("");
+  select.value = current;
+}
+
+document.getElementById("group-select").addEventListener("change", (e) => {
+  _groupFilter = e.target.value;
+  renderNodeList();
+  if (_groupFilter) {
+    // Выбор группы сразу отмечает все её узлы — не нужно ещё раз жать
+    // "выбрать все" после того, как уже сузил список группой.
+    _allNodes
+      .filter((n) => String(n.group_id ?? "") === _groupFilter)
+      .forEach((n) => _selected.add(n.id));
+    renderNodeList();
+  }
+});
 
 async function refreshNodes() {
   const body = document.getElementById("nodes-body");
-  let nodes;
   try {
-    nodes = await api("/api/nodes");
+    _allNodes = await api("/api/nodes");
   } catch (e) {
     body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
     return;
   }
+  _allNodes.sort((a, b) => naturalCompare(a.name, b.name));
+  renderNodeList();
+}
+
+function renderNodeList() {
+  const body = document.getElementById("nodes-body");
+  const nodes = _groupFilter
+    ? _allNodes.filter((n) => String(n.group_id ?? "") === _groupFilter)
+    : _allNodes;
   if (nodes.length === 0) {
-    body.innerHTML = `<div class="empty">Узлов нет — заведи их в Инвентаре</div>`;
+    body.innerHTML = `<div class="empty">${_allNodes.length === 0 ? "Узлов нет — заведи их в Инвентаре" : "В этой группе узлов нет"}</div>`;
+    updatePickedCount();
     return;
   }
   body.innerHTML = nodes
@@ -190,10 +253,12 @@ async function refreshHistory() {
 
 function onKeySaved() {
   refreshNodes();
+  refreshGroups();
   refreshPresets();
   refreshHistory();
 }
 
 refreshNodes();
+refreshGroups();
 refreshPresets();
 refreshHistory();
