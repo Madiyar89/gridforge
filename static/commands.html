@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — справочник команд</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .cmd-nav{display:flex;gap:10px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .cmd-nav a{color:var(--accent);text-decoration:none;font-size:13px;}
+  .cmd-nav a:hover{text-decoration:underline;}
+  .cmd-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .cmd-table th{text-align:left;padding:8px 16px;font-size:11px;color:var(--text-dim);font-weight:500;border-bottom:1px solid var(--border);}
+  .cmd-table td{padding:8px 16px;border-top:1px solid var(--border);vertical-align:top;}
+  .cmd-table td:first-child{color:var(--text-dim);white-space:nowrap;}
+  .cmd-table code{font-family:var(--mono);background:var(--surface-2);border-radius:4px;padding:1px 5px;font-size:11.5px;}
+  .cmd-section h2{padding:14px 16px 4px;margin:0;font-size:14px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Справочник команд</h1>
+  <p>По вендорам — не выполняются отсюда, только для человека. Реальные команды на устройства идут через Рубку/Сценарии.</p>
+</div>
+
+<div class="panel">
+  <div class="cmd-nav">
+    <a href="#cmd-cisco">Cisco IOS</a>
+    <a href="#cmd-junos">Juniper Junos</a>
+    <a href="#cmd-h3c">H3C (Comware)</a>
+    <a href="#cmd-huawei">Huawei (VRP)</a>
+    <a href="#cmd-mikrotik">MikroTik (RouterOS)</a>
+  </div>
+
+  <div class="cmd-section" id="cmd-cisco">
+    <h2>Cisco IOS</h2>
+    <table class="cmd-table"><thead><tr><th>Задача</th><th>Команда</th></tr></thead><tbody>
+      <tr><td>Версия / модель</td><td><code>show version</code></td></tr>
+      <tr><td>Текущий конфиг</td><td><code>show running-config</code></td></tr>
+      <tr><td>Статус интерфейсов</td><td><code>show ip interface brief</code></td></tr>
+      <tr><td>MAC-таблица</td><td><code>show mac address-table</code></td></tr>
+      <tr><td>ARP</td><td><code>show ip arp</code></td></tr>
+      <tr><td>Создать VLAN и назначить на порты</td><td><code>vlan 100</code> → <code>name FLOOR_5</code>; <code>interface range Gi1/0/1-10</code> → <code>switchport access vlan 100</code></td></tr>
+      <tr><td>Сохранить конфиг</td><td><code>copy running-config startup-config</code> (или <code>write memory</code>)</td></tr>
+      <tr><td>Перезагрузка</td><td><code>reload</code></td></tr>
+      <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8</code> / <code>traceroute 8.8.8.8</code></td></tr>
+      <tr><td>Локальный пользователь</td><td><code>username admin privilege 15 secret &lt;pass&gt;</code></td></tr>
+      <tr><td>SSH-only на vty, ACL источников</td><td><code>line vty 0 4</code> → <code>transport input ssh</code> → <code>access-class 23 in</code></td></tr>
+      <tr><td>Standard ACL</td><td><code>ip access-list standard 23</code> → <code>permit 192.0.2.0 0.0.0.255</code></td></tr>
+      <tr><td>Port security на порту</td><td><code>interface Gi1/0/1</code> → <code>switchport port-security</code> → <code>switchport port-security maximum 1</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>ntp server 192.0.2.140</code> / <code>logging host 192.0.2.115 transport udp port 1514</code></td></tr>
+      <tr><td>Бэкап конфига на TFTP</td><td><code>copy running-config tftp://192.0.2.7/backup.cfg</code></td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="cmd-section" id="cmd-junos">
+    <h2>Juniper Junos</h2>
+    <table class="cmd-table"><thead><tr><th>Задача</th><th>Команда</th></tr></thead><tbody>
+      <tr><td>Версия / модель</td><td><code>show version</code></td></tr>
+      <tr><td>Текущий конфиг</td><td><code>show configuration</code></td></tr>
+      <tr><td>Статус интерфейсов</td><td><code>show interfaces terse</code></td></tr>
+      <tr><td>MAC-таблица</td><td><code>show ethernet-switching table</code></td></tr>
+      <tr><td>ARP</td><td><code>show arp</code></td></tr>
+      <tr><td>Создать VLAN и назначить на порт</td><td><code>set vlans FLOOR_5 vlan-id 100</code>; <code>set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members FLOOR_5</code></td></tr>
+      <tr><td>Применить и сохранить конфиг</td><td><code>commit</code></td></tr>
+      <tr><td>Перезагрузка</td><td><code>request system reboot</code></td></tr>
+      <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8 count 5</code> / <code>traceroute 8.8.8.8</code></td></tr>
+      <tr><td>Локальный пользователь</td><td><code>set system login user admin class super-user authentication plain-text-password</code></td></tr>
+      <tr><td>Включить SSH</td><td><code>set system services ssh</code></td></tr>
+      <tr><td>Firewall filter (аналог ACL)</td><td><code>set firewall filter VTY_IN term allow from source-address 192.168.250.0/24 then accept</code></td></tr>
+      <tr><td>Port security (secure-access-port)</td><td><code>set ethernet-switching-options secure-access-port interface ge-0/0/1 mac-limit 1</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>set system ntp server 192.0.2.140</code> / <code>set system syslog host 192.0.2.115 any any</code></td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="cmd-section" id="cmd-h3c">
+    <h2>H3C (Comware)</h2>
+    <table class="cmd-table"><thead><tr><th>Задача</th><th>Команда</th></tr></thead><tbody>
+      <tr><td>Версия / модель</td><td><code>display version</code></td></tr>
+      <tr><td>Текущий конфиг</td><td><code>display current-configuration</code></td></tr>
+      <tr><td>Статус интерфейсов</td><td><code>display interface brief</code></td></tr>
+      <tr><td>MAC-таблица</td><td><code>display mac-address</code></td></tr>
+      <tr><td>ARP</td><td><code>display arp</code></td></tr>
+      <tr><td>Создать VLAN и назначить на порты</td><td><code>vlan 100</code>; <code>interface range GigabitEthernet1/0/1 to GigabitEthernet1/0/10</code> → <code>port access vlan 100</code></td></tr>
+      <tr><td>Сохранить конфиг</td><td><code>save</code> (подтвердить <code>Y</code>)</td></tr>
+      <tr><td>Перезагрузка</td><td><code>reboot</code></td></tr>
+      <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8</code> / <code>tracert 8.8.8.8</code></td></tr>
+      <tr><td>Локальный пользователь</td><td><code>local-user admin password simple &lt;pass&gt;</code> → <code>authorization-attribute level 3</code></td></tr>
+      <tr><td>SSH на vty</td><td><code>user-interface vty 0 4</code> → <code>authentication-mode scheme</code> → <code>protocol inbound ssh</code></td></tr>
+      <tr><td>Basic ACL</td><td><code>acl basic 2000</code> → <code>rule permit source 192.0.2.0 0.0.0.255</code></td></tr>
+      <tr><td>Port security</td><td><code>interface GigabitEthernet1/0/1</code> → <code>port-security enable</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.140</code> / <code>info-center loghost 192.0.2.115</code></td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="cmd-section" id="cmd-huawei">
+    <h2>Huawei (VRP)</h2>
+    <table class="cmd-table"><thead><tr><th>Задача</th><th>Команда</th></tr></thead><tbody>
+      <tr><td>Версия / модель</td><td><code>display version</code></td></tr>
+      <tr><td>Текущий конфиг</td><td><code>display current-configuration</code></td></tr>
+      <tr><td>Статус интерфейсов</td><td><code>display interface brief</code></td></tr>
+      <tr><td>MAC-таблица</td><td><code>display mac-address</code></td></tr>
+      <tr><td>ARP</td><td><code>display arp</code></td></tr>
+      <tr><td>Создать VLAN и назначить на порт</td><td><code>vlan batch 100</code>; <code>interface GigabitEthernet0/0/1</code> → <code>port link-type access</code> → <code>port default vlan 100</code></td></tr>
+      <tr><td>Сохранить конфиг</td><td><code>save</code></td></tr>
+      <tr><td>Перезагрузка</td><td><code>reboot</code></td></tr>
+      <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8</code> / <code>tracert 8.8.8.8</code></td></tr>
+      <tr><td>Локальный пользователь</td><td><code>aaa</code> → <code>local-user admin password irreversible-cipher &lt;pass&gt;</code> → <code>local-user admin privilege level 15</code></td></tr>
+      <tr><td>SSH на vty</td><td><code>user-interface vty 0 4</code> → <code>authentication-mode aaa</code> → <code>protocol inbound ssh</code></td></tr>
+      <tr><td>ACL</td><td><code>acl 2000</code> → <code>rule permit source 192.0.2.0 0.0.0.255</code></td></tr>
+      <tr><td>Port security</td><td><code>interface GigabitEthernet0/0/1</code> → <code>port-security enable</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.140</code> / <code>info-center loghost 192.0.2.115</code></td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="cmd-section" id="cmd-mikrotik">
+    <h2>MikroTik (RouterOS)</h2>
+    <table class="cmd-table"><thead><tr><th>Задача</th><th>Команда</th></tr></thead><tbody>
+      <tr><td>Версия / модель</td><td><code>/system resource print</code></td></tr>
+      <tr><td>Текущий конфиг</td><td><code>/export</code></td></tr>
+      <tr><td>Статус интерфейсов</td><td><code>/interface print</code></td></tr>
+      <tr><td>MAC-таблица (на bridge)</td><td><code>/interface bridge host print</code></td></tr>
+      <tr><td>ARP</td><td><code>/ip arp print</code></td></tr>
+      <tr><td>VLAN на bridge-порту</td><td><code>/interface bridge vlan add bridge=bridge1 tagged=ether1 vlan-ids=100</code></td></tr>
+      <tr><td>Сохранить конфиг</td><td><code>/system backup save name=backup1</code> (бинарный) или <code>/export file=backup1</code> (текстовый)</td></tr>
+      <tr><td>Перезагрузка</td><td><code>/system reboot</code></td></tr>
+      <tr><td>Ping / traceroute</td><td><code>/ping 8.8.8.8</code> / <code>/tool traceroute 8.8.8.8</code></td></tr>
+      <tr><td>Локальный пользователь</td><td><code>/user add name=admin group=full password=&lt;pass&gt;</code></td></tr>
+      <tr><td>Включить SSH, выключить Telnet</td><td><code>/ip service set ssh disabled=no</code> / <code>/ip service set telnet disabled=yes</code></td></tr>
+      <tr><td>Firewall filter (аналог ACL)</td><td><code>/ip firewall filter add chain=input src-address=192.168.250.0/24 action=accept</code></td></tr>
+      <tr><td>Port security</td><td>Прямого аналога нет — ближайшее: <code>/interface bridge port set [find interface=ether1] learn=no</code> (жёсткий allowlist MAC вручную, не то же самое, что sticky port-security)</td></tr>
+      <tr><td>NTP / удалённый лог</td><td><code>/system ntp client set enabled=yes primary-ntp=192.0.2.140</code> / <code>/system logging action add name=remote target=remote remote=192.0.2.115</code></td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<script src="common.js"></script>
+</body>
+</html>
