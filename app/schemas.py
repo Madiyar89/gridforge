@@ -19,12 +19,14 @@ class GroupIn(BaseModel):
 
 
 class CredentialIn(BaseModel):
-    """group_id=None — учётка по умолчанию (см. Credential в models.py и
-    credentials_engine.resolve_credential). Пароль хранится зашифрованным
-    (Fernet, secrets_crypto.py), наружу (GET /api/credentials) никогда не
-    возвращается — только has_password."""
+    """node_id — учётка на конкретный узел (приоритет выше группы), иначе
+    group_id — на группу, иначе (оба None) — учётка по умолчанию. См.
+    Credential в models.py и credentials_engine.resolve_credential.
+    Пароль хранится зашифрованным (Fernet, secrets_crypto.py), наружу
+    (GET /api/credentials) никогда не возвращается — только has_password."""
 
     group_id: int | None = None
+    node_id: int | None = None
     label: str = ""
     username: str
     password: str | None = None

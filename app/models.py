@@ -84,17 +84,21 @@ class Credential(Base):
     По прямому запросу пользователя (2026-09-21): раньше учётку спрашивал
     prompt() перед КАЖДЫМ действием на узле (бэкап/консоль/Рубка/
     Сценарии/порты) — неудобно на парке в десятки коммутаторов с общей
-    учёткой. Теперь: group_id=None — учётка по умолчанию для узлов без
-    группы или без своей учётки, group_id=<N> — переопределяет её для
-    конкретной группы (см. credentials_engine.resolve_credential). Явно
-    переданная учётка в самом запросе (username в теле, как раньше) всё
-    ещё имеет приоритет — центральная учётка это откат для запросов БЕЗ
-    явной учётки, не единственный путь."""
+    учёткой. group_id=None и node_id=None — учётка по умолчанию,
+    group_id=<N> — своя для группы, node_id=<M> — своя для конкретного
+    узла (2026-09-21, тот же день: "у меня зоопарк" — парк смешанного
+    оборудования, где у части коммутаторов логин/пароль не совпадает
+    даже внутри одной группы). Порядок поиска в
+    credentials_engine.resolve_credential: node -> group -> по умолчанию.
+    Явно переданная учётка в самом запросе (username в теле, как раньше)
+    всё ещё имеет приоритет — центральная учётка это откат для запросов
+    БЕЗ явной учётки, не единственный путь."""
 
     __tablename__ = "credentials"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    node_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id"), nullable=True)
     label: Mapped[str] = mapped_column(String(128), default="")
     username: Mapped[str] = mapped_column(String(128), nullable=False)
     # Ровно одно из password/key_path обычно задано — как и везде в
@@ -105,6 +109,7 @@ class Credential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     group: Mapped["Group | None"] = relationship()
+    node: Mapped["Node | None"] = relationship()
 
 
 class Node(Base):
