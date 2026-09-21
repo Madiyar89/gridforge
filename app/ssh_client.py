@@ -23,12 +23,20 @@ from asyncssh.kex import get_default_kex_algs
 # заменяем его: современные устройства как согласовывали свежие
 # алгоритмы, так и продолжат, старые получат шанс на устаревший, раз
 # другого у них нет.
-_LEGACY_KEX = (b"diffie-hellman-group1-sha1", b"diffie-hellman-group-exchange-sha1")
-_LEGACY_CIPHERS = (b"aes128-cbc", b"aes256-cbc", b"3des-cbc")
-KEX_ALGS = list(get_default_kex_algs()) + [a for a in _LEGACY_KEX if a not in get_default_kex_algs()]
-ENCRYPTION_ALGS = list(get_default_encryption_algs()) + [
-    a for a in _LEGACY_CIPHERS if a not in get_default_encryption_algs()
-]
+_LEGACY_KEX = ("diffie-hellman-group1-sha1", "diffie-hellman-group-exchange-sha1")
+_LEGACY_CIPHERS = ("aes128-cbc", "aes256-cbc", "3des-cbc")
+# get_default_kex_algs()/get_default_encryption_algs() отдают bytes (это
+# внутреннее представление asyncssh) — но connect(kex_algs=..., ...)
+# ожидает СТРОКИ и сам делает .encode('ascii') (см. connection.py
+# _select_algs) — реальный баг на боевом сервере (2026-09-21): передача
+# bytes напрямую роняла КАЖДОЕ подключение с AttributeError ещё до
+# попытки соединения, silently проглоченным asyncio.gather(...,
+# return_exceptions=True) в sweep_engine/scenarios_engine — прогоны
+# молча зависали на 0 из N без единой ошибки в интерфейсе.
+_default_kex = [a.decode("ascii") for a in get_default_kex_algs()]
+_default_ciphers = [a.decode("ascii") for a in get_default_encryption_algs()]
+KEX_ALGS = _default_kex + [a for a in _LEGACY_KEX if a not in _default_kex]
+ENCRYPTION_ALGS = _default_ciphers + [a for a in _LEGACY_CIPHERS if a not in _default_ciphers]
 
 
 @dataclass
