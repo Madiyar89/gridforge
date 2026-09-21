@@ -86,6 +86,7 @@ from app.models import (
     Template,
     User,
     Watch,
+    iso,
 )
 from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
@@ -457,7 +458,7 @@ def list_node_probes(node_id: int, db: Session = Depends(_db), key: Principal = 
                 "interval_seconds": p.interval_seconds,
                 "enabled": p.enabled,
                 "latest_sample": (
-                    {"ok": latest.ok, "value": latest.value, "detail": latest.detail, "taken_at": latest.taken_at.isoformat()}
+                    {"ok": latest.ok, "value": latest.value, "detail": latest.detail, "taken_at": iso(latest.taken_at)}
                     if latest
                     else None
                 ),
@@ -482,7 +483,7 @@ def probe_samples(
         .all()
     )
     return [
-        {"taken_at": s.taken_at.isoformat(), "ok": s.ok, "value": s.value, "detail": s.detail}
+        {"taken_at": iso(s.taken_at), "ok": s.ok, "value": s.value, "detail": s.detail}
         for s in rows
     ]
 
@@ -564,9 +565,9 @@ def list_incidents(
                 "severity": i.watch.severity.value,
                 "label": i.watch.label,
                 "detail": i.detail,
-                "opened_at": i.opened_at.isoformat(),
-                "last_seen_at": i.last_seen_at.isoformat(),
-                "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None,
+                "opened_at": iso(i.opened_at),
+                "last_seen_at": iso(i.last_seen_at),
+                "resolved_at": iso(i.resolved_at) if i.resolved_at else None,
             }
         )
     return result
@@ -737,7 +738,7 @@ def delete_action(action_id: int, db: Session = Depends(_db)):
 def list_action_runs(incident_id: int, db: Session = Depends(_db)):
     rows = db.query(ActionRun).filter(ActionRun.incident_id == incident_id).order_by(ActionRun.started_at.desc()).all()
     return [
-        {"id": r.id, "action_id": r.action_id, "started_at": r.started_at.isoformat(), "ok": r.ok, "output": r.output}
+        {"id": r.id, "action_id": r.action_id, "started_at": iso(r.started_at), "ok": r.ok, "output": r.output}
         for r in rows
     ]
 
@@ -769,7 +770,7 @@ def list_backups(node_id: int, db: Session = Depends(_db), key: Principal = Depe
         .all()
     )
     return [
-        {"id": b.id, "taken_at": b.taken_at.isoformat(), "changed": b.changed, "error": b.error, "size": len(b.content)}
+        {"id": b.id, "taken_at": iso(b.taken_at), "changed": b.changed, "error": b.error, "size": len(b.content)}
         for b in rows
     ]
 
@@ -777,7 +778,7 @@ def list_backups(node_id: int, db: Session = Depends(_db), key: Principal = Depe
 @api_read.get("/api/backups/{backup_id}")
 def get_backup(backup_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     backup = require_backup_access(db, key, backup_id)
-    return {"id": backup.id, "node_id": backup.node_id, "taken_at": backup.taken_at.isoformat(), "content": backup.content, "changed": backup.changed, "error": backup.error}
+    return {"id": backup.id, "node_id": backup.node_id, "taken_at": iso(backup.taken_at), "content": backup.content, "changed": backup.changed, "error": backup.error}
 
 
 @api_read.get("/api/backups/{backup_id}/diff")
@@ -859,7 +860,7 @@ def get_audit_findings(node_id: int, db: Session = Depends(_db), key: Principal 
             {
                 "id": f.id, "rule_name": rule.name if rule else "нет бэкапа",
                 "severity": rule.severity.value if rule else "critical",
-                "ok": f.ok, "detail": f.detail, "checked_at": f.checked_at.isoformat(),
+                "ok": f.ok, "detail": f.detail, "checked_at": iso(f.checked_at),
             }
         )
     return result
@@ -879,8 +880,8 @@ def list_scans(db: Session = Depends(_db)):
     return [
         {
             "id": s.id, "cidr": s.cidr, "status": s.status.value,
-            "started_at": s.started_at.isoformat(),
-            "finished_at": s.finished_at.isoformat() if s.finished_at else None,
+            "started_at": iso(s.started_at),
+            "finished_at": iso(s.finished_at) if s.finished_at else None,
             "error": s.error, "host_count": len(s.hosts),
         }
         for s in db.query(Scan).order_by(desc(Scan.started_at)).all()
@@ -939,7 +940,7 @@ def list_ad_audit_runs(db: Session = Depends(_db)):
     return [
         {
             "id": r.id, "server": r.server, "search_base": r.search_base,
-            "started_at": r.started_at.isoformat(), "ok": r.ok, "error": r.error,
+            "started_at": iso(r.started_at), "ok": r.ok, "error": r.error,
             "finding_count": len(r.findings),
         }
         for r in db.query(AdAuditRun).order_by(AdAuditRun.started_at.desc()).all()
@@ -1042,7 +1043,7 @@ def list_users(db: Session = Depends(_db), admin: Principal = Depends(require_ad
             "role": u.role.value,
             "group_id": u.group_id,
             "active": u.active,
-            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            "last_login_at": iso(u.last_login_at) if u.last_login_at else None,
         }
         for u in db.query(User).order_by(User.username).all()
     ]
@@ -1129,7 +1130,7 @@ def get_ports(node_id: int, db: Session = Depends(_db), key: Principal = Depends
         summary[port.state] = summary.get(port.state, 0) + 1
 
     return {
-        "taken_at": snapshot.taken_at.isoformat(),
+        "taken_at": iso(snapshot.taken_at),
         "ok": snapshot.ok,
         "error": snapshot.error,
         "command": snapshot.command,
@@ -1270,7 +1271,7 @@ def get_protection(node_id: int, db: Session = Depends(_db), key: Principal = De
     ports = parse_port_protection(backup.content)
     stp = parse_stp_global(backup.content)
     return {
-        "taken_at": backup.taken_at.isoformat(),
+        "taken_at": iso(backup.taken_at),
         "summary": protection_summary(ports, stp),
         "ports": {
             name: {
@@ -1403,7 +1404,7 @@ def list_sweeps(limit: int = 20, db: Session = Depends(_db), key: Principal = De
                 "id": sweep.id,
                 "label": sweep.label,
                 "status": sweep.status.value,
-                "started_at": sweep.started_at.isoformat(),
+                "started_at": iso(sweep.started_at),
                 "started_by": sweep.started_by,
                 **progress,
             }
@@ -1423,7 +1424,7 @@ def get_sweep(sweep_id: int, db: Session = Depends(_db), key: Principal = Depend
         "id": sweep.id,
         "label": sweep.label,
         "status": sweep.status.value,
-        "started_at": sweep.started_at.isoformat(),
+        "started_at": iso(sweep.started_at),
         "started_by": sweep.started_by,
         **sweep_progress(db, sweep),
         "results": [
@@ -1435,7 +1436,7 @@ def get_sweep(sweep_id: int, db: Session = Depends(_db), key: Principal = Depend
                 "ok": r.ok,
                 "output": r.output,
                 "error": r.error,
-                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                "finished_at": iso(r.finished_at) if r.finished_at else None,
             }
             for r in sorted(results, key=lambda r: r.node.name)
         ],
@@ -1573,7 +1574,7 @@ def list_scenario_runs(limit: int = 20, db: Session = Depends(_db), key: Princip
                 "id": run.id,
                 "label": run.label,
                 "status": run.status.value,
-                "started_at": run.started_at.isoformat(),
+                "started_at": iso(run.started_at),
                 "started_by": run.started_by,
                 **scenario_run_progress(run),
             }
@@ -1593,7 +1594,7 @@ def get_scenario_run(run_id: int, db: Session = Depends(_db), key: Principal = D
         "id": run.id,
         "label": run.label,
         "status": run.status.value,
-        "started_at": run.started_at.isoformat(),
+        "started_at": iso(run.started_at),
         "started_by": run.started_by,
         **scenario_run_progress(run),
         "results": [
@@ -1605,7 +1606,7 @@ def get_scenario_run(run_id: int, db: Session = Depends(_db), key: Principal = D
                 "ok": r.ok,
                 "output": r.output,
                 "error": r.error,
-                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                "finished_at": iso(r.finished_at) if r.finished_at else None,
             }
             for r in sorted(results, key=lambda r: r.node.name)
         ],
@@ -1661,7 +1662,7 @@ def list_api_keys(admin: Principal = Depends(require_admin_key), db: Session = D
             "label": k.label,
             "role": k.role.value,
             "group_id": k.group_id,
-            "created_at": k.created_at.isoformat(),
+            "created_at": iso(k.created_at),
             "revoked": k.revoked,
         }
         for k in db.query(ApiKey).all()
@@ -1700,7 +1701,7 @@ def list_syslog(
     return [
         {
             "id": m.id, "node_id": m.node_id, "source_ip": m.source_ip,
-            "received_at": m.received_at.isoformat(), "facility": m.facility,
+            "received_at": iso(m.received_at), "facility": m.facility,
             "severity": m.severity, "message": m.message,
         }
         for m in rows
@@ -1729,7 +1730,7 @@ def ip_lookup(q: str, limit: int = 50, db: Session = Depends(_db)):
         matches.append(
             {
                 "id": m.id, "source_ip": m.source_ip, "node_id": m.node_id,
-                "received_at": m.received_at.isoformat(), "message": m.message,
+                "received_at": iso(m.received_at), "message": m.message,
                 "hostname_hint": hints["hostname"], "user_hint": hints["user"],
             }
         )
@@ -1758,7 +1759,7 @@ def list_captures(db: Session = Depends(_db)):
         {
             "id": c.id, "interface": c.interface, "bpf_filter": c.bpf_filter,
             "duration_seconds": c.duration_seconds, "status": c.status.value,
-            "started_at": c.started_at.isoformat(), "packet_count": c.packet_count, "error": c.error,
+            "started_at": iso(c.started_at), "packet_count": c.packet_count, "error": c.error,
         }
         for c in db.query(Capture).order_by(desc(Capture.started_at)).all()
     ]

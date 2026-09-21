@@ -35,6 +35,19 @@ def as_aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
+def iso(dt: datetime | None) -> str | None:
+    """.isoformat() с гарантией offset'а — реальный баг (2026-09-21,
+    по прямому запросу пользователя, "время последнего прогона не
+    правильно"): naive datetime из SQLite (см. as_aware выше) даёт
+    isoformat() без 'Z'/offset ("2026-09-21T07:15:25"), а JS `new
+    Date(iso)` на клиенте (timeAgo в common.js) интерпретирует такую
+    строку как ЛОКАЛЬНОЕ время браузера, не UTC — на Алматы (UTC+5) это
+    систематически съедало 5 часов, только что запущенный прогон
+    показывался как "5ч назад". Использовать везде, где datetime из БД
+    уходит наружу через API (не голый .isoformat())."""
+    return as_aware(dt).isoformat() if dt is not None else None
+
+
 class ProbeKind(str, enum.Enum):
     icmp_ping = "icmp_ping"
     tcp_port = "tcp_port"

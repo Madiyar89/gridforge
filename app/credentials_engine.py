@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import Credential, Node
+from app.models import Credential, Node, iso
 from app.secrets_crypto import decrypt_secret, encrypt_secret
 
 
@@ -48,5 +48,5 @@ def mask_credential(cred: Credential) -> dict:
         "username": cred.username,
         "has_password": bool(cred.password),
         "key_path": cred.key_path,
-        "created_at": cred.created_at.isoformat(),
+        "created_at": iso(cred.created_at),
     }

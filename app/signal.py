@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models import Channel, ChannelKind, Incident, WatchSeverity
+from app.models import Channel, ChannelKind, Incident, WatchSeverity, iso
 from app.secrets_crypto import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger("gridforge.signal")
@@ -89,7 +89,7 @@ async def _send_webhook(client: httpx.AsyncClient, channel: Channel, incident: I
             "incident_id": incident.id,
             "severity": incident.watch.severity.value,
             "message": message,
-            "opened_at": incident.opened_at.isoformat(),
+            "opened_at": iso(incident.opened_at),
         },
         timeout=5.0,
     )
