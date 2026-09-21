@@ -3,12 +3,52 @@
 // Один и тот же JSON-контракт с сервера: {risk_score, risk_band,
 // categories:[{name, score, rules:[{id, severity, points, name,
 // description, fix, objects}]}]}.
+//
+// Вёрстка/логика намеренно повторяют старый прототип на NetOpsHub
+// (createAuditPanel в compliance-audit.js) — тот же порядок элементов
+// (плитки категорий с "N нарушений", радар, таблица правил "Баллы |
+// Правило" с раскрывающимся "Затронуто"/"Как исправить"), по прямому
+// запросу пользователя ("сделай отображение как на фото 4").
 
 function riskBandKey(band) {
   if (band === "низкий") return "low";
   if (band === "средний") return "medium";
   if (band === "высокий") return "high";
   return "critical";
+}
+
+function riskBandOf(score) {
+  if (score <= 25) return "низкий";
+  if (score <= 50) return "средний";
+  if (score <= 75) return "высокий";
+  return "критический";
+}
+
+function riskRadarSvg(categories) {
+  const n = categories.length;
+  if (n < 3) return ""; // радар нечитаем меньше чем на 3 осях
+  const cx = 200, cy = 165, R = 90;
+  let rings = "", axes = "", labels = "", pts = [];
+  [0.25, 0.5, 0.75, 1].forEach((frac) => {
+    const ringPts = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + i * ((2 * Math.PI) / n);
+      ringPts.push(`${cx + R * frac * Math.cos(a)},${cy + R * frac * Math.sin(a)}`);
+    }
+    rings += `<polygon points="${ringPts.join(" ")}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+  });
+  categories.forEach((c, i) => {
+    const a = -Math.PI / 2 + i * ((2 * Math.PI) / n);
+    const x2 = cx + R * Math.cos(a), y2 = cy + R * Math.sin(a);
+    axes += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="var(--border)" stroke-width="1"/>`;
+    const lx = cx + (R + 40) * Math.cos(a), ly = cy + (R + 40) * Math.sin(a);
+    const anchor = Math.abs(Math.cos(a)) < 0.2 ? "middle" : Math.cos(a) > 0 ? "start" : "end";
+    labels += `<text x="${lx}" y="${ly}" class="risk-radar-label" text-anchor="${anchor}" dominant-baseline="middle">${escapeHtml(c.name.split(" ")[0])}</text>`;
+    const ratio = c.score / 100;
+    pts.push(`${cx + R * ratio * Math.cos(a)},${cy + R * ratio * Math.sin(a)}`);
+  });
+  const poly = `<polygon points="${pts.join(" ")}" fill="var(--accent)" fill-opacity="0.18" stroke="var(--accent)" stroke-width="2"/>`;
+  return `<svg class="risk-radar" viewBox="0 0 400 340">${rings}${axes}${poly}${labels}</svg>`;
 }
 
 // idPrefix — общая часть id элементов на странице ("ad" / "net"), ожидает
@@ -19,6 +59,7 @@ function riskBandKey(band) {
 // itemsKey — ключ массива объектов в отчёте ("domains"/"devices").
 function createRiskReportPanel(idPrefix, fetchReport, rowLabel, itemsKey, emptyMessage) {
   let report = null;
+  let sortedItems = [];
 
   function el(suffix) {
     return document.getElementById(`${idPrefix}-${suffix}`);
@@ -38,7 +79,13 @@ function createRiskReportPanel(idPrefix, fetchReport, rowLabel, itemsKey, emptyM
       return;
     }
     report = fetched;
-    let metaText = `каталог правил v${report.catalog_version} (${report.catalog_updated_at})`;
+    sortedItems = (report[itemsKey] || [])
+      .slice()
+      .sort((a, b) => naturalCompare(a.label || a.id, b.label || b.id));
+
+    const generated = new Date(report.generated_at).toLocaleString("ru-RU");
+    const rowLabelLower = rowLabel === "Домен" ? "доменов" : "устройств";
+    let metaText = `Сформирован: ${generated} · ${rowLabelLower} в отчёте: ${sortedItems.length} · каталог правил v${report.catalog_version} (${report.catalog_updated_at})`;
     const problems = report.errors || report.skipped_no_backup;
     if (problems && problems.length > 0) {
       const label = report.errors ? "ошибки" : "без бэкапа";
@@ -53,12 +100,11 @@ function createRiskReportPanel(idPrefix, fetchReport, rowLabel, itemsKey, emptyM
 
   function renderList() {
     const body = el("report-fleet-body");
-    const items = report[itemsKey] || [];
-    if (items.length === 0) {
+    if (sortedItems.length === 0) {
       body.innerHTML = `<div class="empty">${emptyMessage || "Нет данных для отчёта"}</div>`;
       return;
     }
-    body.innerHTML = items
+    body.innerHTML = sortedItems
       .map(
         (d, i) => `
       <div class="domain-row" data-i="${i}">
@@ -79,69 +125,65 @@ function createRiskReportPanel(idPrefix, fetchReport, rowLabel, itemsKey, emptyM
   }
 
   function showItem(i) {
-    const items = report[itemsKey] || [];
-    const d = items[i];
+    const d = sortedItems[i];
     if (!d) return;
 
     let tiles = "";
     d.categories.forEach((c) => {
+      const failCount = c.rules.filter((r) => r.points > 0).length;
       tiles += `<div class="risk-tile">
         <div class="t-title">${escapeHtml(c.name)}</div>
-        <div class="t-score risk-band ${riskBandKey(riskBand(c.score))}" style="display:inline-block">${c.score} / 100</div>
+        <div class="t-score risk-band ${riskBandKey(riskBandOf(c.score))}" style="display:inline-block">${c.score} / 100</div>
+        <div class="t-sub">${failCount} нарушени${failCount === 1 ? "е" : failCount >= 2 && failCount <= 4 ? "я" : "й"}</div>
       </div>`;
     });
 
     let sections = "";
     d.categories.forEach((c) => {
       const rules = c.rules.slice().sort((a, b) => b.points - a.points);
-      let rows = "";
+      let ruleRows = "";
       rules.forEach((r) => {
         const objectsBlock = (r.objects || []).length
           ? `<details class="risk-details" open><summary>Затронуто: ${r.objects.length}</summary><div class="risk-objects">${r.objects.map((o) => `<div>${escapeHtml(o)}</div>`).join("")}</div></details>`
           : "";
-        const fixBlock = r.points > 0 ? `<div class="risk-fix">${escapeHtml(r.fix)}</div>` : "";
-        rows += `<div class="risk-rule-row">
-          <div class="pts" style="color:${r.points > 0 ? "var(--crit)" : "var(--ok)"}">${r.points}</div>
-          <div style="flex:1;min-width:0">
+        const fixBlock = r.points > 0 && r.fix
+          ? `<details class="risk-details"><summary>Как исправить</summary><div class="risk-fix">${escapeHtml(r.fix)}</div></details>`
+          : "";
+        ruleRows += `<tr>
+          <td class="risk-pts" style="color:${r.points > 0 ? "var(--crit)" : "var(--ok)"}">${r.points}</td>
+          <td>
             <div class="name">${escapeHtml(r.name)}</div>
             <div class="desc">${escapeHtml(r.description)}</div>
             ${objectsBlock}
             ${fixBlock}
-          </div>
-        </div>`;
+          </td>
+        </tr>`;
       });
       sections += `<div class="risk-cat-section">
         <div class="risk-cat-head">
           <span>${escapeHtml(c.name)}</span>
-          <span class="risk-band ${riskBandKey(riskBand(c.score))}">${c.score} / 100</span>
+          <span class="risk-band ${riskBandKey(riskBandOf(c.score))}">${c.score} / 100</span>
         </div>
-        ${rows}
+        <table class="risk-rules-table"><thead><tr><th>Баллы</th><th>Правило</th></tr></thead><tbody>${ruleRows}</tbody></table>
       </div>`;
     });
 
     el("report-domain-body").innerHTML = `
-      <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-weight:600;font-size:15px">${escapeHtml(d.label || d.id)}</div>
-          <div class="sub" style="color:var(--text-dim);font-family:var(--mono);font-size:11.5px">${escapeHtml(d.domain || d.address || "")}</div>
+      <div class="risk-sticky-head">
+        <div class="risk-dev-title-row">
+          <div>
+            <div style="font-weight:600;font-size:15px">${escapeHtml(d.label || d.id)}</div>
+            <div class="sub" style="color:var(--text-dim);font-family:var(--mono);font-size:11.5px">${escapeHtml(d.domain || `${d.vendor ? d.vendor + " · " : ""}${d.address || ""}${d.scanned_at ? " · бэкап от " + new Date(d.scanned_at).toLocaleString("ru-RU") : ""}`)}</div>
+          </div>
+          <div class="risk-overall risk-band ${riskBandKey(d.risk_band)}">${d.risk_score} <span class="risk-overall-sub">риск / 100 · ${escapeHtml(d.risk_band)}</span></div>
         </div>
-        <div style="text-align:right">
-          <div class="score" style="font-size:24px">${d.risk_score}</div>
-          <span class="risk-band ${riskBandKey(d.risk_band)}">${escapeHtml(d.risk_band)}</span>
-        </div>
+        <div class="risk-tiles">${tiles}</div>
       </div>
-      <div class="risk-tiles">${tiles}</div>
+      ${riskRadarSvg(d.categories)}
       ${sections}
     `;
     el("report-fleet").hidden = true;
     el("report-domain").hidden = false;
-  }
-
-  function riskBand(score) {
-    if (score <= 25) return "низкий";
-    if (score <= 50) return "средний";
-    if (score <= 75) return "высокий";
-    return "критический";
   }
 
   el("report-refresh").addEventListener("click", load);
