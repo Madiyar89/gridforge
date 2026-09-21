@@ -132,8 +132,11 @@ function findProtection(shortName) {
   return full ? ports[full + match[2]] || null : null;
 }
 
+let _detailPort = null;
+
 function showPortDetail(port) {
   if (!port) return;
+  _detailPort = port;
   document.getElementById("port-detail").innerHTML = `
     <b>${escapeHtml(port.name)}</b>
     <dl>
@@ -142,7 +145,78 @@ function showPortDetail(port) {
       <dt>VLAN</dt><dd>${escapeHtml(port.vlan || "—")}${port.is_trunk ? " (trunk)" : ""}</dd>
       <dt>Скорость</dt><dd>${escapeHtml(port.speed || "—")}</dd>
       ${protectionRows(findProtection(port.name))}
-    </dl>`;
+    </dl>
+    <div class="port-edit">
+      <h3 style="margin:14px 0 6px;font-size:13px;">Изменить порт</h3>
+      <div class="form-row">
+        <input id="edit-description" placeholder="описание" value="${escapeHtml(port.description || "")}">
+        <input id="edit-vlan" placeholder="VLAN" value="${escapeHtml(port.vlan || "")}" style="max-width:100px;">
+      </div>
+      <div class="form-row" style="gap:8px;margin-top:6px;">
+        <button id="edit-up" class="btn-ghost">up</button>
+        <button id="edit-down" class="btn-ghost">down</button>
+        <span id="edit-state" style="color:var(--text-dim);font-size:12px;align-self:center;">
+          состояние менять не будем
+        </span>
+      </div>
+      <button id="edit-apply" style="margin-top:8px;">Применить</button>
+      <div id="edit-result" style="margin-top:8px;font-size:12px;"></div>
+    </div>`;
+
+  let pendingState = null;
+  document.getElementById("edit-up").addEventListener("click", () => {
+    pendingState = "up";
+    document.getElementById("edit-state").textContent = "включить (no shutdown)";
+  });
+  document.getElementById("edit-down").addEventListener("click", () => {
+    pendingState = "down";
+    document.getElementById("edit-state").textContent = "выключить (shutdown)";
+  });
+  document.getElementById("edit-apply").addEventListener("click", () =>
+    applyPortEdit(port, pendingState)
+  );
+}
+
+async function applyPortEdit(port, state) {
+  const descInput = document.getElementById("edit-description");
+  const vlanInput = document.getElementById("edit-vlan");
+  const description = descInput.value.trim() !== (port.description || "") ? descInput.value.trim() : null;
+  const vlan = vlanInput.value.trim() !== String(port.vlan || "") ? vlanInput.value.trim() : null;
+
+  if (description === null && vlan === null && !state) {
+    return toast("Нечего применять — ничего не изменилось", true);
+  }
+
+  const username = prompt("Логин для подключения к узлу:");
+  if (!username) return;
+  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
+
+  const nodeId = document.getElementById("node-select").value;
+  const resultEl = document.getElementById("edit-result");
+  const btn = document.getElementById("edit-apply");
+  btn.disabled = true;
+  btn.textContent = "Применяю…";
+  try {
+    const result = await api(
+      `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ description, vlan, state, username, password }),
+      }
+    );
+    if (result.ok) {
+      toast("Применено");
+      resultEl.innerHTML = `<span style="color:var(--ok);">применено ✓</span> <code>${result.commands.map(escapeHtml).join(" · ")}</code>`;
+      loadPorts();
+    } else {
+      resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(result.error || "ошибка")}</span>`;
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Применить";
+  }
 }
 
 function protectionRows(prot) {

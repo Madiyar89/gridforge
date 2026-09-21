@@ -168,6 +168,21 @@ class PortRefreshIn(BaseModel):
     timeout_seconds: float = 20.0
 
 
+class PortApplyIn(BaseModel):
+    """Изменение одного порта (описание/VLAN/up-down) — хотя бы одно из
+    трёх полей обязательно, см. проверку в port_commands.build_port_lines.
+    Учётка, как и везде, живёт только в пределах запроса."""
+
+    description: str | None = None
+    vlan: str | None = None
+    state: str | None = None  # "up" | "down" | None
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+    port: int = 22
+    timeout_seconds: float = 20.0
+
+
 class CaptureIn(BaseModel):
     interface: str
     bpf_filter: str | None = None

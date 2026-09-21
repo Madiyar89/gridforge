@@ -89,6 +89,7 @@ from app.models import (
 from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
 from app.port_security import parse_port_protection, parse_stp_global, protection_summary
+from app.port_commands import PortCommandError, apply_port
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
@@ -110,6 +111,7 @@ from app.schemas import (
     NodeIn,
     NodeUpdateIn,
     PasswordChangeIn,
+    PortApplyIn,
     PortRefreshIn,
     ProbeIn,
     ScanHostToNodeIn,
@@ -1072,6 +1074,41 @@ def get_ports(node_id: int, db: Session = Depends(_db), key: Principal = Depends
             for group in group_ports(ports)
         ],
     }
+
+
+@api_operate.post("/api/nodes/{node_id}/ports/{port_name:path}/apply")
+async def apply_port_endpoint(
+    node_id: int,
+    port_name: str,
+    payload: PortApplyIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """Изменить описание/VLAN/состояние (up-down) одного порта — перенесено
+    из карточки устройства NetOpsHub, та же логика построения команд (см.
+    port_commands.py), но напрямую по SSH/Telnet, без Ansible. Права
+    operator — реально меняет конфигурацию боевого оборудования, как и
+    Scenario.
+
+    port_name — через путь, а не query/body: содержит "/" (Gi1/0/5),
+    отсюда {port_name:path} в маршруте."""
+    node = require_node_access(db, key, node_id)
+    try:
+        result = await apply_port(
+            node,
+            port_name,
+            description=payload.description,
+            vlan=payload.vlan,
+            state=payload.state,
+            username=payload.username,
+            password=payload.password,
+            key_path=payload.key_path,
+            conn_port=payload.port,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    except PortCommandError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return result
 
 
 @api_read.get("/api/nodes/{node_id}/protection")
