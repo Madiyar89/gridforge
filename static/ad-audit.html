@@ -25,20 +25,20 @@
   <p>Проверки в духе PingCastle — 25 правил по 4 категориям (устаревшие объекты, привилегированные учётки, доверия, аномалии). Домены берутся из <a href="ldap.html">LDAP-подключений</a>, отчёт считается заново на каждый запрос, история не хранится.</p>
 </div>
 
-<div class="panel" id="report-fleet">
+<div class="panel" id="ad-report-fleet">
   <h2>
     Отчёт по доменам
     <span>
-      <span class="count" id="report-meta"></span>
-      <button id="report-refresh" class="icon-btn" style="margin-left:8px">Обновить</button>
+      <span class="count" id="ad-report-meta"></span>
+      <button id="ad-report-refresh" class="icon-btn" style="margin-left:8px">Обновить</button>
     </span>
   </h2>
-  <div class="body" id="report-fleet-body"><div class="empty">Загрузка…</div></div>
+  <div class="body" id="ad-report-fleet-body"><div class="empty">Загрузка…</div></div>
 </div>
 
-<div class="panel" id="report-domain" hidden>
-  <h2><span id="domain-back" class="icon-btn" style="cursor:pointer">← ко всем доменам</span></h2>
-  <div class="body" id="report-domain-body"></div>
+<div class="panel" id="ad-report-domain" hidden>
+  <h2><span id="ad-domain-back" class="icon-btn" style="cursor:pointer">← ко всем доменам</span></h2>
+  <div class="body" id="ad-report-domain-body"></div>
 </div>
 
 <div class="panel">
@@ -71,6 +71,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="common.js"></script>
+<script src="risk-report.js"></script>
 <script src="ad-audit.js"></script>
 </body>
 </html>

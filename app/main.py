@@ -31,6 +31,7 @@ from app.auth import (
 from app.db import get_session, init_db
 from app.scenario_catalog import seed_default_scenarios
 from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
+from app.network_audit_engine import build_network_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
 from app.dashboard_engine import build_dashboard
@@ -1071,6 +1072,15 @@ async def get_ad_audit_report(db: Session = Depends(_db)):
     по категориям (см. ad_audit_engine.run_ad_audit_fleet_report). Считается
     заново на каждый запрос, ничего не пишет в БД."""
     return await run_ad_audit_fleet_report(db)
+
+
+@api_read.get("/api/network-audit/report")
+def get_network_audit_report(db: Session = Depends(_db)):
+    """Безстейтовый флот-отчёт по узлам Cisco/Junos с бэкапом — 26 правил,
+    риск-скор по категориям (см. network_audit_engine). Синхронный (нет
+    сетевого I/O — работает по уже снятым Backup.content), в отличие от
+    AD-аудита не нужен await."""
+    return build_network_audit_fleet_report(db)
 
 
 @api_write.post("/api/retention/run")

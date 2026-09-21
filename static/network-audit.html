@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — аудит сети</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Аудит конфигураций сети</h1>
+  <p>26 правил по 4 категориям (управление и доступ, резервирование L3, L2-доступ, гигиена конфигурации) — по последнему бэкапу узлов Cisco/Junos. Узлы без бэкапа в отчёт не попадают.</p>
+</div>
+
+<div class="panel" id="net-report-fleet">
+  <h2>
+    Отчёт по устройствам
+    <span>
+      <span class="count" id="net-report-meta"></span>
+      <button id="net-report-refresh" class="icon-btn" style="margin-left:8px">Обновить</button>
+    </span>
+  </h2>
+  <div class="body" id="net-report-fleet-body"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="panel" id="net-report-domain" hidden>
+  <h2><span id="net-domain-back" class="icon-btn" style="cursor:pointer">← ко всем устройствам</span></h2>
+  <div class="body" id="net-report-domain-body"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="risk-report.js"></script>
+<script src="network-audit.js"></script>
+</body>
+</html>
