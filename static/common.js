@@ -27,6 +27,7 @@ const NAV_ICONS = {
   configsearch: '<circle cx="8.5" cy="8.5" r="5"/><path d="M12.5 12.5 17 17"/><path d="M6 8.5h5"/>',
   hubs: '<circle cx="10" cy="4.5" r="2"/><circle cx="4" cy="15.5" r="2"/><circle cx="16" cy="15.5" r="2"/><path d="M10 6.5v3"/><path d="M10 9.5 4 13.5"/><path d="M10 9.5l6 4"/>',
   commandsref: '<path d="M4 3.5h9l3 3v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1z"/><path d="M6.5 8.5h7"/><path d="M6.5 11.5h7"/><path d="M6.5 14.5h4"/>',
+  firmware: '<rect x="4" y="3" width="12" height="14" rx="1.5"/><path d="M7.5 7h5"/><path d="M7.5 10h5"/><circle cx="10" cy="14" r="1.2"/>',
   channels: '<path d="M10 3a4.5 4.5 0 0 1 4.5 4.5c0 3.5 1.5 5 1.5 5H4s1.5-1.5 1.5-5A4.5 4.5 0 0 1 10 3z"/><path d="M8.3 15.5a1.8 1.8 0 0 0 3.4 0"/>',
   ports: '<rect x="2.5" y="5.5" width="15" height="9" rx="1.5"/><path d="M6 8.5v3"/><path d="M10 8.5v3"/><path d="M14 8.5v3"/>',
   users: '<circle cx="10" cy="6.5" r="3"/><path d="M4 16.5c0-3.2 2.7-5 6-5s6 1.8 6 5"/>',
@@ -60,6 +61,7 @@ const NAV_GROUPS = [
       { href: "ports.html", label: "Порты", icon: "ports" },
       { href: "console.html", label: "Консоль", icon: "console" },
       { href: "commands.html", label: "Команды", icon: "commandsref" },
+      { href: "firmware.html", label: "Версии ПО", icon: "firmware" },
     ],
   },
   {

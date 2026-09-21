@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — версии ПО</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Версии ПО</h1>
+  <p>Хранилище файлов образов. Сама заливка на устройство и активация — вручную (TFTP/консоль), это только каталог.</p>
+</div>
+
+<div class="panel">
+  <h2>Загрузить образ</h2>
+  <form id="fw-upload-form" class="form-row" style="border-top:none">
+    <select id="fw-vendor" required>
+      <option value="cisco_ios">Cisco IOS</option>
+      <option value="junos">Juniper Junos</option>
+    </select>
+    <input id="fw-file" type="file" required>
+    <button type="submit" id="fw-upload-btn">Загрузить</button>
+  </form>
+  <div id="fw-upload-status" style="padding:0 16px 14px;font-size:12.5px;"></div>
+</div>
+
+<div id="fw-lists"></div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="firmware.js"></script>
+</body>
+</html>

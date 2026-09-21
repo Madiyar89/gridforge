@@ -10,7 +10,8 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Response, WebSocket
+from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -37,6 +38,7 @@ from app.audit_engine import run_audit
 from app.compliance_engine import check_compliance
 from app.config_search import search_configs
 from app.hub_detection_engine import find_probable_hubs
+from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
@@ -959,6 +961,42 @@ async def get_probable_hubs(db: Session = Depends(_db)):
     На operate (не read) — реально ходит на оборудование по SSH, не только
     читает БД."""
     return await find_probable_hubs(db, resolve_credential=resolve_credential)
+
+
+@api_read.get("/api/firmware")
+def get_firmware_list():
+    """Только хранилище файлов образов (перенос «Версии ПО» из NetOpsHub,
+    без автозаливки — там она шла Ansible-плейбуками через TFTP, которых
+    у GridForge нет; файл скачивается отсюда и заливается вручную)."""
+    return list_firmware()
+
+
+@api_write.post("/api/firmware/upload", status_code=201)
+async def upload_firmware(vendor: str = Form(...), file: UploadFile = File(...)):
+    if vendor not in ALLOWED_VENDORS:
+        raise HTTPException(status_code=400, detail=f"Неизвестный вендор: {vendor}")
+    try:
+        path = save_firmware(vendor, file.filename, file.file)
+    except FirmwareError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"filename": path.name, "size": path.stat().st_size}
+
+
+@api_read.get("/api/firmware/download")
+def download_firmware(vendor: str, filename: str):
+    try:
+        path = firmware_path(vendor, filename)
+    except FirmwareError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
+
+
+@api_write.delete("/api/firmware", status_code=204)
+def delete_firmware_endpoint(vendor: str, filename: str):
+    try:
+        delete_firmware(vendor, filename)
+    except FirmwareError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @api_operate.post("/api/nodes/{node_id}/audit")
