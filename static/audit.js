@@ -33,6 +33,7 @@ async function refreshRules() {
         await api(`/api/audit-rules/${btn.dataset.id}`, { method: "DELETE" });
         toast("Правило удалено");
         refreshRules();
+        loadCompliance();
       } catch (e) {
         toast(e.message, true);
       }
@@ -62,6 +63,7 @@ document.getElementById("add-rule").addEventListener("click", async () => {
     document.getElementById("r-desc").value = "";
     toast("Правило добавлено");
     refreshRules();
+    loadCompliance();
   } catch (e) {
     toast(e.message, true);
   }
@@ -121,10 +123,48 @@ document.getElementById("audit-node-select").addEventListener("change", async (e
   }
 });
 
+async function loadCompliance() {
+  const body = document.getElementById("compliance-body");
+  let data;
+  try {
+    data = await api("/api/reports/compliance");
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  const rules = data.rules || [];
+  if (rules.length === 0) {
+    body.innerHTML = `<div class="empty">Правил нет — добавь их выше</div>`;
+    return;
+  }
+  body.innerHTML = rules
+    .map((r) => {
+      const clean = r.non_compliant.length === 0;
+      const listBlock = clean
+        ? ""
+        : `<details class="risk-details" open><summary>Не соответствует: ${r.non_compliant.length}</summary><div class="risk-objects">${r.non_compliant
+            .map((n) => `<div>${escapeHtml(n.hostname)} — ${escapeHtml(n.detail)}</div>`)
+            .join("")}</div></details>`;
+      return `<div class="incident-row" style="align-items:flex-start">
+        <span class="sev-dot ${clean ? "" : r.severity}" style="background:${clean ? "var(--ok)" : ""};margin-top:6px"></span>
+        <div class="main">
+          <div class="label">${escapeHtml(r.name)} <span class="count">· проверено: ${r.checked_count} · ${clean ? "все соответствуют" : r.non_compliant.length + " не соответствуют"}</span></div>
+          <div class="detail">${escapeHtml(r.description)}</div>
+          ${listBlock}
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+document.getElementById("compliance-refresh").addEventListener("click", loadCompliance);
+
 function onKeySaved() {
   refreshRules();
   loadNodePicker();
+  loadCompliance();
 }
 
 refreshRules();
 loadNodePicker();
+loadCompliance();

@@ -34,6 +34,7 @@ from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
 from app.network_audit_engine import build_network_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
+from app.compliance_engine import check_compliance
 from app.config_search import search_configs
 from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
@@ -939,6 +940,15 @@ def delete_audit_rule(rule_id: int, db: Session = Depends(_db)):
         raise HTTPException(status_code=404, detail="Правило не найдено")
     db.delete(rule)
     db.commit()
+
+
+@api_read.get("/api/reports/compliance")
+def get_compliance(db: Session = Depends(_db)):
+    """Golden config — правило → список несоответствующих узлов по всему
+    парку (см. app/compliance_engine.py). Правила — те же AuditRule, что
+    уже используются на странице «Аудит» (узел → правила), здесь просто
+    развёрнуты в обратную сторону."""
+    return {"rules": check_compliance(db)}
 
 
 @api_operate.post("/api/nodes/{node_id}/audit")
