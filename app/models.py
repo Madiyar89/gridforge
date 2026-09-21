@@ -73,6 +73,40 @@ class Group(Base):
     nodes: Mapped[list["Node"]] = relationship(back_populates="group")
 
 
+class Credential(Base):
+    """Централизованная учётка для подключения к узлам — своя версия
+    Ansible Vault group_vars из NetOpsHub (там пароль/ключ задан один раз
+    на группу узлов, не вводится вручную при каждом запуске), но проще:
+    без Vault, пароль лежит в этой же БД зашифрованным (Fernet, см.
+    secrets_crypto.py — тот же механизм, что уже защищает
+    Probe.params.password/Action.config.password).
+
+    По прямому запросу пользователя (2026-09-21): раньше учётку спрашивал
+    prompt() перед КАЖДЫМ действием на узле (бэкап/консоль/Рубка/
+    Сценарии/порты) — неудобно на парке в десятки коммутаторов с общей
+    учёткой. Теперь: group_id=None — учётка по умолчанию для узлов без
+    группы или без своей учётки, group_id=<N> — переопределяет её для
+    конкретной группы (см. credentials_engine.resolve_credential). Явно
+    переданная учётка в самом запросе (username в теле, как раньше) всё
+    ещё имеет приоритет — центральная учётка это откат для запросов БЕЗ
+    явной учётки, не единственный путь."""
+
+    __tablename__ = "credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    label: Mapped[str] = mapped_column(String(128), default="")
+    username: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Ровно одно из password/key_path обычно задано — как и везде в
+    # GridForge, где нужен SSH/Telnet-логин (Probe kind=ssh_command,
+    # Action, консоль).
+    password: Mapped[str | None] = mapped_column(String(500), nullable=True)  # зашифровано, см. encrypt_secret
+    key_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    group: Mapped["Group | None"] = relationship()
+
+
 class Node(Base):
     __tablename__ = "nodes"
 

@@ -29,6 +29,7 @@ import asyncssh
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.auth import _hash_key  # переиспользуем ровно ту же проверку ключа, что и HTTP API
+from app.credentials_engine import resolve_credential
 from app.db import get_session
 from app.models import ApiKey, Node
 
@@ -72,6 +73,15 @@ async def handle_console(ws: WebSocket) -> None:
     db = get_session()
     try:
         node = db.get(Node, node_id)
+        username = payload.get("username")
+        key_path = payload.get("key_path")
+        password = payload.get("password")
+        if not username:
+            # Явной учётки нет — та же центральная учётка (Credential), что
+            # использует HTTP-часть API (см. credentials_engine.py).
+            cred = resolve_credential(db, node) if node is not None else None
+            if cred is not None:
+                username, password, key_path = cred["username"], cred["password"], cred["key_path"]
     finally:
         db.close()
     if node is None:
@@ -79,9 +89,11 @@ async def handle_console(ws: WebSocket) -> None:
         await ws.close(code=1002)
         return
 
-    username = payload.get("username")
     if not username:
-        await ws.send_json({"type": "error", "message": "username обязателен"})
+        await ws.send_json({
+            "type": "error",
+            "message": "нужен логин — укажи явно или настрой центральную учётку в Настройки → Учётки",
+        })
         await ws.close(code=1002)
         return
 
@@ -92,8 +104,6 @@ async def handle_console(ws: WebSocket) -> None:
         "known_hosts": None,
         "connect_timeout": 10,
     }
-    key_path = payload.get("key_path")
-    password = payload.get("password")
     if key_path:
         connect_kwargs["client_keys"] = [key_path]
     elif password:

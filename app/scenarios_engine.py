@@ -76,16 +76,14 @@ async def run_scenario(
     run_id: int,
     tasks: list[dict],
     *,
-    username: str,
-    password: str | None,
-    key_path: str | None,
     port: int,
     timeout_seconds: float,
 ) -> None:
     """Фоновая часть — вызывается через asyncio.create_task так же, как
-    run_sweep. : [{result_id, address, command, vendor}, ...],
-    подготовленные вызывающей стороной в её (уже закрытой к этому моменту)
-    сессии."""
+    run_sweep. tasks: [{result_id, address, command, vendor, username,
+    password, key_path}, ...], подготовленные вызывающей стороной (учётка
+    уже разрешена на узел — явная или центральная, см. run_scenario_endpoint
+    в main.py) в её (уже закрытой к этому моменту) сессии."""
     semaphore = asyncio.Semaphore(MAX_PARALLEL)
     await asyncio.gather(
         *(
@@ -95,9 +93,9 @@ async def run_scenario(
                 task["address"],
                 task["command"],
                 task.get("vendor"),
-                username=username,
-                password=password,
-                key_path=key_path,
+                username=task["username"],
+                password=task.get("password"),
+                key_path=task.get("key_path"),
                 port=port,
                 timeout_seconds=timeout_seconds,
             )

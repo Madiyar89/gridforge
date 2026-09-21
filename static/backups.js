@@ -57,13 +57,13 @@ async function refreshBackups() {
 }
 
 document.getElementById("run-backup").addEventListener("click", async () => {
-  const username = document.getElementById("b-user").value.trim();
+  const username = document.getElementById("b-user").value.trim() || null;
   const command = document.getElementById("b-cmd").value.trim();
   const key_path = document.getElementById("b-key").value.trim();
   const port = Number(document.getElementById("b-port").value) || 22;
-  if (!username || !command) return toast("Укажи логин и команду", true);
+  if (!command) return toast("Укажи команду (например: show running-config)", true);
   try {
-    const result = await api(`/api/nodes/${selectedNodeId}/backup`, {
+    const result = await apiWithCredentials(`/api/nodes/${selectedNodeId}/backup`, {
       method: "POST",
       body: JSON.stringify({ username, command, key_path: key_path || null, port }),
     });

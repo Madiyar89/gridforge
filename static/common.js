@@ -26,6 +26,7 @@ const NAV_ICONS = {
   channels: '<path d="M10 3a4.5 4.5 0 0 1 4.5 4.5c0 3.5 1.5 5 1.5 5H4s1.5-1.5 1.5-5A4.5 4.5 0 0 1 10 3z"/><path d="M8.3 15.5a1.8 1.8 0 0 0 3.4 0"/>',
   ports: '<rect x="2.5" y="5.5" width="15" height="9" rx="1.5"/><path d="M6 8.5v3"/><path d="M10 8.5v3"/><path d="M14 8.5v3"/>',
   users: '<circle cx="10" cy="6.5" r="3"/><path d="M4 16.5c0-3.2 2.7-5 6-5s6 1.8 6 5"/>',
+  credentials: '<circle cx="7" cy="10" r="3.5"/><path d="M10.2 10h7.3"/><path d="M14.5 10v3"/><path d="M17 10v2.2"/>',
 };
 
 function navIcon(name) {
@@ -75,6 +76,7 @@ const NAV_GROUPS = [
     items: [
       { href: "channels.html", label: "Каналы", icon: "channels" },
       { href: "users.html", label: "Пользователи", icon: "users" },
+      { href: "credentials.html", label: "Учётки", icon: "credentials" },
     ],
   },
 ];
@@ -134,6 +136,27 @@ async function api(path, options = {}) {
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+// Учётка узла централизована (Credential, Настройки → Учётки) — большинство
+// запросов к устройствам (бэкап, порты, Рубка, Сценарии, консоль) шлётся
+// БЕЗ username/password, сервер сам подставляет центральную учётку по
+// группе узла. Просим логин/пароль вручную только если сервер ответил, что
+// подходящей учётки нет (422, credentialRequired) — тогда одна попытка
+// повтора с введённой учёткой, без сохранения на клиенте.
+async function apiWithCredentials(path, options = {}) {
+  try {
+    return await api(path, options);
+  } catch (e) {
+    if (e.status !== 422 || !/нужен логин/.test(e.message)) throw e;
+    const username = prompt("Логин для подключения к узлу (учётка по умолчанию не настроена):");
+    if (!username) throw e;
+    const password = prompt("Пароль (пусто — если вход по ключу):") || null;
+    const body = options.body ? JSON.parse(options.body) : {};
+    body.username = username;
+    body.password = password;
+    return await api(path, { ...options, body: JSON.stringify(body) });
+  }
 }
 
 function toast(message, isError = false) {

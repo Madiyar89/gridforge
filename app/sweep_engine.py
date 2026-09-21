@@ -43,6 +43,10 @@ async def _run_one(
     port: int,
     timeout_seconds: float,
 ) -> None:
+    # username/password/key_path приходят готовыми на каждую задачу (см.
+    # run_sweep) — либо явная учётка из запроса (одна на все узлы, как
+    # раньше), либо уже разрешённая по узлу центральная (Credential,
+    # разные узлы могут отличаться группой и, соответственно, учёткой).
     async with semaphore:
         # Транспорт выбирается по вендору: часть парка только по Telnet.
         outcome = await run_device_command(
@@ -76,16 +80,15 @@ async def run_sweep(
     sweep_id: int,
     tasks: list[dict],
     *,
-    username: str,
-    password: str | None,
-    key_path: str | None,
     port: int,
     timeout_seconds: float,
 ) -> None:
     """Фоновая часть: опрашивает узлы и закрывает прогон.
 
-    `tasks` — список словарей {result_id, address, command, vendor}, подготовленных
-    вызывающей стороной в её сессии. Сюда не передаются объекты ORM: они
+    `tasks` — список словарей {result_id, address, command, vendor,
+    username, password, key_path}, подготовленных вызывающей стороной в
+    её сессии (учётка уже разрешена на узел — явная или центральная, см.
+    create_sweep в main.py). Сюда не передаются объекты ORM: они
     принадлежат чужой сессии, которая к этому моменту уже закрыта.
     """
     semaphore = asyncio.Semaphore(MAX_PARALLEL)
@@ -98,9 +101,9 @@ async def run_sweep(
                 task["address"],
                 task["command"],
                 task.get("vendor"),
-                username=username,
-                password=password,
-                key_path=key_path,
+                username=task["username"],
+                password=task.get("password"),
+                key_path=task.get("key_path"),
                 port=port,
                 timeout_seconds=timeout_seconds,
             )

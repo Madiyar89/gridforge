@@ -178,12 +178,9 @@ function renderScenarioForm() {
   document.getElementById("run-scenario-btn").addEventListener("click", runActiveScenario);
 }
 
-function askCredentials() {
-  const username = prompt("Логин для подключения к узлам:");
-  if (!username) return null;
-  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
-  return { username, password };
-}
+// Учётка — центральная (Настройки → Учётки), своя на группу узла;
+// ручной prompt — только если сервер ответит, что нет ни центральной,
+// ни явной учётки (см. apiWithCredentials в common.js).
 
 async function runActiveScenario() {
   if (!_activeScenario) return;
@@ -197,21 +194,18 @@ async function runActiveScenario() {
     if (!params[p]) return toast(`Заполни параметр: ${p}`, true);
   }
 
-  const creds = askCredentials();
-  if (!creds) return;
-
   if (!confirm(`Сценарий «${_activeScenario.label}» изменит конфигурацию на ${_selected.size} узлах. Продолжить?`)) {
     return;
   }
 
   try {
-    const started = await api(`/api/scenarios/${_activeScenario.id}/run`, {
+    const started = await apiWithCredentials(`/api/scenarios/${_activeScenario.id}/run`, {
       method: "POST",
-      body: JSON.stringify({ node_ids: [..._selected], params, ...creds }),
+      body: JSON.stringify({ node_ids: [..._selected], params }),
     });
     toast(`Запущено на ${started.nodes} узлах`);
     if (started.skipped && started.skipped.length) {
-      toast(`Пропущены (нет команды под вендор): ${started.skipped.join(", ")}`, true);
+      toast(`Пропущены: ${started.skipped.join(", ")}`, true);
     }
     watchRun(started.id);
     refreshHistory();

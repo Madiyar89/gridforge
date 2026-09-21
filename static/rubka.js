@@ -132,26 +132,23 @@ document.getElementById("run-custom").addEventListener("click", () => {
   runSweep({ command });
 });
 
-function askCredentials() {
-  // Спрашиваем каждый раз: пароль от боевого оборудования не должен
-  // оседать ни в localStorage, ни в полях формы между заходами.
-  const username = prompt("Логин для подключения к узлам:");
-  if (!username) return null;
-  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
-  return { username, password };
-}
+// Учётка — центральная (Настройки → Учётки), своя на группу узла;
+// разные узлы в выборке могут молча использовать разные учётки. Ручной
+// prompt — только если сервер ответит, что для узла нет ни центральной,
+// ни явной учётки (см. apiWithCredentials в common.js).
 
 async function runSweep(what) {
   if (_selected.size === 0) return toast("Не выбрано ни одного узла", true);
-  const creds = askCredentials();
-  if (!creds) return;
 
   try {
-    const started = await api("/api/sweeps", {
+    const started = await apiWithCredentials("/api/sweeps", {
       method: "POST",
-      body: JSON.stringify({ node_ids: [..._selected], ...what, ...creds }),
+      body: JSON.stringify({ node_ids: [..._selected], ...what }),
     });
     toast(`Запущено на ${started.nodes} узлах`);
+    if (started.skipped && started.skipped.length) {
+      toast(`Пропущены (нет учётки): ${started.skipped.join(", ")}`, true);
+    }
     document.getElementById("custom-command").value = "";
     watchSweep(started.id);
     refreshHistory();

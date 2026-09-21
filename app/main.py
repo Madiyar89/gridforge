@@ -68,6 +68,7 @@ from app.models import (
     Capture,
     CaptureStatus,
     Channel,
+    Credential,
     EscalationStep,
     Group,
     Incident,
@@ -91,6 +92,7 @@ from app.retention_engine import run_retention
 from app.port_security import parse_port_protection, parse_stp_global, protection_summary
 from app.port_commands import PortCommandError, apply_port, bounce_port
 from app.stp_protection import StpProtectionError, apply_stp_protection
+from app.credentials_engine import encrypt_password, mask_credential, resolve_credential
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
@@ -106,6 +108,7 @@ from app.schemas import (
     BackupTriggerIn,
     CaptureIn,
     ChannelIn,
+    CredentialIn,
     EscalationStepIn,
     GroupIn,
     LoginIn,
@@ -144,6 +147,23 @@ def _db() -> Session:
         yield db
     finally:
         db.close()
+
+
+def _resolve_node_credential(db: Session, node: Node, payload) -> tuple[str, str | None, str | None]:
+    """username/password/key_path для запроса к одному узлу: явно
+    переданные в теле запроса — в приоритете (ручной override как
+    раньше), иначе центральная учётка (Credential, см.
+    credentials_engine.resolve_credential). 422, если нет ни того, ни
+    другого — тот же текст ошибки везде, где вызывается."""
+    if payload.username:
+        return payload.username, payload.password, payload.key_path
+    cred = resolve_credential(db, node)
+    if cred is None:
+        raise HTTPException(
+            status_code=422,
+            detail="нужен логин — укажи явно или настрой центральную учётку в Настройки → Учётки",
+        )
+    return cred["username"], cred["password"], cred["key_path"]
 
 
 @asynccontextmanager
@@ -250,6 +270,48 @@ def delete_group(group_id: int, db: Session = Depends(_db)):
     if group.nodes:
         raise HTTPException(status_code=409, detail=f"В группе ещё {len(group.nodes)} узел(ов) — сначала перенеси/удали их")
     db.delete(group)
+    db.commit()
+
+
+@api_write.post("/api/credentials", status_code=201)
+def upsert_credential(payload: CredentialIn, db: Session = Depends(_db)):
+    """Заводит или заменяет центральную учётку для группы (group_id=None —
+    учётка по умолчанию). Одна учётка на группу — новый POST с тем же
+    group_id заменяет старую, а не плодит дубликаты (иначе resolve_credential
+    получал бы неоднозначный выбор между несколькими записями)."""
+    if payload.group_id is not None and db.get(Group, payload.group_id) is None:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    existing = db.query(Credential).filter(Credential.group_id == payload.group_id).first()
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
+    cred = Credential(
+        group_id=payload.group_id,
+        label=payload.label,
+        username=payload.username,
+        password=encrypt_password(payload.password),
+        key_path=payload.key_path,
+    )
+    db.add(cred)
+    db.commit()
+    db.refresh(cred)
+    return mask_credential(cred)
+
+
+@api_write.get("/api/credentials")
+def list_credentials(db: Session = Depends(_db)):
+    """Права admin, не обычный api_read — пароли не отдаются (см.
+    mask_credential), но сам факт "у этой группы есть общая учётка X" уже
+    чувствительная информация, как у ApiKey."""
+    return [mask_credential(c) for c in db.query(Credential).order_by(Credential.group_id.is_(None).desc(), Credential.label).all()]
+
+
+@api_write.delete("/api/credentials/{credential_id}", status_code=204)
+def delete_credential(credential_id: int, db: Session = Depends(_db)):
+    cred = db.get(Credential, credential_id)
+    if cred is None:
+        raise HTTPException(status_code=404, detail="Учётка не найдена")
+    db.delete(cred)
     db.commit()
 
 
@@ -677,10 +739,11 @@ async def trigger_backup(
     key: Principal = Depends(require_api_key),
 ):
     node = require_node_access(db, key, node_id)
+    username, password, key_path = _resolve_node_credential(db, node, payload)
     backup = await run_backup(
         db, node,
-        username=payload.username, command=payload.command,
-        key_path=payload.key_path, password=payload.password, port=payload.port,
+        username=username, command=payload.command,
+        key_path=key_path, password=password, port=payload.port,
     )
     return {"id": backup.id, "changed": backup.changed, "error": backup.error}
 
@@ -1018,12 +1081,13 @@ async def refresh_ports(
     Команда сюда не передаётся — её выбирает сервер по вендору узла,
     иначе через это поле можно было бы выполнить произвольную."""
     node = require_node_access(db, key, node_id)
+    username, password, key_path = _resolve_node_credential(db, node, payload)
     snapshot = await collect_ports(
         db,
         node,
-        username=payload.username,
-        password=payload.password,
-        key_path=payload.key_path,
+        username=username,
+        password=password,
+        key_path=key_path,
         port=payload.port,
         timeout_seconds=payload.timeout_seconds,
     )
@@ -1096,6 +1160,7 @@ async def apply_port_endpoint(
     port_name — через путь, а не query/body: содержит "/" (Gi1/0/5),
     отсюда {port_name:path} в маршруте."""
     node = require_node_access(db, key, node_id)
+    username, password, key_path = _resolve_node_credential(db, node, payload)
     try:
         result = await apply_port(
             node,
@@ -1105,9 +1170,9 @@ async def apply_port_endpoint(
             state=payload.state,
             port_security=payload.port_security,
             port_security_maximum=payload.port_security_maximum,
-            username=payload.username,
-            password=payload.password,
-            key_path=payload.key_path,
+            username=username,
+            password=password,
+            key_path=key_path,
             conn_port=payload.port,
             timeout_seconds=payload.timeout_seconds,
         )
@@ -1127,12 +1192,13 @@ async def bounce_port_endpoint(
     """Отбить порт: shutdown -> пауза -> no shutdown — перенесено из
     bounce_port_cisco.yml/bounce_port_juniper.yml NetOpsHub."""
     node = require_node_access(db, key, node_id)
+    username, password, key_path = _resolve_node_credential(db, node, payload)
     return await bounce_port(
         node,
         port_name,
-        username=payload.username,
-        password=payload.password,
-        key_path=payload.key_path,
+        username=username,
+        password=password,
+        key_path=key_path,
         conn_port=payload.port,
         timeout_seconds=payload.timeout_seconds,
         delay_seconds=payload.delay_seconds,
@@ -1152,6 +1218,7 @@ async def apply_stp_protection_endpoint(
     берутся из последнего снимка портов (GET /api/nodes/{id}/ports,
     is_trunk на каждом порту), клиент может их поправить перед отправкой."""
     node = require_node_access(db, key, node_id)
+    username, password, key_path = _resolve_node_credential(db, node, payload)
     try:
         return await apply_stp_protection(
             node,
@@ -1161,9 +1228,9 @@ async def apply_stp_protection_endpoint(
             root_bridge_vlans=payload.root_bridge_vlans,
             bpdu_guard=payload.bpdu_guard,
             loop_guard=payload.loop_guard,
-            username=payload.username,
-            password=payload.password,
-            key_path=payload.key_path,
+            username=username,
+            password=password,
+            key_path=key_path,
             conn_port=payload.port,
             timeout_seconds=payload.timeout_seconds,
         )
@@ -1263,29 +1330,49 @@ async def create_sweep(
     db.commit()
     db.refresh(sweep)
 
+    # Учётка — явная на все узлы разом (как раньше), либо у каждого узла
+    # своя центральная (разные группы могут иметь разные учётки) —
+    # разрешаем по узлу, не одну на весь прогон.
     tasks = []
+    skipped = []
     for node in nodes:
+        if payload.username:
+            username, password, node_key_path = payload.username, payload.password, payload.key_path
+        else:
+            cred = resolve_credential(db, node)
+            if cred is None:
+                skipped.append(node.name)
+                continue
+            username, password, node_key_path = cred["username"], cred["password"], cred["key_path"]
         command = custom_command or command_for_node(payload.preset_key, node.vendor)
         result = SweepResult(sweep_id=sweep.id, node_id=node.id, command=command)
         db.add(result)
         db.commit()
         db.refresh(result)
-        tasks.append({"result_id": result.id, "address": node.address, "command": command, "vendor": node.vendor})
+        tasks.append(
+            {
+                "result_id": result.id,
+                "address": node.address,
+                "command": command,
+                "vendor": node.vendor,
+                "username": username,
+                "password": password,
+                "key_path": node_key_path,
+            }
+        )
+
+    if not tasks:
+        db.delete(sweep)
+        db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Ни для одного узла нет учётки (явной или центральной): {', '.join(skipped)}",
+        )
 
     # Прогон уходит в фон: десятки SSH-сессий не должны держать HTTP-запрос
     # открытым, интерфейс опрашивает прогресс отдельно.
-    asyncio.create_task(
-        run_sweep(
-            sweep.id,
-            tasks,
-            username=payload.username,
-            password=payload.password,
-            key_path=payload.key_path,
-            port=payload.port,
-            timeout_seconds=payload.timeout_seconds,
-        )
-    )
-    return {"id": sweep.id, "label": sweep.label, "nodes": len(tasks)}
+    asyncio.create_task(run_sweep(sweep.id, tasks, port=payload.port, timeout_seconds=payload.timeout_seconds))
+    return {"id": sweep.id, "label": sweep.label, "nodes": len(tasks), "skipped": skipped}
 
 
 @api_read.get("/api/sweeps")
@@ -1417,8 +1504,16 @@ async def run_scenario_endpoint(
         vendor_key = node.vendor.value if node.vendor else None
         template = scenario.commands_by_vendor.get(vendor_key)
         if template is None:
-            skipped.append(node.name)
+            skipped.append(f"{node.name} (нет команды под вендор)")
             continue
+        if payload.username:
+            username, password, node_key_path = payload.username, payload.password, payload.key_path
+        else:
+            cred = resolve_credential(db, node)
+            if cred is None:
+                skipped.append(f"{node.name} (нет учётки)")
+                continue
+            username, password, node_key_path = cred["username"], cred["password"], cred["key_path"]
         try:
             command = render_command(template, payload.params)
         except ScenarioParamError as exc:
@@ -1429,27 +1524,27 @@ async def run_scenario_endpoint(
         db.add(result)
         db.commit()
         db.refresh(result)
-        tasks.append({"result_id": result.id, "address": node.address, "command": command, "vendor": node.vendor})
+        tasks.append(
+            {
+                "result_id": result.id,
+                "address": node.address,
+                "command": command,
+                "vendor": node.vendor,
+                "username": username,
+                "password": password,
+                "key_path": node_key_path,
+            }
+        )
 
     if not tasks:
         db.delete(run)
         db.commit()
         raise HTTPException(
             status_code=422,
-            detail=f"Ни один из выбранных узлов не подходит под сценарий (нет команды под вендор): {', '.join(skipped)}",
+            detail=f"Ни один из выбранных узлов не подходит: {', '.join(skipped)}",
         )
 
-    asyncio.create_task(
-        run_scenario(
-            run.id,
-            tasks,
-            username=payload.username,
-            password=payload.password,
-            key_path=payload.key_path,
-            port=payload.port,
-            timeout_seconds=payload.timeout_seconds,
-        )
-    )
+    asyncio.create_task(run_scenario(run.id, tasks, port=payload.port, timeout_seconds=payload.timeout_seconds))
     return {"id": run.id, "label": run.label, "nodes": len(tasks), "skipped": skipped}
 
 

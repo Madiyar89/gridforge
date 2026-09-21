@@ -18,6 +18,19 @@ class GroupIn(BaseModel):
     name: str
 
 
+class CredentialIn(BaseModel):
+    """group_id=None — учётка по умолчанию (см. Credential в models.py и
+    credentials_engine.resolve_credential). Пароль хранится зашифрованным
+    (Fernet, secrets_crypto.py), наружу (GET /api/credentials) никогда не
+    возвращается — только has_password."""
+
+    group_id: int | None = None
+    label: str = ""
+    username: str
+    password: str | None = None
+    key_path: str | None = None
+
+
 class NodeIn(BaseModel):
     name: str
     address: str
@@ -76,7 +89,7 @@ class SweepIn(BaseModel):
     node_ids: list[int]
     preset_key: str | None = None
     command: str | None = None
-    username: str
+    username: str | None = None
     password: str | None = None
     key_path: str | None = None
     port: int = 22
@@ -95,7 +108,7 @@ class ScenarioIn(BaseModel):
 class ScenarioRunIn(BaseModel):
     node_ids: list[int]
     params: dict[str, str] = {}
-    username: str
+    username: str | None = None
     password: str | None = None
     key_path: str | None = None
     port: int = 22
@@ -147,7 +160,7 @@ class ActionIn(BaseModel):
 
 
 class BackupTriggerIn(BaseModel):
-    username: str
+    username: str | None = None
     command: str
     key_path: str | None = None
     password: str | None = None
@@ -159,9 +172,10 @@ class PortRefreshIn(BaseModel):
     определяется вендором узла на сервере (см. ports_engine.STATUS_COMMANDS),
     иначе через это поле можно было бы выполнить произвольную.
 
-    Учётка, как и у бэкапа, живёт только в пределах запроса."""
+    Учётка не обязательна в запросе — если не указана, берётся
+    центральная (Credential, см. credentials_engine.resolve_credential)."""
 
-    username: str
+    username: str | None = None
     password: str | None = None
     key_path: str | None = None
     port: int = 22
@@ -171,15 +185,15 @@ class PortRefreshIn(BaseModel):
 class PortApplyIn(BaseModel):
     """Изменение одного порта (описание/VLAN/up-down/Port Security) — хотя
     бы одно из полей обязательно, см. проверку в
-    port_commands.build_port_lines. Учётка, как и везде, живёт только в
-    пределах запроса."""
+    port_commands.build_port_lines. Учётка не обязательна — см.
+    PortRefreshIn."""
 
     description: str | None = None
     vlan: str | None = None
     state: str | None = None  # "up" | "down" | None
     port_security: str | None = None  # "on" | "off" | None
     port_security_maximum: int | str | None = None
-    username: str
+    username: str | None = None
     password: str | None = None
     key_path: str | None = None
     port: int = 22
@@ -189,7 +203,7 @@ class PortApplyIn(BaseModel):
 class PortBounceIn(BaseModel):
     """Отбить порт: shutdown -> пауза -> no shutdown."""
 
-    username: str
+    username: str | None = None
     password: str | None = None
     key_path: str | None = None
     port: int = 22
@@ -207,7 +221,7 @@ class StpProtectionApplyIn(BaseModel):
     root_bridge_vlans: list[str] = []
     bpdu_guard: bool = True
     loop_guard: bool = True
-    username: str
+    username: str | None = None
     password: str | None = None
     key_path: str | None = None
     port: int = 22

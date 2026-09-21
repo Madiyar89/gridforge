@@ -224,20 +224,15 @@ async function applyPortEdit(port, state) {
     return toast("Нечего применять — ничего не изменилось", true);
   }
 
-  const creds = askPortCredentials();
-  if (!creds) return;
-
+  const nodeId = document.getElementById("node-select").value;
   const resultEl = document.getElementById("edit-result");
   const btn = document.getElementById("edit-apply");
   btn.disabled = true;
   btn.textContent = "Применяю…";
   try {
-    const result = await api(
-      `/api/nodes/${creds.nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
-      {
-        method: "POST",
-        body: JSON.stringify({ description, vlan, state, ...creds.auth }),
-      }
+    const result = await apiWithCredentials(
+      `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
+      { method: "POST", body: JSON.stringify({ description, vlan, state }) }
     );
     renderApplyResult(resultEl, result);
   } catch (e) {
@@ -254,23 +249,17 @@ async function applyPortSecurity(port, portSecurity) {
     return toast("Выбери включить/выключить или укажи максимум MAC", true);
   }
 
-  const creds = askPortCredentials();
-  if (!creds) return;
-
+  const nodeId = document.getElementById("node-select").value;
   const resultEl = document.getElementById("ps-result");
   const btn = document.getElementById("ps-apply");
   btn.disabled = true;
   btn.textContent = "Применяю…";
   try {
-    const result = await api(
-      `/api/nodes/${creds.nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
+    const result = await apiWithCredentials(
+      `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/apply`,
       {
         method: "POST",
-        body: JSON.stringify({
-          port_security: portSecurity,
-          port_security_maximum: maximum,
-          ...creds.auth,
-        }),
+        body: JSON.stringify({ port_security: portSecurity, port_security_maximum: maximum }),
       }
     );
     renderApplyResult(resultEl, result);
@@ -286,17 +275,15 @@ async function applyPortSecurity(port, portSecurity) {
 async function bouncePort(port) {
   if (!confirm(`Отбить порт ${port.name}: shutdown → пауза 5с → no shutdown. Продолжить?`)) return;
 
-  const creds = askPortCredentials();
-  if (!creds) return;
-
+  const nodeId = document.getElementById("node-select").value;
   const resultEl = document.getElementById("bounce-result");
   const btn = document.getElementById("bounce-apply");
   btn.disabled = true;
   btn.textContent = "Отбиваю…";
   try {
-    const result = await api(
-      `/api/nodes/${creds.nodeId}/ports/${encodeURIComponent(port.name)}/bounce`,
-      { method: "POST", body: JSON.stringify(creds.auth) }
+    const result = await apiWithCredentials(
+      `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/bounce`,
+      { method: "POST", body: JSON.stringify({}) }
     );
     renderApplyResult(resultEl, result);
     if (result.ok) loadPorts();
@@ -306,14 +293,6 @@ async function bouncePort(port) {
     btn.disabled = false;
     btn.textContent = "Отбить порт";
   }
-}
-
-function askPortCredentials() {
-  const nodeId = document.getElementById("node-select").value;
-  const username = prompt("Логин для подключения к узлу:");
-  if (!username) return null;
-  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
-  return { nodeId, auth: { username, password } };
 }
 
 function renderApplyResult(resultEl, result) {
@@ -353,19 +332,16 @@ document.getElementById("refresh-ports").addEventListener("click", async () => {
   const nodeId = document.getElementById("node-select").value;
   if (!nodeId) return toast("Выбери узел", true);
 
-  // Учётка спрашивается каждый раз и никуда не сохраняется — тот же
-  // принцип, что в Рубке и при снятии бэкапа.
-  const username = prompt("Логин для подключения к узлу:");
-  if (!username) return;
-  const password = prompt("Пароль (пусто — если вход по ключу):") || null;
-
+  // Учётка берётся из центральной (Настройки → Учётки) — спрашиваем
+  // вручную только если для узла не настроена ни своя, ни учётка по
+  // умолчанию (см. apiWithCredentials в common.js).
   const btn = document.getElementById("refresh-ports");
   btn.disabled = true;
   btn.textContent = "Опрашиваю…";
   try {
-    const result = await api(`/api/nodes/${nodeId}/ports/refresh`, {
+    const result = await apiWithCredentials(`/api/nodes/${nodeId}/ports/refresh`, {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({}),
     });
     if (result.ok) {
       toast(`Снято портов: ${result.ports}`);
@@ -459,15 +435,13 @@ async function applyStpProtection() {
   const accessPorts = splitPortList(document.getElementById("stp-access-ports").value);
   const trunkPorts = splitPortList(document.getElementById("stp-trunk-ports").value);
 
-  const creds = askPortCredentials();
-  if (!creds) return;
-
+  const nodeId = document.getElementById("node-select").value;
   const resultEl = document.getElementById("stp-result");
   const btn = document.getElementById("stp-apply");
   btn.disabled = true;
   btn.textContent = "Применяю…";
   try {
-    const result = await api(`/api/nodes/${creds.nodeId}/stp-protection/apply`, {
+    const result = await apiWithCredentials(`/api/nodes/${nodeId}/stp-protection/apply`, {
       method: "POST",
       body: JSON.stringify({
         access_ports: accessPorts,
@@ -476,7 +450,6 @@ async function applyStpProtection() {
         root_bridge_vlans: rootBridgeVlans,
         bpdu_guard: bpduGuard,
         loop_guard: loopGuard,
-        ...creds.auth,
       }),
     });
     renderApplyResult(resultEl, result);

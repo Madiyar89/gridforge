@@ -34,8 +34,8 @@ document.getElementById("c-connect").addEventListener("click", () => {
   const password = document.getElementById("c-pass").value;
   const port = Number(document.getElementById("c-port").value) || 22;
   if (!nodeId) return toast("Выбери узел", true);
-  if (!username) return toast("Укажи логин", true);
-  if (!keyPath && !password) return toast("Укажи ключ или пароль", true);
+  // username/пароль/ключ можно не указывать — тогда сервер подставит
+  // центральную учётку узла (Настройки → Учётки), см. main.py/console_ws.py.
 
   if (ws) {
     ws.close();
