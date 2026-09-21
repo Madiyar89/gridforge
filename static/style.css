@@ -267,6 +267,38 @@ a{color:var(--accent);}
 }
 .icon-btn:hover{color:var(--accent);border-color:var(--accent);}
 
+/* === риск-скор отчёты (AD-аудит, сетевой аудит) === */
+.risk-band{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600;}
+.risk-band.low{color:var(--ok);background:var(--ok-bg);}
+.risk-band.medium{color:var(--warn);background:var(--warn-bg);}
+.risk-band.high,.risk-band.critical{color:var(--crit);background:var(--crit-bg);}
+.domain-row{
+  padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;
+  align-items:center;gap:10px;cursor:pointer;
+}
+.domain-row:last-child{border-bottom:none;}
+.domain-row:hover{background:var(--surface-2);}
+.domain-row .name{font-weight:600;font-size:13px;}
+.domain-row .sub{color:var(--text-dim);font-size:11.5px;font-family:var(--mono);margin-top:2px;}
+.domain-row .score{font-family:var(--mono);font-size:18px;font-weight:700;}
+.risk-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:14px 16px;}
+.risk-tile{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+.risk-tile .t-title{font-size:11.5px;color:var(--text-dim);margin-bottom:4px;}
+.risk-tile .t-score{font-family:var(--mono);font-size:20px;font-weight:700;}
+.risk-cat-section{border-top:1px solid var(--border);}
+.risk-cat-head{
+  padding:11px 16px;display:flex;justify-content:space-between;align-items:center;
+  font-size:13px;font-weight:600;background:var(--surface-2);
+}
+.risk-rule-row{padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:10px;}
+.risk-rule-row .pts{font-family:var(--mono);font-weight:700;min-width:26px;text-align:right;}
+.risk-rule-row .name{font-weight:600;font-size:12.5px;}
+.risk-rule-row .desc{color:var(--text-dim);font-size:11.5px;margin-top:2px;}
+.risk-objects{margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--text-dim);max-height:140px;overflow-y:auto;}
+.risk-objects div{padding:1px 0;}
+.risk-fix{margin-top:6px;font-size:11.5px;color:var(--accent);}
+details.risk-details summary{cursor:pointer;font-size:11.5px;color:var(--text-dim);}
+
 dialog{
   background:var(--surface);color:var(--text);border:1px solid var(--border);
   border-radius:12px;padding:0;width:min(440px,92vw);

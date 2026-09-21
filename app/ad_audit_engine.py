@@ -11,11 +11,16 @@ from __future__ import annotations
 
 import asyncio
 import ssl
+from datetime import datetime, timezone
 
 import ldap3
 from sqlalchemy.orm import Session
 
-from app.models import AdAuditRun, AdFinding, WatchSeverity
+from app.ad_audit_collector import collect_ad_facts
+from app.ad_audit_rules import CATALOG_UPDATED_AT, CATALOG_VERSION, RULES
+from app.ldap_engine import bind_kwargs, decrypt_password
+from app.models import AdAuditRun, AdFinding, LdapConnection, WatchSeverity
+from app.risk_scoring import category_score, evaluate_rules, object_score, risk_band
 
 # Биты userAccountControl (RFC — задокументированы Microsoft, не чья-то ИС)
 UAC_ACCOUNTDISABLE = 0x0002
@@ -143,3 +148,66 @@ async def run_ad_audit(db: Session, server: str, bind_dn: str, bind_password: st
     db.commit()
     db.refresh(run)
     return run
+
+
+# ============================================================================
+# Новый безстейтовый отчёт (перенос из NetOpsHub, шаг 2) — использует
+# LdapConnection вместо разового ввода пароля, 25-правильный каталог из
+# ad_audit_rules.py и общий движок скоринга risk_scoring.py. Отчёт считается
+# заново на каждый запрос, не персистится — тот же принцип, что и у сетевого
+# аудита в NetOpsHub (история изменений видна через сравнение backup'ов, не
+# через хранение прошлых отчётов)."""
+
+
+def _build_domain_report(conn: LdapConnection, facts: dict) -> dict:
+    categories: list[dict] = []
+    category_scores: dict[str, int] = {}
+    by_category: dict[str, list] = {}
+    for rule in RULES:
+        by_category.setdefault(rule.category, []).append(rule)
+
+    for category, rules in by_category.items():
+        results = evaluate_rules(rules, facts)
+        score = category_score(results)
+        category_scores[category] = score
+        categories.append({"name": category, "score": score, "rules": results})
+
+    score = object_score(category_scores)
+    return {
+        "label": conn.label,
+        "domain": conn.domain,
+        "ok": True,
+        "risk_score": score,
+        "risk_band": risk_band(score),
+        "categories": categories,
+    }
+
+
+async def run_domain_report(conn: LdapConnection) -> dict:
+    """Один домен — подключение, сбор фактов, прогон правил. Ошибка bind'а
+    или поиска не валит весь флот-отчёт, попадает в errors[] у вызывающей
+    стороны (см. run_ad_audit_fleet_report)."""
+    password = decrypt_password(conn.password)
+    kwargs = bind_kwargs(conn, password)
+    try:
+        facts = await asyncio.to_thread(collect_ad_facts, **kwargs, base_dn=conn.base_dn)
+    except ldap3.core.exceptions.LDAPException as exc:
+        return {
+            "label": conn.label,
+            "domain": conn.domain,
+            "ok": False,
+            "error": str(exc) or exc.__class__.__name__,
+        }
+    return _build_domain_report(conn, facts)
+
+
+async def run_ad_audit_fleet_report(db: Session) -> dict:
+    connections = db.query(LdapConnection).order_by(LdapConnection.label).all()
+    domains = [await run_domain_report(conn) for conn in connections]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "catalog_version": CATALOG_VERSION,
+        "catalog_updated_at": CATALOG_UPDATED_AT,
+        "domains": [d for d in domains if d["ok"]],
+        "errors": [d for d in domains if not d["ok"]],
+    }

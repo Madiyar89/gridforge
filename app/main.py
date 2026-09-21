@@ -30,7 +30,7 @@ from app.auth import (
 )
 from app.db import get_session, init_db
 from app.scenario_catalog import seed_default_scenarios
-from app.ad_audit_engine import run_ad_audit
+from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
 from app.dashboard_engine import build_dashboard
@@ -1063,6 +1063,14 @@ def get_ad_audit_findings(run_id: int, db: Session = Depends(_db)):
         {"id": f.id, "check_name": f.check_name, "severity": f.severity.value, "dn": f.dn, "detail": f.detail}
         for f in findings
     ]
+
+
+@api_read.get("/api/ad-audit/report")
+async def get_ad_audit_report(db: Session = Depends(_db)):
+    """Безстейтовый флот-отчёт по всем LdapConnection — 25 правил, риск-скор
+    по категориям (см. ad_audit_engine.run_ad_audit_fleet_report). Считается
+    заново на каждый запрос, ничего не пишет в БД."""
+    return await run_ad_audit_fleet_report(db)
 
 
 @api_write.post("/api/retention/run")
