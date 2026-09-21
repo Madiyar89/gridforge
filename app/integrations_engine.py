@@ -50,9 +50,12 @@ async def _test_zabbix(url: str, api_token: str) -> None:
 async def _test_graylog(url: str, api_token: str) -> None:
     """Graylog REST API — токен как логин в Basic Auth с паролем "token"
     (штатный способ Graylog для API-токенов, не сессионный логин/пароль
-    человека)."""
+    человека). verify=False — реальный сертификат этого Graylog
+    самоподписанный (подтверждено вживую, curl требовал -k), тот же
+    случай, что уже решался для внешних систем в этой инфраструктуре
+    (corporate-ca.crt у исходящего HTTPS в Docker-сборках)."""
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
             res = await client.get(
                 url.rstrip("/") + "/api/system",
                 auth=(api_token, "token"),
