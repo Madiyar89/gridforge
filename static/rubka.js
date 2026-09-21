@@ -184,7 +184,8 @@ function renderResults(data) {
     `${escapeHtml(data.label)} · готово ${data.done} из ${data.total}` +
     (data.failed ? ` · ошибок ${data.failed}` : "");
 
-  document.getElementById("results-body").innerHTML = data.results
+  document.getElementById("results-body").innerHTML = [...data.results]
+    .sort((a, b) => naturalCompare(a.node_name, b.node_name))
     .map((r) => {
       if (r.ok === null) {
         return `<div class="result-row"><b>${escapeHtml(r.node_name)}</b> <span class="addr">— опрашивается…</span></div>`;
