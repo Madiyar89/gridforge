@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — LDAP</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>LDAP</h1>
+  <p>Домены для AD-аудита — можно завести несколько сразу. Подключение проверяется при сохранении (реальный bind), пароль хранится зашифрованным и после сохранения не показывается.</p>
+</div>
+
+<div class="panel">
+  <h2>Подключения <span class="count" id="ldap-count"></span></h2>
+  <div class="body" id="ldap-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <input id="new-ldap-label" placeholder="метка (напр. mt-inet.kz)">
+    <input id="new-ldap-host" placeholder="контроллер домена (IP/hostname)">
+    <input id="new-ldap-port" type="number" value="636" style="max-width:80px;">
+    <input id="new-ldap-domain" placeholder="домен (напр. mt-inet.kz)">
+  </div>
+  <div class="form-row">
+    <input id="new-ldap-basedn" placeholder="base DN (напр. DC=mt-inet,DC=kz)">
+    <input id="new-ldap-username" placeholder="логин (без домена)">
+    <input id="new-ldap-password" type="password" placeholder="пароль">
+    <label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
+      <input type="checkbox" id="new-ldap-ssl" checked> LDAPS
+    </label>
+    <button id="add-ldap">Сохранить</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="ldap.js"></script>
+</body>
+</html>

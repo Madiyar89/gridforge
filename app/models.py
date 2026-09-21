@@ -150,6 +150,32 @@ class Integration(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class LdapConnection(Base):
+    """Домен для AD-аудита — своя версия LdapCredentialSet из NetOpsHub
+    (2026-09-21, по прямому запросу пользователя: "так же добавил ldap
+    подключение", в связке с переносом AD-аудита на GridForge). Там
+    пароль лежит в отдельном Ansible-Vault-файле на диск, здесь — тот же
+    Fernet-механизм, что уже защищает Credential.password/
+    Integration.api_token (secrets_crypto.py), прямо в этой же строке.
+
+    Bind-логин собирается в момент подключения как f"{username}@{domain}"
+    (UPN), не DN — тот же приём, что в NetOpsHub, работает без знания
+    точного расположения объекта учётки в дереве каталога."""
+
+    __tablename__ = "ldap_connections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    dc_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(default=636)
+    domain: Mapped[str] = mapped_column(String(255), nullable=False)
+    base_dn: Mapped[str] = mapped_column(String(500), nullable=False)
+    username: Mapped[str] = mapped_column(String(128), nullable=False)
+    password: Mapped[str] = mapped_column(String(500), nullable=False)  # зашифровано, см. encrypt_secret
+    use_ssl: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Node(Base):
     __tablename__ = "nodes"
 

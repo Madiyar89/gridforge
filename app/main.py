@@ -73,6 +73,7 @@ from app.models import (
     Group,
     Incident,
     Integration,
+    LdapConnection,
     Node,
     Probe,
     Sample,
@@ -96,6 +97,8 @@ from app.port_commands import PortCommandError, apply_port, bounce_port
 from app.stp_protection import StpProtectionError, apply_stp_protection
 from app.credentials_engine import encrypt_password, mask_credential, resolve_credential
 from app.integrations_engine import INTEGRATION_REGISTRY, IntegrationTestError, encrypt_token
+from app.ldap_engine import LdapTestError, mask_connection, test_bind
+from app.ldap_engine import encrypt_password as encrypt_ldap_password
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
@@ -115,6 +118,7 @@ from app.schemas import (
     EscalationStepIn,
     GroupIn,
     IntegrationIn,
+    LdapConnectionIn,
     LoginIn,
     NodeIn,
     NodeUpdateIn,
@@ -387,6 +391,49 @@ def delete_integration(key: str, db: Session = Depends(_db)):
     if integration is not None:
         db.delete(integration)
         db.commit()
+
+
+@api_read.get("/api/ldap-connections")
+def list_ldap_connections(db: Session = Depends(_db)):
+    return [mask_connection(c) for c in db.query(LdapConnection).order_by(LdapConnection.label).all()]
+
+
+@api_write.post("/api/ldap-connections", status_code=201)
+def create_ldap_connection(payload: LdapConnectionIn, db: Session = Depends(_db)):
+    try:
+        test_bind(
+            dc_host=payload.dc_host,
+            port=payload.port,
+            domain=payload.domain,
+            username=payload.username,
+            password=payload.password,
+            use_ssl=payload.use_ssl,
+        )
+    except LdapTestError as exc:
+        raise HTTPException(status_code=400, detail=f"Не удалось подключиться: {exc}")
+    conn = LdapConnection(
+        label=payload.label,
+        dc_host=payload.dc_host,
+        port=payload.port,
+        domain=payload.domain,
+        base_dn=payload.base_dn,
+        username=payload.username,
+        password=encrypt_ldap_password(payload.password),
+        use_ssl=payload.use_ssl,
+    )
+    db.add(conn)
+    db.commit()
+    db.refresh(conn)
+    return mask_connection(conn)
+
+
+@api_write.delete("/api/ldap-connections/{connection_id}", status_code=204)
+def delete_ldap_connection(connection_id: int, db: Session = Depends(_db)):
+    conn = db.get(LdapConnection, connection_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail="Подключение не найдено")
+    db.delete(conn)
+    db.commit()
 
 
 @api_write.post("/api/nodes", status_code=201)

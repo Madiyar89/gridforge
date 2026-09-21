@@ -44,6 +44,21 @@ class IntegrationIn(BaseModel):
     api_token: str
 
 
+class LdapConnectionIn(BaseModel):
+    """Домен для AD-аудита. Пароль хранится зашифрованным, наружу
+    (GET /api/ldap-connections) никогда не возвращается — см.
+    LdapConnection в models.py."""
+
+    label: str
+    dc_host: str
+    port: int = 636
+    domain: str
+    base_dn: str
+    username: str
+    password: str
+    use_ssl: bool = True
+
+
 class NodeIn(BaseModel):
     name: str
     address: str
