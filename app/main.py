@@ -72,6 +72,7 @@ from app.models import (
     EscalationStep,
     Group,
     Incident,
+    Integration,
     Node,
     Probe,
     Sample,
@@ -94,6 +95,7 @@ from app.port_security import parse_port_protection, parse_stp_global, protectio
 from app.port_commands import PortCommandError, apply_port, bounce_port
 from app.stp_protection import StpProtectionError, apply_stp_protection
 from app.credentials_engine import encrypt_password, mask_credential, resolve_credential
+from app.integrations_engine import INTEGRATION_REGISTRY, IntegrationTestError, encrypt_token
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
@@ -112,6 +114,7 @@ from app.schemas import (
     CredentialIn,
     EscalationStepIn,
     GroupIn,
+    IntegrationIn,
     LoginIn,
     NodeIn,
     NodeUpdateIn,
@@ -330,6 +333,60 @@ def delete_credential(credential_id: int, db: Session = Depends(_db)):
         raise HTTPException(status_code=404, detail="Учётка не найдена")
     db.delete(cred)
     db.commit()
+
+
+@api_read.get("/api/integrations")
+def list_integrations(db: Session = Depends(_db)):
+    """Фиксированный список ключей (INTEGRATION_REGISTRY) — не то, что
+    реально в БД, чтобы показать "не настроено" даже для интеграций,
+    которые ещё никто не заводил, а не молчать про них."""
+    existing = {i.key: i for i in db.query(Integration).all()}
+    return [
+        {
+            "key": key,
+            "label": spec.label,
+            "url_placeholder": spec.url_placeholder,
+            "configured": key in existing,
+            "url": existing[key].url if key in existing else None,
+        }
+        for key, spec in INTEGRATION_REGISTRY.items()
+    ]
+
+
+@api_write.put("/api/integrations/{key}", status_code=204)
+async def set_integration(key: str, payload: IntegrationIn, db: Session = Depends(_db)):
+    spec = INTEGRATION_REGISTRY.get(key)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"неизвестная интеграция: {key}")
+    url = payload.url.strip()
+    if not url:
+        raise HTTPException(status_code=422, detail="URL не может быть пустым")
+    if not payload.api_token:
+        raise HTTPException(status_code=422, detail="токен не может быть пустым")
+
+    existing = db.query(Integration).filter(Integration.key == key).first()
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
+    integration = Integration(key=key, url=url, api_token=encrypt_token(payload.api_token))
+    db.add(integration)
+    db.commit()
+
+    try:
+        await spec.test(url, payload.api_token)
+    except IntegrationTestError as exc:
+        # Настройки уже сохранены (зашифрованы) — не откатываем запись из-за
+        # неудачной проверки, тот же принцип, что и у NetOpsHub: честно
+        # сообщаем, что похоже на неверный URL/токен, можно тут же поправить.
+        raise HTTPException(status_code=400, detail=f"Настройки сохранены, но проверка не прошла: {exc}")
+
+
+@api_write.delete("/api/integrations/{key}", status_code=204)
+def delete_integration(key: str, db: Session = Depends(_db)):
+    integration = db.query(Integration).filter(Integration.key == key).first()
+    if integration is not None:
+        db.delete(integration)
+        db.commit()
 
 
 @api_write.post("/api/nodes", status_code=201)

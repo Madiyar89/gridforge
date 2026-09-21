@@ -27,6 +27,7 @@ const NAV_ICONS = {
   ports: '<rect x="2.5" y="5.5" width="15" height="9" rx="1.5"/><path d="M6 8.5v3"/><path d="M10 8.5v3"/><path d="M14 8.5v3"/>',
   users: '<circle cx="10" cy="6.5" r="3"/><path d="M4 16.5c0-3.2 2.7-5 6-5s6 1.8 6 5"/>',
   credentials: '<circle cx="7" cy="10" r="3.5"/><path d="M10.2 10h7.3"/><path d="M14.5 10v3"/><path d="M17 10v2.2"/>',
+  integrations: '<circle cx="5.5" cy="5.5" r="2.3"/><circle cx="14.5" cy="5.5" r="2.3"/><circle cx="5.5" cy="14.5" r="2.3"/><circle cx="14.5" cy="14.5" r="2.3"/><path d="M7.6 5.5h4.6"/><path d="M5.5 7.6v4.6"/><path d="M14.5 7.6v4.6"/>',
 };
 
 function navIcon(name) {
@@ -77,6 +78,7 @@ const NAV_GROUPS = [
       { href: "channels.html", label: "Каналы", icon: "channels" },
       { href: "users.html", label: "Пользователи", icon: "users" },
       { href: "credentials.html", label: "Учётки", icon: "credentials" },
+      { href: "integrations.html", label: "Интеграции", icon: "integrations" },
     ],
   },
 ];

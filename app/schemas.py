@@ -35,6 +35,15 @@ class CredentialIn(BaseModel):
     key_path: str | None = None
 
 
+class IntegrationIn(BaseModel):
+    """URL + токен внешней системы (Graylog/Zabbix). Токен хранится
+    зашифрованным, наружу (GET /api/integrations) никогда не
+    возвращается — см. Integration в models.py."""
+
+    url: str
+    api_token: str
+
+
 class NodeIn(BaseModel):
     name: str
     address: str

@@ -130,6 +130,26 @@ class Credential(Base):
     node: Mapped["Node | None"] = relationship()
 
 
+class Integration(Base):
+    """Доступ к внешней системе (Graylog/Zabbix и т.п.) — своя версия
+    страницы "Интеграции" из NetOpsHub (2026-09-21, по прямому запросу
+    пользователя: "надо добавить интеграцию в учётки что бы я мог
+    добавлять graylog and zabbix"), тот же принцип: URL + токен, токен
+    зашифрован (Fernet, secrets_crypto.py — тот же механизм, что уже
+    защищает Credential.password), одна запись на ключ интеграции. Список
+    допустимых ключей — INTEGRATION_REGISTRY в integrations_engine.py,
+    не в БД: набор внешних систем, которые GridForge умеет опрашивать,
+    меняется только кодом, не через API."""
+
+    __tablename__ = "integrations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    api_token: Mapped[str] = mapped_column(String(1000), nullable=False)  # зашифровано, см. encrypt_secret
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Node(Base):
     __tablename__ = "nodes"
 

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Интеграции</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .integration-card{padding:14px 16px;border-bottom:1px solid var(--border);}
+  .integration-card:last-child{border-bottom:none;}
+  .integration-head{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .integration-head b{font-size:14px;}
+  .integration-status{font-size:12px;color:var(--text-dim);}
+  .integration-status.ok{color:var(--ok);}
+  .integration-status.off{color:var(--text-dim);}
+  .integration-form{display:none;gap:8px;margin-top:10px;}
+  .integration-form.open{display:flex;flex-wrap:wrap;}
+  .integration-form input{flex:1;min-width:200px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Интеграции</h1>
+  <p>Доступ к внешним системам (Graylog, Zabbix) — URL и токен, чтобы GridForge мог сам к ним обращаться. Токен хранится зашифрованным и после сохранения не показывается.</p>
+</div>
+
+<div class="panel">
+  <h2>Внешние системы</h2>
+  <div class="body" id="integrations-body"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="integrations.js"></script>
+</body>
+</html>
