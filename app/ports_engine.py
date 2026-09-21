@@ -273,6 +273,99 @@ async def collect_ports(
     return snapshot
 
 
+# Команда MAC-таблицы, отфильтрованная по конкретному порту — по прямому
+# запросу пользователя (перенос "По устройству" из NetOpsHub, живым
+# запросом по кнопке, не отдельным хранимым снимком). {port} подставляется
+# уже подтверждённым именем существующего порта (из PortSnapshot), не
+# произвольным пользовательским вводом — command injection risk нет.
+MAC_COMMANDS = {
+    Vendor.cisco_ios: "show mac address-table interface {port}",
+    Vendor.cisco_ios_telnet: "show mac address-table interface {port}",
+    Vendor.junos: "show ethernet-switching table interface {port}",
+}
+
+_MAC_RE = re.compile(r"([0-9a-f]{4}[.:][0-9a-f]{4}[.:][0-9a-f]{4}|(?:[0-9a-f]{2}:){5}[0-9a-f]{2})", re.IGNORECASE)
+
+
+def parse_cisco_mac_table(output: str) -> list[dict]:
+    """Разбирает `show mac address-table interface <port>`."""
+    lines = output.splitlines()
+    header_index = next(
+        (i for i, line in enumerate(lines) if "Mac Address" in line and "Vlan" in line),
+        None,
+    )
+    if header_index is None:
+        return []
+    header = lines[header_index]
+    bounds = _column_bounds(header, ["Vlan", "Mac Address", "Type", "Ports"])
+    if not bounds:
+        return []
+    rows = []
+    for line in lines[header_index + 1:]:
+        if not line.strip() or set(line.strip()) <= {"-"}:
+            continue
+        mac = _slice(line, bounds["Mac Address"])
+        if not _MAC_RE.search(mac):
+            continue
+        rows.append({"vlan": _slice(line, bounds["Vlan"]), "mac": mac, "type": _slice(line, bounds["Type"])})
+    return rows
+
+
+def parse_junos_mac_table(output: str) -> list[dict]:
+    """Разбирает `show ethernet-switching table interface <port>` — не
+    проверено на живом Juniper (тот же статус, что и parse_junos_terse
+    выше), разобрано по документированному формату."""
+    rows = []
+    for line in output.splitlines():
+        match = _MAC_RE.search(line)
+        if not match:
+            continue
+        parts = line.split()
+        vlan = parts[0] if parts else ""
+        rows.append({"vlan": vlan, "mac": match.group(1), "type": ""})
+    return rows
+
+
+def parse_mac_table(vendor: Vendor | None, output: str) -> list[dict]:
+    if vendor is Vendor.junos:
+        return parse_junos_mac_table(output)
+    return parse_cisco_mac_table(output)
+
+
+async def live_port_mac(
+    node,
+    port_name: str,
+    *,
+    username: str,
+    password: str | None = None,
+    key_path: str | None = None,
+    port: int = 22,
+    timeout_seconds: float = 20.0,
+) -> dict:
+    """Живой запрос MAC-адресов на конкретном порту — по кнопке, ничего не
+    сохраняется (в отличие от PortSnapshot, который снимает состояние ВСЕХ
+    портов и хранится). Тот же принцип, что STP-чеклист уже применяет к
+    port-map: спросить устройство сейчас, а не поддерживать ещё один
+    хранимый снимок ради редко нужной детали."""
+    from app.device_client import default_port, run_device_command
+
+    template = MAC_COMMANDS.get(node.vendor or Vendor.cisco_ios, MAC_COMMANDS[Vendor.cisco_ios])
+    command = template.format(port=port_name)
+    result = await run_device_command(
+        vendor=node.vendor,
+        host=node.address,
+        command=command,
+        username=username,
+        password=password,
+        key_path=key_path,
+        port=port if port not in (0, 22) else default_port(node.vendor),
+        timeout_seconds=timeout_seconds,
+    )
+    if not result.ok:
+        return {"ok": False, "error": result.error, "macs": []}
+    return {"ok": True, "error": None, "macs": parse_mac_table(node.vendor, result.stdout)}
+
+
 def latest_snapshot(db, node_id: int):
     from app.models import PortSnapshot
 

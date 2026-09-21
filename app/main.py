@@ -102,7 +102,7 @@ from app.credentials_engine import encrypt_password, mask_credential, resolve_cr
 from app.integrations_engine import INTEGRATION_REGISTRY, IntegrationTestError, encrypt_token
 from app.ldap_engine import LdapTestError, mask_connection, test_bind
 from app.ldap_engine import encrypt_password as encrypt_ldap_password
-from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot
+from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot, live_port_mac
 from app.scan_engine import ScanValidationError, run_scan
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
 from app.sweep_engine import run_sweep, sweep_progress
@@ -1255,6 +1255,30 @@ async def refresh_ports(
         timeout_seconds=payload.timeout_seconds,
     )
     return {"id": snapshot.id, "ok": snapshot.ok, "ports": len(snapshot.ports), "error": snapshot.error}
+
+
+@api_operate.post("/api/nodes/{node_id}/ports/{port_name}/mac")
+async def get_port_mac(
+    node_id: int,
+    port_name: str,
+    payload: PortRefreshIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """MAC-адреса на конкретном порту — живой запрос по кнопке (перенос
+    «По устройству» из NetOpsHub), ничего не сохраняется. См.
+    ports_engine.live_port_mac."""
+    node = require_node_access(db, key, node_id)
+    username, password, key_path = _resolve_node_credential(db, node, payload)
+    return await live_port_mac(
+        node,
+        port_name,
+        username=username,
+        password=password,
+        key_path=key_path,
+        port=payload.port,
+        timeout_seconds=payload.timeout_seconds,
+    )
 
 
 @api_read.get("/api/nodes/{node_id}/ports")

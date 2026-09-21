@@ -154,6 +154,10 @@ function showPortDetail(port) {
       ${protectionRows(findProtection(port.name))}
     </dl>
     <div class="port-edit">
+      <h3 style="margin:14px 0 6px;font-size:13px;">MAC-адреса на порту</h3>
+      <button id="mac-fetch" class="btn-ghost">Показать MAC</button>
+      <div id="mac-result" style="margin-top:8px;font-size:12px;"></div>
+
       <h3 style="margin:14px 0 6px;font-size:13px;">Изменить порт</h3>
       <div class="form-row">
         <input id="edit-description" placeholder="описание" value="${escapeHtml(port.description || "")}">
@@ -212,6 +216,36 @@ function showPortDetail(port) {
   );
 
   document.getElementById("bounce-apply").addEventListener("click", () => bouncePort(port));
+  document.getElementById("mac-fetch").addEventListener("click", () => fetchPortMac(port));
+}
+
+async function fetchPortMac(port) {
+  const nodeId = document.getElementById("node-select").value;
+  const resultEl = document.getElementById("mac-result");
+  const btn = document.getElementById("mac-fetch");
+  btn.disabled = true;
+  btn.textContent = "Опрашиваю…";
+  resultEl.innerHTML = "";
+  try {
+    const result = await apiWithCredentials(
+      `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/mac`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
+    if (!result.ok) {
+      resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(result.error || "не удалось опросить")}</span>`;
+    } else if (result.macs.length === 0) {
+      resultEl.innerHTML = `<span style="color:var(--text-dim);">MAC-адресов на порту не видно</span>`;
+    } else {
+      resultEl.innerHTML = result.macs
+        .map((m) => `<div style="font-family:var(--mono);padding:2px 0;">${escapeHtml(m.mac)} · VLAN ${escapeHtml(m.vlan || "—")}${m.type ? " · " + escapeHtml(m.type) : ""}</div>`)
+        .join("");
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Показать MAC";
+  }
 }
 
 async function applyPortEdit(port, state) {
