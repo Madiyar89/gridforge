@@ -284,6 +284,11 @@ MAC_COMMANDS = {
     Vendor.junos: "show ethernet-switching table interface {port}",
 }
 
+# Полная MAC-таблица (все порты разом, без фильтра) — для обнаружения
+# вероятных хабов (app/hub_detection_engine.py), парсится тем же
+# parse_cisco_mac_table (Ports-колонка теперь читается всегда).
+FULL_MAC_COMMAND_CISCO = "show mac address-table"
+
 _MAC_RE = re.compile(r"([0-9a-f]{4}[.:][0-9a-f]{4}[.:][0-9a-f]{4}|(?:[0-9a-f]{2}:){5}[0-9a-f]{2})", re.IGNORECASE)
 
 
@@ -307,7 +312,10 @@ def parse_cisco_mac_table(output: str) -> list[dict]:
         mac = _slice(line, bounds["Mac Address"])
         if not _MAC_RE.search(mac):
             continue
-        rows.append({"vlan": _slice(line, bounds["Vlan"]), "mac": mac, "type": _slice(line, bounds["Type"])})
+        rows.append({
+            "vlan": _slice(line, bounds["Vlan"]), "mac": mac, "type": _slice(line, bounds["Type"]),
+            "port": _slice(line, bounds["Ports"]) if "Ports" in bounds else "",
+        })
     return rows
 
 

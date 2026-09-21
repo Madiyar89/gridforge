@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — вероятные хабы</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Вероятные хабы</h1>
+  <p>Эвристика: access-порт (не trunk), на котором видно 2+ разных MAC разом — обычно «IP-телефон + ПК» (не хаб), 3+ — уже подозрительно. Живой опрос MAC-таблицы каждого Cisco-узла по кнопке, ничего не хранится.</p>
+</div>
+
+<div class="panel">
+  <h2>
+    Результат
+    <span><button id="hubs-scan" class="icon-btn">Просканировать</button></span>
+  </h2>
+  <div class="body" id="hubs-body"><div class="empty">Нажми «Просканировать» — опросит все Cisco-узлы</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="hubs.js"></script>
+</body>
+</html>

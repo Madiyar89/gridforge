@@ -36,6 +36,7 @@ from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.audit_engine import run_audit
 from app.compliance_engine import check_compliance
 from app.config_search import search_configs
+from app.hub_detection_engine import find_probable_hubs
 from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
@@ -949,6 +950,15 @@ def get_compliance(db: Session = Depends(_db)):
     уже используются на странице «Аудит» (узел → правила), здесь просто
     развёрнуты в обратную сторону."""
     return {"rules": check_compliance(db)}
+
+
+@api_operate.post("/api/reports/probable-hubs")
+async def get_probable_hubs(db: Session = Depends(_db)):
+    """Вероятные хабы/неуправляемые свитчи за access-портами — живой опрос
+    полной MAC-таблицы каждого Cisco-узла (см. app/hub_detection_engine.py).
+    На operate (не read) — реально ходит на оборудование по SSH, не только
+    читает БД."""
+    return await find_probable_hubs(db, resolve_credential=resolve_credential)
 
 
 @api_operate.post("/api/nodes/{node_id}/audit")
