@@ -7,14 +7,21 @@
 <link rel="stylesheet" href="style.css">
 <style>
   .rubka{display:grid;grid-template-columns:minmax(260px,1fr) minmax(320px,1.4fr) minmax(280px,1fr);gap:16px;align-items:start;}
-  .scn-list{display:flex;flex-direction:column;gap:8px;}
-  .scn-cat{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin:10px 0 2px;}
-  .scn-btn{display:flex;flex-direction:column;gap:3px;padding:10px;text-align:left;cursor:pointer;width:100%;
-           background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);}
-  .scn-btn:hover{border-color:var(--accent);}
-  .scn-btn.active{border-color:var(--accent);background:var(--panel-2,var(--bg));}
-  .scn-btn b{font-size:13px;}
-  .scn-btn span{font-size:11px;color:var(--text-dim);}
+  .scn-list{display:flex;flex-direction:column;gap:10px;}
+  .scn-cat{
+    font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);
+    margin:16px 0 6px;padding-bottom:6px;border-bottom:1px solid var(--border);
+  }
+  .scn-cat:first-child{margin-top:2px;}
+  .scn-btn{
+    display:flex;flex-direction:column;gap:5px;padding:14px 16px;text-align:left;cursor:pointer;width:100%;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);
+    transition:border-color .12s ease,background .12s ease;
+  }
+  .scn-btn:hover{border-color:var(--accent);background:var(--surface);}
+  .scn-btn.active{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 1px var(--accent);}
+  .scn-btn b{font-size:15px;}
+  .scn-btn span{font-size:12px;color:var(--text-dim);font-family:var(--mono);}
   .scn-form{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
   .scn-form label{font-size:11px;color:var(--text-dim);}
   .scn-form input{width:100%;}
