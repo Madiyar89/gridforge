@@ -28,6 +28,7 @@ from app.models import Vendor
 # Команда снятия состояния по вендорам. Только чтение.
 STATUS_COMMANDS = {
     Vendor.cisco_ios: "show interfaces status",
+    Vendor.cisco_ios_telnet: "show interfaces status",  # те же команды, другой транспорт
     Vendor.junos: "show interfaces terse",
 }
 
@@ -226,18 +227,21 @@ async def collect_ports(
     «не удалось снять» это полезная информация, а молча оставлять на
     схеме вчерашние данные хуже, чем честно показать, что связи нет.
     """
+    from app.device_client import default_port, run_device_command
     from app.models import PortSnapshot
-    from app.ssh_client import run_ssh_command
 
+    # Telnet-устройства опрашиваются тем же вызовом: транспорт выбирается
+    # по вендору внутри device_client.
     command = STATUS_COMMANDS.get(node.vendor or Vendor.cisco_ios, STATUS_COMMANDS[Vendor.cisco_ios])
-    result = await run_ssh_command(
+    result = await run_device_command(
+        vendor=node.vendor,
         host=node.address,
-        port=port,
-        username=username,
         command=command,
-        timeout_seconds=timeout_seconds,
-        key_path=key_path,
+        username=username,
         password=password,
+        key_path=key_path,
+        port=port if port not in (0, 22) else default_port(node.vendor),
+        timeout_seconds=timeout_seconds,
     )
 
     snapshot = PortSnapshot(node_id=node.id, command=command, ok=result.ok)

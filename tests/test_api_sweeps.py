@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.auth import generate_key
 from app.main import app
 from app.models import ApiKeyRole, Group, Node, Sweep, SweepResult, Vendor
-from app.ssh_client import SshResult
+from app.device_client import DeviceResult, uses_telnet
 
 
 @pytest.fixture()
@@ -21,13 +21,16 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def fake_ssh(monkeypatch):
-    """Вместо настоящего SSH — успешный ответ с эхом команды: так видно,
-    какая именно строка ушла бы на устройство."""
-    async def fake_run(*, host, port, username, command, timeout_seconds, key_path=None, password=None, known_hosts=None):
-        return SshResult(ok=True, exit_status=0, stdout=f"[{host}] {command}", error=None)
+def fake_device(monkeypatch):
+    """Вместо настоящего подключения — успешный ответ с эхом команды: так
+    видно, какая именно строка ушла бы на устройство. Подменяется общий
+    вызов device_client, а не SSH: транспорт выбирается по вендору узла."""
+    async def fake_run(*, vendor, host, command, username, password=None, key_path=None,
+                       port=None, timeout_seconds=20.0, enable_password=None):
+        transport = "telnet" if uses_telnet(vendor) else "ssh"
+        return DeviceResult(True, 0, f"[{host}] {command}", None, transport)
 
-    monkeypatch.setattr("app.sweep_engine.run_ssh_command", fake_run)
+    monkeypatch.setattr("app.sweep_engine.run_device_command", fake_run)
 
 
 @pytest.fixture()

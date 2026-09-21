@@ -11,7 +11,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models import Backup, Node
-from app.ssh_client import run_ssh_command
+from app.device_client import default_port, run_device_command
 
 DEFAULT_BACKUP_TIMEOUT_SECONDS = 20.0
 
@@ -19,14 +19,16 @@ DEFAULT_BACKUP_TIMEOUT_SECONDS = 20.0
 async def run_backup(db: Session, node: Node, *, username: str, command: str, key_path: str | None = None,
                       password: str | None = None, port: int = 22,
                       timeout_seconds: float = DEFAULT_BACKUP_TIMEOUT_SECONDS) -> Backup:
-    result = await run_ssh_command(
+    # Транспорт по вендору: часть парка доступна только по Telnet.
+    result = await run_device_command(
+        vendor=node.vendor,
         host=node.address,
-        port=port,
-        username=username,
         command=command,
-        timeout_seconds=timeout_seconds,
-        key_path=key_path,
+        username=username,
         password=password,
+        key_path=key_path,
+        port=port if port not in (0, 22) else default_port(node.vendor),
+        timeout_seconds=timeout_seconds,
     )
 
     # Сравниваем только с последним УСПЕШНЫМ снимком — неудачная попытка

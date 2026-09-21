@@ -1165,7 +1165,7 @@ async def create_sweep(
         db.add(result)
         db.commit()
         db.refresh(result)
-        tasks.append({"result_id": result.id, "address": node.address, "command": command})
+        tasks.append({"result_id": result.id, "address": node.address, "command": command, "vendor": node.vendor})
 
     # Прогон уходит в фон: десятки SSH-сессий не должны держать HTTP-запрос
     # открытым, интерфейс опрашивает прогресс отдельно.

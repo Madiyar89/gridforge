@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import Node, Sweep, SweepResult, SweepStatus, _now
-from app.ssh_client import run_ssh_command
+from app.device_client import default_port, run_device_command
 
 logger = logging.getLogger("gridforge.sweep")
 
@@ -35,6 +35,7 @@ async def _run_one(
     result_id: int,
     address: str,
     command: str,
+    vendor,
     *,
     username: str,
     password: str | None,
@@ -43,14 +44,16 @@ async def _run_one(
     timeout_seconds: float,
 ) -> None:
     async with semaphore:
-        outcome = await run_ssh_command(
+        # Транспорт выбирается по вендору: часть парка только по Telnet.
+        outcome = await run_device_command(
+            vendor=vendor,
             host=address,
-            port=port,
-            username=username,
             command=command,
-            timeout_seconds=timeout_seconds,
-            key_path=key_path,
+            username=username,
             password=password,
+            key_path=key_path,
+            port=port if port not in (0, 22) else default_port(vendor),
+            timeout_seconds=timeout_seconds,
         )
 
     # Своя сессия на запись: задачи идут параллельно, а сессия SQLAlchemy
@@ -81,7 +84,7 @@ async def run_sweep(
 ) -> None:
     """Фоновая часть: опрашивает узлы и закрывает прогон.
 
-    `tasks` — список словарей {result_id, address, command}, подготовленных
+    `tasks` — список словарей {result_id, address, command, vendor}, подготовленных
     вызывающей стороной в её сессии. Сюда не передаются объекты ORM: они
     принадлежат чужой сессии, которая к этому моменту уже закрыта.
     """
@@ -94,6 +97,7 @@ async def run_sweep(
                 task["result_id"],
                 task["address"],
                 task["command"],
+                task.get("vendor"),
                 username=username,
                 password=password,
                 key_path=key_path,
