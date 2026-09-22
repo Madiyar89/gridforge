@@ -38,6 +38,7 @@ from app.audit_engine import run_audit
 from app.compliance_engine import check_compliance
 from app.config_search import search_configs
 from app.hub_detection_engine import find_probable_hubs
+from app.mac_search_engine import search_mac
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
@@ -961,6 +962,14 @@ async def get_probable_hubs(db: Session = Depends(_db)):
     На operate (не read) — реально ходит на оборудование по SSH, не только
     читает БД."""
     return await find_probable_hubs(db, resolve_credential=resolve_credential)
+
+
+@api_operate.post("/api/reports/mac-search")
+async def get_mac_search(q: str, db: Session = Depends(_db)):
+    """Поиск MAC-адреса сразу по всему парку — живой опрос полной
+    MAC-таблицы каждого Cisco-узла (см. app/mac_search_engine.py). На
+    operate — реально ходит на оборудование по SSH."""
+    return await search_mac(db, q, resolve_credential=resolve_credential)
 
 
 @api_read.get("/api/firmware")

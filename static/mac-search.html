@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — поиск MAC</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Поиск MAC-адреса</h1>
+  <p>Живой опрос MAC-таблицы каждого Cisco-узла разом — где физически воткнуто устройство. Можно ввести не весь адрес (минимум 4 hex-символа), разделители (: . -) не важны.</p>
+</div>
+
+<div class="panel">
+  <div class="form-row" style="border-top:none">
+    <input id="mac-query" placeholder="aa:bb:cc:dd:ee:ff или просто часть">
+    <button id="mac-search-btn">Искать</button>
+  </div>
+  <div class="body" id="mac-body"><div class="empty">Введи MAC (или его часть) и нажми «Искать»</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="mac-search.js"></script>
+</body>
+</html>
