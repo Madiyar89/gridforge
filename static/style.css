@@ -303,6 +303,15 @@ a{color:var(--accent);}
    жить в тесном окошке 560px с внутренним скроллом, по прямому запросу
    пользователя. */
 #nodes-body{max-height:none;overflow-y:visible;}
+
+/* Фильтр статуса результата доменного скана (Advanced Port Scanner style —
+   переключатель "все / в домене / не в домене / ошибка"). */
+.ds-filter-btn{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);
+  border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-weight:600;
+}
+.ds-filter-btn:hover{border-color:var(--accent);color:var(--text);}
+.ds-filter-btn.active{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
 /* Тот же overflow:hidden-у-предка ломает sticky (см. #legacy-panel выше) —
    risk-sticky-head внутри report-domain-body должен липнуть к прокрутке
    страницы, а не к границам своей .panel. */

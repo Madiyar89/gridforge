@@ -1,11 +1,15 @@
 // Доменная инвентаризация — ping-скан + WinRM/SMB на каждый живой хост.
-// В отличие от обычного скана (scan.js) — фоновый прогон (может занять
-// минуты на большой подсети), результат опрашивается поллингом, тот же
-// принцип, что у Sweep/Сценариев.
+// Учётки и история сканов — выпадающими списками (по прямому запросу
+// пользователя, "как в Advanced Port Scanner"), результат — на главном
+// месте, с фильтром по статусу (все/в домене/не в домене/ошибка).
 
 let _dsGroups = [];
+let _dsCredSets = [];
+let _dsScans = [];
 let _dsPollTimer = null;
 let _dsSelectedScanId = null;
+let _dsCurrentData = null;
+let _dsStatusFilter = "";
 
 const DS_METHOD_LABELS = { winrm: "WinRM", smb_domain: "SMB (доменная)", smb_anonymous: "SMB (анонимно)" };
 const DS_STATUS_LABELS = {
@@ -25,52 +29,49 @@ async function refreshDsGroups() {
   document.getElementById("new-ds-group").innerHTML = `<option value="">любая группа (глобальный)</option>${opts}`;
 }
 
-// === Credential-наборы ===
+// === Credential-наборы — выпадающий список ===
 
-function credSetGroupLabel(s) {
-  return s.group_name ? `группа «${s.group_name}»` : "любая группа";
+function credSetOptionLabel(s) {
+  const scope = s.group_name ? `группа «${s.group_name}»` : "любая группа";
+  const range = s.range_cidr || "любой диапазон";
+  const cred = s.username ? ` · ${s.domain || ""}\\${s.username}` : "";
+  return `${s.label} — ${scope} · ${range} · ${DS_METHOD_LABELS[s.method] || s.method}${cred}`;
 }
 
 async function refreshDsCredSets() {
-  const body = document.getElementById("ds-cred-body");
-  let sets;
+  const select = document.getElementById("ds-cred-select");
   try {
-    sets = await api("/api/domain-scan/credential-sets");
+    _dsCredSets = await api("/api/domain-scan/credential-sets");
   } catch (e) {
-    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
     return;
   }
-  document.getElementById("ds-cred-count").textContent = sets.length;
-  if (sets.length === 0) {
-    body.innerHTML = `<div class="empty">Наборов нет — заведи хотя бы один ниже, иначе сканировать нечем</div>`;
+  document.getElementById("ds-cred-count").textContent = _dsCredSets.length;
+  if (_dsCredSets.length === 0) {
+    select.innerHTML = `<option value="">Наборов нет — добавь ниже, иначе сканировать нечем</option>`;
     return;
   }
-  body.innerHTML = sets
-    .map(
-      (s) => `
-      <div class="channel-row">
-        <span>
-          <b>${escapeHtml(s.label)}</b>
-          <span class="count">· ${credSetGroupLabel(s)} · ${escapeHtml(s.range_cidr || "любой диапазон")} · ${DS_METHOD_LABELS[s.method] || s.method}${
-        s.fallback_method ? " → " + (DS_METHOD_LABELS[s.fallback_method] || s.fallback_method) : ""
-      }${s.username ? " · " + escapeHtml(s.domain || "") + "\\" + escapeHtml(s.username) : ""}</span>
-        </span>
-        <button data-id="${s.id}" class="del-ds-cred">удалить</button>
-      </div>`
-    )
-    .join("");
-  body.querySelectorAll(".del-ds-cred").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      try {
-        await api(`/api/domain-scan/credential-sets/${btn.dataset.id}`, { method: "DELETE" });
-        toast("Набор удалён");
-        refreshDsCredSets();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    });
-  });
+  select.innerHTML = _dsCredSets.map((s) => `<option value="${s.id}">${escapeHtml(credSetOptionLabel(s))}</option>`).join("");
 }
+
+document.getElementById("ds-cred-add-toggle").addEventListener("click", () => {
+  const form = document.getElementById("ds-cred-form");
+  form.hidden = !form.hidden;
+});
+
+document.getElementById("ds-cred-delete").addEventListener("click", async () => {
+  const id = document.getElementById("ds-cred-select").value;
+  if (!id) return toast("Выбери набор для удаления", true);
+  const set = _dsCredSets.find((s) => String(s.id) === id);
+  if (!confirm(`Удалить набор «${set ? set.label : id}»?`)) return;
+  try {
+    await api(`/api/domain-scan/credential-sets/${id}`, { method: "DELETE" });
+    toast("Набор удалён");
+    refreshDsCredSets();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
 
 document.getElementById("new-ds-method").addEventListener("change", (e) => {
   const isAnon = e.target.value === "smb_anonymous";
@@ -98,6 +99,7 @@ document.getElementById("add-ds-cred").addEventListener("click", async () => {
     ["new-ds-label", "new-ds-cidr", "new-ds-domain", "new-ds-username", "new-ds-password"].forEach((id) => {
       document.getElementById(id).value = "";
     });
+    document.getElementById("ds-cred-form").hidden = true;
     toast("Набор добавлен");
     refreshDsCredSets();
   } catch (e) {
@@ -105,36 +107,42 @@ document.getElementById("add-ds-cred").addEventListener("click", async () => {
   }
 });
 
-// === Сканы ===
+// === История сканов — выпадающий список ===
 
 async function refreshDsScans() {
-  const body = document.getElementById("ds-scans-body");
-  let scans;
+  const select = document.getElementById("ds-scans-select");
   try {
-    scans = await api("/api/domain-scan");
+    _dsScans = await api("/api/domain-scan");
   } catch (e) {
-    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
     return;
   }
-  document.getElementById("ds-scans-count").textContent = scans.length;
-  if (scans.length === 0) {
-    body.innerHTML = `<div class="empty">Сканов ещё не было</div>`;
+  if (_dsScans.length === 0) {
+    select.innerHTML = `<option value="">Сканов ещё не было</option>`;
     return;
   }
-  body.innerHTML = scans
+  const prev = select.value;
+  select.innerHTML = _dsScans
     .map((s) => {
-      const statusColor = s.status === "done" ? "var(--ok)" : s.status === "failed" ? "var(--crit)" : "var(--warn)";
-      return `
-      <div class="channel-row ds-scan-row" data-id="${s.id}" style="cursor:pointer">
-        <span><span style="color:${statusColor}">${escapeHtml(s.status)}</span> · ${escapeHtml(s.cidr)}${s.group_name ? " · " + escapeHtml(s.group_name) : ""} <span class="count">· ${s.host_count} хост(ов)</span></span>
-        <span class="count">${timeAgo(s.started_at)}</span>
-      </div>`;
+      const label = `${s.status} · ${s.cidr}${s.group_name ? " · " + s.group_name : ""} · ${s.host_count} хост(ов) · ${timeAgo(s.started_at)}`;
+      return `<option value="${s.id}">${escapeHtml(label)}</option>`;
     })
     .join("");
-  body.querySelectorAll(".ds-scan-row").forEach((row) => {
-    row.addEventListener("click", () => watchDsScan(Number(row.dataset.id)));
-  });
+  if (prev && _dsScans.some((s) => String(s.id) === prev)) {
+    select.value = prev;
+  } else {
+    select.value = String(_dsScans[0].id);
+    watchDsScan(_dsScans[0].id);
+  }
 }
+
+document.getElementById("ds-scans-select").addEventListener("change", (e) => {
+  if (e.target.value) watchDsScan(Number(e.target.value));
+});
+
+document.getElementById("ds-result-refresh").addEventListener("click", () => {
+  if (_dsSelectedScanId) watchDsScan(_dsSelectedScanId);
+});
 
 function watchDsScan(scanId) {
   _dsSelectedScanId = scanId;
@@ -147,7 +155,8 @@ function watchDsScan(scanId) {
       clearInterval(_dsPollTimer);
       return;
     }
-    renderDsResult(data);
+    _dsCurrentData = data;
+    renderDsResult();
     if (data.status !== "running") {
       clearInterval(_dsPollTimer);
       refreshDsScans();
@@ -157,9 +166,25 @@ function watchDsScan(scanId) {
   _dsPollTimer = setInterval(tick, 3000);
 }
 
-function renderDsResult(data) {
+// === Результат — с фильтром по статусу (все / в домене / не в домене / ошибка) ===
+
+document.querySelectorAll(".ds-filter-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    _dsStatusFilter = btn.dataset.status;
+    document.querySelectorAll(".ds-filter-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    renderDsResult();
+  });
+});
+
+function renderDsResult() {
+  const data = _dsCurrentData;
   const meta = document.getElementById("ds-result-meta");
   const body = document.getElementById("ds-result-body");
+  if (!data) {
+    meta.textContent = "";
+    body.innerHTML = `<div class="empty">Выбери скан выше</div>`;
+    return;
+  }
   if (data.status === "failed") {
     meta.textContent = "";
     body.innerHTML = `<div class="empty">Скан не удался: ${escapeHtml(data.error || "неизвестная ошибка")}</div>`;
@@ -169,11 +194,19 @@ function renderDsResult(data) {
     data.status === "running"
       ? `выполняется · опрошено ${data.hosts.length}${data.live_hosts != null ? " из " + data.live_hosts : ""}`
       : `готово · ${data.hosts.length} хост(ов)`;
-  if (data.hosts.length === 0) {
-    body.innerHTML = `<div class="empty">${data.status === "running" ? "Ping-скан ещё выполняется…" : "Живых хостов не найдено"}</div>`;
+
+  const hosts = _dsStatusFilter ? data.hosts.filter((h) => h.status === _dsStatusFilter) : data.hosts;
+  if (hosts.length === 0) {
+    body.innerHTML = `<div class="empty">${
+      data.hosts.length === 0
+        ? data.status === "running"
+          ? "Ping-скан ещё выполняется…"
+          : "Живых хостов не найдено"
+        : "Под этот фильтр ничего не попало"
+    }</div>`;
     return;
   }
-  body.innerHTML = [...data.hosts]
+  body.innerHTML = [...hosts]
     .sort((a, b) => naturalCompare(a.address, b.address))
     .map((h) => {
       const st = DS_STATUS_LABELS[h.status] || { text: h.status, color: "var(--text-dim)" };
@@ -202,7 +235,8 @@ document.getElementById("ds-run").addEventListener("click", async () => {
       body: JSON.stringify({ cidr, group_id: groupId ? Number(groupId) : null }),
     });
     toast("Скан запущен");
-    refreshDsScans();
+    await refreshDsScans();
+    document.getElementById("ds-scans-select").value = String(started.id);
     watchDsScan(started.id);
   } catch (e) {
     toast(e.message, true);
