@@ -211,11 +211,22 @@ function renderDsResult() {
     .map((h) => {
       const st = DS_STATUS_LABELS[h.status] || { text: h.status, color: "var(--text-dim)" };
       const detail = h.status === "error" ? h.error_reason || "" : [h.domain, h.os_caption].filter(Boolean).join(" · ");
+      // Тип устройства — по прямому запросу пользователя ("как определять
+      // принтеры/виртуалки"): модель/производитель честно приходят от
+      // Windows (Win32_ComputerSystem — говорит "VMware Virtual Platform"
+      // для ВМ, реальную модель для физического железа), HTTP-баннер
+      // ловит то, что не отвечает ни по WinRM, ни по SMB вообще
+      // (принтеры/камеры/веб-морды свитчей).
+      const deviceBits = [];
+      if (h.manufacturer || h.model) deviceBits.push([h.manufacturer, h.model].filter(Boolean).join(" "));
+      if (h.http_banner) deviceBits.push(`HTTP: ${h.http_banner}`);
+      const deviceLine = deviceBits.length ? `<div class="detail" style="color:var(--accent)">${escapeHtml(deviceBits.join(" · "))}</div>` : "";
       return `<div class="incident-row">
         <span class="sev-dot" style="background:${st.color}"></span>
         <div class="main">
           <div class="label">${escapeHtml(h.computer_name || h.address)} <span class="count">(${escapeHtml(h.address)})</span> <span style="color:${st.color}">${st.text}</span></div>
           <div class="detail">${escapeHtml(detail || "—")}${h.method_used ? ` <span style="opacity:.6">· ${DS_METHOD_LABELS[h.method_used] || h.method_used}</span>` : ""}</div>
+          ${deviceLine}
         </div>
       </div>`;
     })

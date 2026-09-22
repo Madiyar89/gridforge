@@ -164,10 +164,17 @@ def _query_winrm_sync(ip: str, domain: str, username: str, password: str) -> dic
         transport="ntlm",
         server_cert_validation="ignore",
     )
+    # Manufacturer/Model — по прямому запросу пользователя ("как
+    # определять принтеры/виртуалки"): Win32_ComputerSystem честно
+    # говорит "VMware, Inc." / "VMware Virtual Platform" для ВМ на
+    # VMware, аналогично VirtualBox/Hyper-V, и реальную модель для
+    # физического железа — тот же источник, что уже спрашивали для
+    # Domain/PartOfDomain/Name/Caption, просто два поля добавлены в тот
+    # же PowerShell-запрос (одна WinRM-сессия, не вторая).
     ps = (
         "$cs = Get-CimInstance Win32_ComputerSystem; "
         "$os = Get-CimInstance Win32_OperatingSystem; "
-        "Write-Output ($cs.Domain + '|' + $cs.PartOfDomain + '|' + $cs.Name + '|' + $os.Caption)"
+        "Write-Output ($cs.Domain + '|' + $cs.PartOfDomain + '|' + $cs.Name + '|' + $os.Caption + '|' + $cs.Manufacturer + '|' + $cs.Model)"
     )
     result = session.run_ps(ps)
     if result.status_code != 0:
@@ -177,10 +184,14 @@ def _query_winrm_sync(ip: str, domain: str, username: str, password: str) -> dic
     if len(parts) < 4:
         raise RuntimeError("WinRM: неожиданный формат ответа PowerShell")
     domain_out, part_of_domain, computer_name, os_caption = parts[0], parts[1], parts[2], parts[3]
+    manufacturer = parts[4] if len(parts) > 4 else None
+    model = parts[5] if len(parts) > 5 else None
     return {
         "domain": domain_out if part_of_domain.strip().lower() == "true" else None,
         "computer_name": computer_name or None,
         "os_caption": os_caption or None,
+        "manufacturer": manufacturer or None,
+        "model": model or None,
     }
 
 
@@ -194,6 +205,59 @@ def _query_smb_sync(ip: str, domain: str | None, username: str, password: str) -
         return {"domain": server_domain, "computer_name": conn.getServerName() or None, "os_caption": None}
     finally:
         conn.close()
+
+
+_HTTP_BANNER_TIMEOUT = 3.0
+
+
+def _http_banner_sync(ip: str, port: int, use_tls: bool) -> str | None:
+    """Короткий HTTP-запрос на 80/443 — по прямому запросу пользователя
+    ("как определять принтеры/веб-морды устройств"). Ловит то, что не
+    отвечает ни по WinRM, ни по SMB вообще (принтеры, камеры, свитчи с
+    веб-интерфейсом) — то же самое, что видно как "HTTP, CANON HTTP
+    Server" в Advanced Port Scanner. Server-заголовок в приоритете
+    (короче и надёжнее), <title> — запасной вариант, если заголовка нет
+    (частый случай у встраиваемых веб-серверов)."""
+    import re
+    import socket
+    import ssl
+
+    try:
+        sock = socket.create_connection((ip, port), timeout=_HTTP_BANNER_TIMEOUT)
+        if use_tls:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=ip)
+        sock.settimeout(_HTTP_BANNER_TIMEOUT)
+        sock.sendall(f"GET / HTTP/1.1\r\nHost: {ip}\r\nConnection: close\r\n\r\n".encode())
+        raw = b""
+        while len(raw) < 8192:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        sock.close()
+    except (OSError, ssl.SSLError):
+        return None
+
+    text = raw.decode("latin-1", errors="replace")
+    server_match = re.search(r"(?im)^Server:\s*(.+)$", text)
+    if server_match:
+        return server_match.group(1).strip()[:200]
+    title_match = re.search(r"(?is)<title[^>]*>(.*?)</title>", text)
+    if title_match:
+        title = re.sub(r"\s+", " ", title_match.group(1)).strip()
+        return title[:200] if title else None
+    return None
+
+
+async def get_http_banner(ip: str) -> str | None:
+    for port, use_tls in ((80, False), (443, True)):
+        banner = await asyncio.to_thread(_http_banner_sync, ip, port, use_tls)
+        if banner:
+            return banner
+    return None
 
 
 async def _run_method(method: DomainScanMethod, ip: str, creds: dict | None) -> dict:
@@ -220,6 +284,7 @@ async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | Non
     entry = {
         "address": ip, "computer_name": None, "domain": None, "os_caption": None,
         "status": "error", "error_reason": None, "method_used": None,
+        "manufacturer": None, "model": None, "http_banner": None,
     }
     cred_set = resolve_credential_set(ip, group_id, sets)
     if cred_set is None:
@@ -253,6 +318,11 @@ async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | Non
                 else:
                     last_error = msg[:200]
 
+        # HTTP-баннер — независимо от того, ответил ли хост по WinRM/SMB:
+        # это как раз способ опознать принтеры/камеры/веб-морды, у которых
+        # ни WinRM, ни SMB вообще нет, только веб-интерфейс на 80/443.
+        entry["http_banner"] = await get_http_banner(ip)
+
     entry["method_used"] = used_method
     if data is None:
         entry["error_reason"] = last_error or "метод(ы) опроса недоступны на этом хосте"
@@ -260,6 +330,8 @@ async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | Non
 
     entry["domain"] = data.get("domain")
     entry["os_caption"] = data.get("os_caption")
+    entry["manufacturer"] = data.get("manufacturer")
+    entry["model"] = data.get("model")
     computer_name = data.get("computer_name")
     entry["computer_name"] = computer_name
     if entry["domain"] and computer_name and entry["domain"].upper() == computer_name.upper():

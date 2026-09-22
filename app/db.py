@@ -75,6 +75,11 @@ def _migrate_missing_columns() -> None:
             ("node_id", "INTEGER"),
             ("vendor", "VARCHAR(32)"),
         ],
+        "domain_scan_hosts": [
+            ("manufacturer", "VARCHAR(255)"),
+            ("model", "VARCHAR(255)"),
+            ("http_banner", "VARCHAR(500)"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

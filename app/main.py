@@ -1195,7 +1195,8 @@ def get_domain_scan(scan_id: int, db: Session = Depends(_db)):
             {
                 "address": h.address, "computer_name": h.computer_name, "domain": h.domain,
                 "os_caption": h.os_caption, "status": h.status, "error_reason": h.error_reason,
-                "method_used": h.method_used,
+                "method_used": h.method_used, "manufacturer": h.manufacturer, "model": h.model,
+                "http_banner": h.http_banner,
             }
             for h in scan.hosts
         ],

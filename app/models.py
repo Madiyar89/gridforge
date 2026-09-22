@@ -687,6 +687,18 @@ class DomainScanHost(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)  # in_domain | not_in_domain | error
     error_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     method_used: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Определение типа устройства (2026-09-22, по прямому запросу
+    # пользователя — "как определять принтеры/виртуалки") — manufacturer/
+    # model приходят от самой Windows через ту же WinRM-сессию (честно
+    # говорит "VMware Virtual Platform"/"VirtualBox" для ВМ, реальную
+    # модель для физического железа), http_banner — отдельный лёгкий
+    # HTTP-запрос на 80/443 для хостов без WinRM/SMB вообще (принтеры,
+    # камеры, веб-морды свитчей). MAC/OUI-вендор НЕ добавлен — GridForge
+    # в Docker-контейнере с NAT-сетью не видит L2/ARP ни для одной
+    # подсети (проверено вживую), MAC был бы всегда пустым.
+    manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    http_banner: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     scan: Mapped["DomainScan"] = relationship(back_populates="hosts")
 
