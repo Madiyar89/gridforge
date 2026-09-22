@@ -177,10 +177,10 @@
 <dialog id="action-modal">
   <form method="dialog" id="action-form">
     <h3>Новое действие — <span id="action-modal-watch"></span></h3>
-    <p class="hint" style="padding:0">Выполняется по SSH на узле условия, при каждом открытии нового инцидента.</p>
+    <p class="hint" style="padding:0">Выполняется по SSH на узле условия, при каждом открытии нового инцидента. Логин можно не указывать — тогда используется центральная учётка узла.</p>
     <label>Порт <input id="a-port" type="number" value="22"></label>
-    <label>Логин <input id="a-user" placeholder="monitor"></label>
-    <label>Путь к приватному ключу <input id="a-key" placeholder="/home/user/.ssh/id_ed25519"></label>
+    <label>Логин <input id="a-user" placeholder="пусто — взять центральную учётку узла (Настройки → Учётки)"></label>
+    <label>Путь к приватному ключу <input id="a-key" placeholder="нужен только если логин указан вручную"></label>
     <label>Команда <input id="a-cmd" placeholder="systemctl restart nginx"></label>
     <div class="modal-actions">
       <button type="button" value="cancel" class="btn-ghost" id="action-cancel">Отмена</button>
