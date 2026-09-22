@@ -51,11 +51,19 @@ SEED_SCENARIOS: list[dict] = [
         "key": "syslog_forward",
         "label": "Отправлять логи на сборщик",
         "category": "config",
-        "params": ["syslog_host"],
+        # syslog_port добавлен по прямому запросу пользователя
+        # (2026-09-22, "проверь коммутаторы на предмет отправки логов на
+        # 192.0.2.244") — реальная проверка на проде показала, что ни
+        # один коммутатор не шлёт логи на сам GridForge, только на старый
+        # сборщик NetOpsHub (192.0.2.115, UDP 514 по умолчанию).
+        # GridForge слушает НЕ 514 (root не нужен), а 5140 — см.
+        # syslog.html/syslog_server.py — без явного порта в команде
+        # логи ушли бы на 514, где никто не слушает.
+        "params": ["syslog_host", "syslog_port"],
         "commands_by_vendor": {
             "cisco_ios": (
                 "configure terminal\n"
-                "logging host {syslog_host}\n"
+                "logging host {syslog_host} transport udp port {syslog_port}\n"
                 # "notice" — реальная ошибка ("% Invalid input detected"),
                 # найдена вживую на LAB-1 (2026-09-21): Cisco IOS требует
                 # полное имя ключевого слова severity — "notifications", не
@@ -68,14 +76,14 @@ SEED_SCENARIOS: list[dict] = [
             ),
             "cisco_ios_telnet": (
                 "configure terminal\n"
-                "logging host {syslog_host}\n"
+                "logging host {syslog_host} transport udp port {syslog_port}\n"
                 "logging trap notifications\n"
                 "end\n"
                 "write memory"
             ),
             "junos": (
                 "configure\n"
-                "set system syslog host {syslog_host} any notice\n"
+                "set system syslog host {syslog_host} port {syslog_port} any notice\n"
                 "commit and-quit"
             ),
         },
