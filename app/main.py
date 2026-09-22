@@ -1305,7 +1305,7 @@ async def refresh_ports(
     return {"id": snapshot.id, "ok": snapshot.ok, "ports": len(snapshot.ports), "error": snapshot.error}
 
 
-@api_operate.post("/api/nodes/{node_id}/ports/{port_name}/mac")
+@api_operate.post("/api/nodes/{node_id}/ports/{port_name:path}/mac")
 async def get_port_mac(
     node_id: int,
     port_name: str,
@@ -1329,7 +1329,7 @@ async def get_port_mac(
     )
 
 
-@api_operate.post("/api/nodes/{node_id}/ports/{port_name}/downup")
+@api_operate.post("/api/nodes/{node_id}/ports/{port_name:path}/downup")
 async def get_port_downup(
     node_id: int,
     port_name: str,
