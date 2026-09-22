@@ -3,6 +3,8 @@
 let _protection = { ports: {}, summary: null };
 let _lastPortsData = null;
 let _nodesById = {};
+let _allNodes = [];
+let _selectedNodeId = null;
 
 const STATE_LABEL = {
   up: "линк есть",
@@ -13,26 +15,73 @@ const STATE_LABEL = {
 };
 
 async function refreshNodeList() {
-  const select = document.getElementById("node-select");
-  let nodes;
+  let nodes, groups;
   try {
-    nodes = sortNodesNatural(await api("/api/nodes"));
+    [nodes, groups] = await Promise.all([api("/api/nodes"), api("/api/groups")]);
   } catch (e) {
     return;
   }
+  nodes = sortNodesNatural(nodes);
+  _allNodes = nodes;
   _nodesById = Object.fromEntries(nodes.map((n) => [String(n.id), n]));
-  const previous = select.value;
-  select.innerHTML = nodes
-    .map((n) => `<option value="${n.id}">${escapeHtml(n.name)} — ${escapeHtml(n.address)}</option>`)
-    .join("");
-  if (previous) select.value = previous;
-  if (select.value) loadPorts();
+
+  const groupSelect = document.getElementById("ports-group-select");
+  const prevGroup = groupSelect.value;
+  groupSelect.innerHTML =
+    `<option value="">все группы</option>` +
+    groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("") +
+    `<option value="__none__">без группы</option>`;
+  groupSelect.value = prevGroup;
+
+  renderNodeChips();
+  if (!_selectedNodeId && _visibleNodes().length) {
+    selectNode(_visibleNodes()[0].id);
+  }
 }
 
-document.getElementById("node-select").addEventListener("change", loadPorts);
+function _visibleNodes() {
+  const filter = document.getElementById("ports-group-select").value;
+  if (filter === "__none__") return _allNodes.filter((n) => !n.group_id);
+  if (filter) return _allNodes.filter((n) => String(n.group_id) === filter);
+  return _allNodes;
+}
+
+function renderNodeChips() {
+  const list = document.getElementById("ports-node-list");
+  const nodes = _visibleNodes();
+  if (nodes.length === 0) {
+    list.innerHTML = `<div class="empty">В этой группе узлов нет</div>`;
+    return;
+  }
+  list.innerHTML = nodes
+    .map(
+      (n) => `
+      <div class="node-chip${String(n.id) === String(_selectedNodeId) ? " active" : ""}" data-id="${n.id}">
+        ${escapeHtml(n.name)}<span class="addr">${escapeHtml(n.address)}</span>
+      </div>`
+    )
+    .join("");
+  list.querySelectorAll(".node-chip").forEach((el) => {
+    el.addEventListener("click", () => selectNode(el.dataset.id));
+  });
+}
+
+function selectNode(nodeId) {
+  _selectedNodeId = String(nodeId);
+  renderNodeChips();
+  loadPorts();
+}
+
+document.getElementById("ports-group-select").addEventListener("change", () => {
+  renderNodeChips();
+  const visible = _visibleNodes();
+  if (visible.length && !visible.some((n) => String(n.id) === String(_selectedNodeId))) {
+    selectNode(visible[0].id);
+  }
+});
 
 async function loadPorts() {
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const body = document.getElementById("ports-body");
   if (!nodeId) return;
 
@@ -225,7 +274,7 @@ function showPortDetail(port) {
 }
 
 async function fetchPortMac(port) {
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const resultEl = document.getElementById("mac-result");
   const btn = document.getElementById("mac-fetch");
   btn.disabled = true;
@@ -254,7 +303,7 @@ async function fetchPortMac(port) {
 }
 
 async function fetchPortDownup(port) {
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const resultEl = document.getElementById("downup-result");
   const btn = document.getElementById("downup-fetch");
   btn.disabled = true;
@@ -288,7 +337,7 @@ async function applyPortEdit(port, state) {
     return toast("Нечего применять — ничего не изменилось", true);
   }
 
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const resultEl = document.getElementById("edit-result");
   const btn = document.getElementById("edit-apply");
   btn.disabled = true;
@@ -313,7 +362,7 @@ async function applyPortSecurity(port, portSecurity) {
     return toast("Выбери включить/выключить или укажи максимум MAC", true);
   }
 
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const resultEl = document.getElementById("ps-result");
   const btn = document.getElementById("ps-apply");
   btn.disabled = true;
@@ -339,7 +388,7 @@ async function applyPortSecurity(port, portSecurity) {
 async function bouncePort(port) {
   if (!confirm(`Отбить порт ${port.name}: shutdown → пауза 5с → no shutdown. Продолжить?`)) return;
 
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const resultEl = document.getElementById("bounce-result");
   const btn = document.getElementById("bounce-apply");
   btn.disabled = true;
@@ -392,8 +441,38 @@ function protectionRows(prot) {
   return `<dt>Защита</dt><dd>${bits.join("<br>")}</dd>`;
 }
 
+document.getElementById("bulk-refresh").addEventListener("click", async () => {
+  const nodes = _visibleNodes();
+  if (nodes.length === 0) return toast("В этой группе узлов нет", true);
+  if (!confirm(`Опросить порты на ${nodes.length} узле(ах)? Это может занять время — по одному, последовательно.`)) return;
+
+  const btn = document.getElementById("bulk-refresh");
+  const status = document.getElementById("bulk-refresh-status");
+  btn.disabled = true;
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    status.textContent = `${i + 1}/${nodes.length} — ${n.name}…`;
+    try {
+      const result = await apiWithCredentials(`/api/nodes/${n.id}/ports/refresh`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (result.ok) ok++;
+      else failed++;
+    } catch (e) {
+      failed++;
+    }
+  }
+  btn.disabled = false;
+  status.textContent = `готово: успешно ${ok}, ошибок ${failed}`;
+  toast(`Общий опрос завершён: успешно ${ok}, ошибок ${failed}`, failed > 0 && ok === 0);
+  if (_selectedNodeId && nodes.some((n) => String(n.id) === String(_selectedNodeId))) loadPorts();
+});
+
 document.getElementById("refresh-ports").addEventListener("click", async () => {
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   if (!nodeId) return toast("Выбери узел", true);
 
   // Учётка берётся из центральной (Настройки → Учётки) — спрашиваем
@@ -435,7 +514,7 @@ function renderStpForm() {
     body.innerHTML = `<div class="empty">Сначала сними состояние портов — список access/trunk берётся оттуда</div>`;
     return;
   }
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const vendor = (_nodesById[nodeId] || {}).vendor;
   const isJunos = vendor === "junos";
 
@@ -499,7 +578,7 @@ async function applyStpProtection() {
   const accessPorts = splitPortList(document.getElementById("stp-access-ports").value);
   const trunkPorts = splitPortList(document.getElementById("stp-trunk-ports").value);
 
-  const nodeId = document.getElementById("node-select").value;
+  const nodeId = _selectedNodeId;
   const resultEl = document.getElementById("stp-result");
   const btn = document.getElementById("stp-apply");
   btn.disabled = true;
