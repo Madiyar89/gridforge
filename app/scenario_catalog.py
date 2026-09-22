@@ -29,6 +29,16 @@ SEED_SCENARIOS: list[dict] = [
                 "end\n"
                 "write memory"
             ),
+            # Тот же IOS CLI, что у cisco_ios — разница только в транспорте
+            # (Telnet вместо SSH, см. device_client.run_device_config), по
+            # прямому запросу пользователя (перенос ntp_cisco_telnet.yml).
+            "cisco_ios_telnet": (
+                "configure terminal\n"
+                "clock timezone {timezone_name} {timezone_offset}\n"
+                "ntp server {ntp_server} prefer\n"
+                "end\n"
+                "write memory"
+            ),
             "junos": (
                 "configure\n"
                 "set system time-zone {timezone_iana}\n"
@@ -56,6 +66,13 @@ SEED_SCENARIOS: list[dict] = [
                 "end\n"
                 "write memory"
             ),
+            "cisco_ios_telnet": (
+                "configure terminal\n"
+                "logging host {syslog_host}\n"
+                "logging trap notifications\n"
+                "end\n"
+                "write memory"
+            ),
             "junos": (
                 "configure\n"
                 "set system syslog host {syslog_host} any notice\n"
@@ -70,6 +87,14 @@ SEED_SCENARIOS: list[dict] = [
         "params": ["banner_text"],
         "commands_by_vendor": {
             "cisco_ios": (
+                "configure terminal\n"
+                "banner motd $\n"
+                "{banner_text}\n"
+                "$\n"
+                "end\n"
+                "write memory"
+            ),
+            "cisco_ios_telnet": (
                 "configure terminal\n"
                 "banner motd $\n"
                 "{banner_text}\n"

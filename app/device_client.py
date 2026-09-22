@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from app.models import Vendor
 from app.ssh_client import run_ssh_command, run_ssh_config_lines
-from app.telnet_client import DEFAULT_TELNET_PORT, run_telnet_command
+from app.telnet_client import DEFAULT_TELNET_PORT, run_telnet_command, run_telnet_config_lines
 
 # Вендоры, к которым ходим по Telnet. Узкий список, а не «всё, что не
 # SSH»: по умолчанию должен быть защищённый транспорт, а Telnet —
@@ -89,14 +89,23 @@ async def run_device_config(
     """Выполняет НЕСКОЛЬКО строк, меняющих конфигурацию (configure
     terminal/.../end, set .../commit) — отдельно от run_device_command,
     потому что многострочный блок нельзя послать одним exec-запросом
-    (см. подробный разбор в ssh_client.run_ssh_config_lines). Telnet
-    пока не поддержан (узкий список вендоров без него в этом парке) —
-    если понадобится, добавлять по тому же принципу, не через
-    run_telnet_command с "\\n" внутри одной команды (та же ошибка)."""
+    (см. подробный разбор в ssh_client.run_ssh_config_lines). Telnet —
+    тот же приём (построчно, с паузой между строками), см.
+    telnet_client.run_telnet_config_lines: по прямому запросу
+    пользователя (перенос ntp_cisco_telnet/enable_syslog_cisco_telnet/
+    update_banner_cisco_telnet.yml из NetOpsHub — у GridForge Сценарии
+    раньше работали только по SSH, старые telnet-only свитчи вроде
+    LAB-7/LAB-11 не могли получить эти правки вообще)."""
     if uses_telnet(vendor):
-        return DeviceResult(
-            False, None, "", "многострочные команды по Telnet пока не поддержаны", "telnet"
+        result = await run_telnet_config_lines(
+            host=host,
+            port=port or DEFAULT_TELNET_PORT,
+            username=username,
+            password=password,
+            lines=lines,
+            timeout_seconds=timeout_seconds,
         )
+        return DeviceResult(result.ok, result.exit_status, result.stdout, result.error, "telnet")
 
     result = await run_ssh_config_lines(
         host=host,
