@@ -110,12 +110,88 @@ SEED_SCENARIOS: list[dict] = [
         },
     },
     {
+        "key": "create_local_user",
+        "label": "Создать локального пользователя",
+        "category": "security",
+        "params": ["username", "password", "privilege"],
+        "commands_by_vendor": {
+            # Своя, упрощённая версия create_local_user_cisco.yml/
+            # create_named_local_user_cisco.yml из NetOpsHub — там
+            # логин/пароль брались из отдельного vault-хранилища
+            # (group_vars/local_device_users), у GridForge такого
+            # хранилища нет, поэтому логин/пароль/привилегия — обычные
+            # параметры формы запуска, как у остальных сценариев.
+            "cisco_ios": (
+                "configure terminal\n"
+                "username {username} privilege {privilege} secret {password}\n"
+                "end\n"
+                "write memory"
+            ),
+            "cisco_ios_telnet": (
+                "configure terminal\n"
+                "username {username} privilege {privilege} secret {password}\n"
+                "end\n"
+                "write memory"
+            ),
+            # Junos не различает числовую привилегию — используем
+            # класс super-user (полный доступ), параметр privilege на
+            # эту команду не влияет, но остаётся в форме — иначе на
+            # Junos-узле поле пришлось бы прятать отдельной логикой,
+            # которой у формы сценария сейчас нет.
+            "junos": (
+                "configure\n"
+                "set system login user {username} class super-user authentication plain-text-password\n"
+                "{password}\n"
+                "{password}\n"
+                "commit and-quit"
+            ),
+        },
+    },
+    {
+        "key": "create_vlan",
+        "label": "Создать VLAN на устройстве",
+        "category": "config",
+        "params": ["vlan_id", "vlan_name"],
+        "commands_by_vendor": {
+            # Только сам VLAN на устройстве (create_vlan_*.yml из
+            # NetOpsHub) — назначение VLAN на конкретный порт уже есть
+            # отдельно на странице "Порты" (там же выбор порта, тут его
+            # нет и не должно быть).
+            "cisco_ios": (
+                "configure terminal\n"
+                "vlan {vlan_id}\n"
+                "name {vlan_name}\n"
+                "end\n"
+                "write memory"
+            ),
+            "cisco_ios_telnet": (
+                "configure terminal\n"
+                "vlan {vlan_id}\n"
+                "name {vlan_name}\n"
+                "end\n"
+                "write memory"
+            ),
+            "junos": (
+                "configure\n"
+                "set vlans {vlan_name} vlan-id {vlan_id}\n"
+                "commit and-quit"
+            ),
+        },
+    },
+    {
         "key": "aaa_remove_vty_override",
         "label": "AAA: убрать принудительный privilege 15 с vty 0-4",
         "category": "security",
         "params": [],
         "commands_by_vendor": {
             "cisco_ios": (
+                "configure terminal\n"
+                "line vty 0 4\n"
+                "no privilege level 15\n"
+                "end\n"
+                "write memory"
+            ),
+            "cisco_ios_telnet": (
                 "configure terminal\n"
                 "line vty 0 4\n"
                 "no privilege level 15\n"
