@@ -39,6 +39,7 @@ from app.compliance_engine import check_compliance
 from app.config_search import search_configs
 from app.hub_detection_engine import find_probable_hubs
 from app.mac_search_engine import search_mac
+from app.domain_scan_engine import DomainScanValidationError, run_domain_scan
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.dashboard_engine import build_dashboard
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
@@ -76,6 +77,10 @@ from app.models import (
     CaptureStatus,
     Channel,
     Credential,
+    DomainScan,
+    DomainScanCredentialSet,
+    DomainScanHost,
+    DomainScanMethod,
     EscalationStep,
     Group,
     Incident,
@@ -122,6 +127,8 @@ from app.schemas import (
     CaptureIn,
     ChannelIn,
     CredentialIn,
+    DomainScanCredentialSetIn,
+    DomainScanRunIn,
     EscalationStepIn,
     GroupIn,
     IntegrationIn,
@@ -1079,6 +1086,120 @@ def list_scan_hosts(scan_id: int, db: Session = Depends(_db)):
         }
         for h in scan.hosts
     ]
+
+
+@api_read.get("/api/domain-scan/credential-sets")
+def list_domain_scan_credential_sets(db: Session = Depends(_db)):
+    return [
+        {
+            "id": s.id, "label": s.label, "group_id": s.group_id,
+            "group_name": s.group.name if s.group else None,
+            "range_cidr": s.range_cidr, "method": s.method.value,
+            "fallback_method": s.fallback_method.value if s.fallback_method else None,
+            "domain": s.domain, "username": s.username,
+            "has_password": bool(s.password),
+        }
+        for s in db.query(DomainScanCredentialSet).order_by(DomainScanCredentialSet.label).all()
+    ]
+
+
+@api_write.post("/api/domain-scan/credential-sets", status_code=201)
+def create_domain_scan_credential_set(payload: DomainScanCredentialSetIn, db: Session = Depends(_db)):
+    try:
+        method = DomainScanMethod(payload.method)
+        fallback = DomainScanMethod(payload.fallback_method) if payload.fallback_method else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неизвестный метод — winrm/smb_domain/smb_anonymous")
+    if fallback == method:
+        raise HTTPException(status_code=400, detail="fallback_method не может совпадать с основным методом")
+    if method != DomainScanMethod.smb_anonymous and not (payload.domain and payload.username and payload.password):
+        raise HTTPException(status_code=400, detail="domain/username/password обязательны для этого метода (кроме smb_anonymous)")
+    if payload.range_cidr:
+        try:
+            import ipaddress
+
+            ipaddress.ip_network(payload.range_cidr, strict=False)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Некорректный диапазон: {payload.range_cidr!r}")
+
+    row = DomainScanCredentialSet(
+        label=payload.label,
+        group_id=payload.group_id,
+        range_cidr=payload.range_cidr,
+        method=method,
+        fallback_method=fallback,
+        domain=payload.domain if method != DomainScanMethod.smb_anonymous else None,
+        username=payload.username if method != DomainScanMethod.smb_anonymous else None,
+        password=encrypt_secret(payload.password) if payload.password else None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id}
+
+
+@api_write.delete("/api/domain-scan/credential-sets/{set_id}", status_code=204)
+def delete_domain_scan_credential_set(set_id: int, db: Session = Depends(_db)):
+    row = db.get(DomainScanCredentialSet, set_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Набор не найден")
+    db.delete(row)
+    db.commit()
+
+
+@api_operate.post("/api/domain-scan/run", status_code=201)
+async def run_domain_scan_endpoint(payload: DomainScanRunIn, db: Session = Depends(_db)):
+    """Запускает доменную инвентаризацию в фоне (ping-скан + WinRM/SMB на
+    каждый живой хост) и сразу возвращает id — прогресс/результат смотри
+    через GET /api/domain-scan/{id}, тот же принцип, что у Sweep."""
+    try:
+        from app.scan_engine import _validate_cidr
+
+        _validate_cidr(payload.cidr)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"некорректный CIDR/IP: {payload.cidr!r}")
+
+    scan = DomainScan(cidr=payload.cidr, group_id=payload.group_id)
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    asyncio.create_task(run_domain_scan(scan.id, payload.cidr, payload.group_id, get_session))
+    return {"id": scan.id}
+
+
+@api_read.get("/api/domain-scan")
+def list_domain_scans(db: Session = Depends(_db)):
+    return [
+        {
+            "id": s.id, "cidr": s.cidr, "group_id": s.group_id,
+            "group_name": s.group.name if s.group else None,
+            "status": s.status.value, "started_at": iso(s.started_at),
+            "finished_at": iso(s.finished_at) if s.finished_at else None,
+            "error": s.error, "live_hosts": s.live_hosts, "host_count": len(s.hosts),
+        }
+        for s in db.query(DomainScan).order_by(desc(DomainScan.started_at)).limit(30).all()
+    ]
+
+
+@api_read.get("/api/domain-scan/{scan_id}")
+def get_domain_scan(scan_id: int, db: Session = Depends(_db)):
+    scan = db.get(DomainScan, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Скан не найден")
+    return {
+        "id": scan.id, "cidr": scan.cidr, "status": scan.status.value,
+        "started_at": iso(scan.started_at),
+        "finished_at": iso(scan.finished_at) if scan.finished_at else None,
+        "error": scan.error, "live_hosts": scan.live_hosts,
+        "hosts": [
+            {
+                "address": h.address, "computer_name": h.computer_name, "domain": h.domain,
+                "os_caption": h.os_caption, "status": h.status, "error_reason": h.error_reason,
+                "method_used": h.method_used,
+            }
+            for h in scan.hosts
+        ],
+    }
 
 
 @api_write.post("/api/scan-hosts/{host_id}/create-node", status_code=201)

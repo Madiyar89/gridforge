@@ -282,6 +282,22 @@ class ScanIn(BaseModel):
     ports: str | None = None
 
 
+class DomainScanRunIn(BaseModel):
+    cidr: str
+    group_id: int | None = None
+
+
+class DomainScanCredentialSetIn(BaseModel):
+    label: str
+    group_id: int | None = None
+    range_cidr: str | None = None
+    method: str  # winrm | smb_domain | smb_anonymous
+    fallback_method: str | None = None
+    domain: str | None = None
+    username: str | None = None
+    password: str | None = None
+
+
 class ScanHostToNodeIn(BaseModel):
     name: str | None = None
     group_id: int | None = None

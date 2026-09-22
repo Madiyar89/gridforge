@@ -621,6 +621,76 @@ class ScanHost(Base):
     scan: Mapped["Scan"] = relationship(back_populates="hosts")
 
 
+class DomainScanMethod(str, enum.Enum):
+    winrm = "winrm"
+    smb_domain = "smb_domain"
+    smb_anonymous = "smb_anonymous"
+
+
+class DomainScanCredentialSet(Base):
+    """Учётка для WinRM/SMB-опроса рабочих станций — перенесено из
+    NetOpsHub (app/modules/domain_scan/models.py:ScanCredentialSet).
+    Приоритет применения при резолюции по IP (см.
+    domain_scan_engine.resolve_credential_set): group_id+range_cidr точный
+    > group_id дефолт (range_cidr=None) > range_cidr глобальный
+    (group_id=None) > глобальный дефолт (оба None) — та же логика, что у
+    Credential (Настройки → Учётки), но отдельная сущность: там про SSH на
+    сетевое железо, тут про WinRM/SMB на Windows-станции, разные протоколы
+    и разные поля (нужен domain)."""
+
+    __tablename__ = "domain_scan_credential_sets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    range_cidr: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    method: Mapped[DomainScanMethod] = mapped_column(Enum(DomainScanMethod), nullable=False)
+    fallback_method: Mapped[DomainScanMethod | None] = mapped_column(Enum(DomainScanMethod), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    password: Mapped[str | None] = mapped_column(String(500), nullable=True)  # зашифровано, см. encrypt_secret
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    group: Mapped["Group | None"] = relationship()
+
+
+class DomainScan(Base):
+    """Прогон доменной инвентаризации: nmap ping-скан подсети + WinRM/SMB-
+    опрос каждого живого хоста (см. app/domain_scan_engine.py). Своя
+    таблица, не Scan/ScanHost выше — те про открытые TCP-порты сетевого
+    железа, здесь — про членство Windows-станции в домене."""
+
+    __tablename__ = "domain_scans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cidr: Mapped[str] = mapped_column(String(64), nullable=False)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.running)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    live_hosts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    hosts: Mapped[list["DomainScanHost"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
+    group: Mapped["Group | None"] = relationship()
+
+
+class DomainScanHost(Base):
+    __tablename__ = "domain_scan_hosts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_id: Mapped[int] = mapped_column(ForeignKey("domain_scans.id"), nullable=False)
+    address: Mapped[str] = mapped_column(String(64), nullable=False)
+    computer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    os_caption: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)  # in_domain | not_in_domain | error
+    error_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    method_used: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    scan: Mapped["DomainScan"] = relationship(back_populates="hosts")
+
+
 class CaptureStatus(str, enum.Enum):
     running = "running"
     done = "done"

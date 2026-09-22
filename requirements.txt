@@ -10,6 +10,11 @@ cryptography>=42
 # нужен FastAPI для разбора multipart/form-data (загрузка файлов образов
 # ПО, см. app/firmware_store.py) — FastAPI сам этого не тащит транзитивно.
 python-multipart>=0.0.9
+# WinRM/SMB-опрос рабочих станций (Доменная инвентаризация, см.
+# app/domain_scan_engine.py) — перенос из NetOpsHub (там то же самое,
+# только через Ansible-плейбук + отдельный скрипт).
+pywinrm>=0.4
+impacket>=0.11
 # MySQL/MariaDB драйвер (2026-09-20) — чистый Python, без компилируемых
 # зависимостей (в отличие от mysqlclient) — проще ставить на разные ОС.
 # Нужен только если GRIDFORGE_DATABASE_URL указывает на mysql+pymysql://.

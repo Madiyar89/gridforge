@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --cert /usr/local/share/ca-certificates/corporate-ca.crt -r requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 120 --cert /usr/local/share/ca-certificates/corporate-ca.crt -r requirements.txt
 COPY app/ ./app/
 COPY static/ ./static/
 RUN mkdir -p /app/data

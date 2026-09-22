@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — доменная инвентаризация</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Доменная инвентаризация</h1>
+  <p>Этап 1 — nmap ping-скан подсети (живые хосты). Этап 2 — для каждого живого хоста опрос по WinRM/SMB: домен, залогиненный компьютер, ОС. Учётка подбирается автоматически по группе/диапазону — см. «Credential-наборы» ниже.</p>
+</div>
+
+<div class="panel">
+  <h2>Новый скан</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="ds-cidr" placeholder="CIDR/IP, например 203.0.113.0/24">
+    <select id="ds-group"><option value="">без группы (глобальные наборы)</option></select>
+    <button id="ds-run">Запустить скан</button>
+  </div>
+  <div class="hint">Ping-скан + WinRM/SMB на каждый живой хост — может занять несколько минут на большой подсети.</div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>История сканов <span class="count" id="ds-scans-count"></span></h2>
+    <div class="body" id="ds-scans-body"><div class="empty">Загрузка…</div></div>
+  </div>
+  <div class="panel">
+    <h2>Результат <span class="count" id="ds-result-meta"></span></h2>
+    <div class="body" id="ds-result-body"><div class="empty">Выбери скан слева</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Credential-наборы <span class="count" id="ds-cred-count"></span></h2>
+  <p class="hint" style="padding-top:12px">Приоритет: точный диапазон своей группы → группа без диапазона (дефолт) → диапазон без группы (глобальный) → совсем глобальный дефолт. Fallback-метод (если основной не сработал) необязателен — anonymous SMB как последний рубеж пробуется всегда сам, даже без явного fallback.</p>
+  <div class="body" id="ds-cred-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <input id="new-ds-label" placeholder="название набора">
+    <select id="new-ds-group"><option value="">любая группа (глобальный)</option></select>
+    <input id="new-ds-cidr" placeholder="диапазон, напр. 203.0.113.0/24 (опц.)">
+  </div>
+  <div class="form-row" style="border-top:none">
+    <select id="new-ds-method">
+      <option value="winrm">WinRM (HTTPS/5986)</option>
+      <option value="smb_domain">SMB, доменная учётка</option>
+      <option value="smb_anonymous">SMB, анонимно (без учётки)</option>
+    </select>
+    <select id="new-ds-fallback">
+      <option value="">без fallback-метода</option>
+      <option value="winrm">fallback: WinRM</option>
+      <option value="smb_domain">fallback: SMB (доменная)</option>
+    </select>
+  </div>
+  <div class="form-row" style="border-top:none">
+    <input id="new-ds-domain" placeholder="домен, напр. mt-inet.kz">
+    <input id="new-ds-username" placeholder="логин">
+    <input id="new-ds-password" type="password" placeholder="пароль">
+    <button id="add-ds-cred">+ набор</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="domain-scan.js"></script>
+</body>
+</html>
