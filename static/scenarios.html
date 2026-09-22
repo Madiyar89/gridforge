@@ -22,15 +22,25 @@
   .scn-btn.active{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 1px var(--accent);}
   .scn-btn b{font-size:15px;}
   .scn-btn span{font-size:12px;color:var(--text-dim);font-family:var(--mono);}
-  .scn-form{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
-  .scn-form label{font-size:11px;color:var(--text-dim);}
-  .scn-form input{width:100%;}
   .node-pick{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:13px;}
   .node-pick .addr{color:var(--text-dim);font-size:11px;}
   .node-list{max-height:320px;overflow-y:auto;}
-  .result-row{padding:8px;border-bottom:1px solid var(--border);}
-  .result-row pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-all;font-size:12px;
-                  max-height:220px;overflow:auto;background:var(--bg);padding:8px;border-radius:4px;}
+  #results-body{max-height:none;overflow:visible;}
+  .result-row{border-bottom:1px solid var(--border);}
+  .result-row:last-child{border-bottom:none;}
+  .result-row summary{
+    padding:10px 14px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;
+  }
+  .result-row summary::-webkit-details-marker{display:none;}
+  .result-row summary::before{content:"▸";color:var(--text-dim);font-size:11px;transition:transform .12s ease;flex-shrink:0;}
+  .result-row[open] summary::before{transform:rotate(90deg);}
+  .result-row summary:hover{background:var(--surface-2);}
+  .result-row .err-text{color:var(--crit);font-size:12px;margin-left:auto;}
+  .result-row .pending-text{color:var(--text-dim);font-size:12px;margin-left:auto;}
+  .result-row pre{
+    margin:0 14px 12px;white-space:pre-wrap;word-break:break-all;font-size:12px;
+    max-height:480px;overflow:auto;background:var(--bg);padding:10px 12px;border-radius:6px;
+  }
 </style>
 </head>
 <body>
@@ -71,7 +81,6 @@
     <h2>2 · Сценарий</h2>
     <div class="body">
       <div class="scn-list" id="scenarios-list"><div class="empty">Загрузка…</div></div>
-      <div id="scn-form-holder"></div>
     </div>
   </div>
 
@@ -80,6 +89,17 @@
     <div class="body" id="history-body"><div class="empty">Загрузка…</div></div>
   </div>
 </div>
+
+<dialog id="scn-modal">
+  <form method="dialog" id="scn-modal-form">
+    <h3>Сценарий «<span id="scn-modal-title"></span>»</h3>
+    <div id="scn-modal-fields"></div>
+    <div class="modal-actions">
+      <button type="button" value="cancel" class="btn-ghost" id="scn-modal-cancel">Отмена</button>
+      <button type="button" id="run-scenario-btn">Запустить на выбранных узлах</button>
+    </div>
+  </form>
+</dialog>
 
 <div class="panel">
   <h2>Результат <span class="count" id="progress-label"></span></h2>

@@ -153,31 +153,32 @@ function selectScenario(id) {
   document.querySelectorAll(".scn-btn").forEach((btn) => {
     btn.classList.toggle("active", Number(btn.dataset.id) === id);
   });
-  renderScenarioForm();
+  openScenarioModal();
 }
 
-function renderScenarioForm() {
-  const holder = document.getElementById("scn-form-holder");
-  if (!_activeScenario) {
-    holder.innerHTML = "";
-    return;
-  }
+function openScenarioModal() {
+  if (!_activeScenario) return;
+  if (_selected.size === 0) return toast("Сначала выбери узлы (шаг 1)", true);
+
+  document.getElementById("scn-modal-title").textContent = _activeScenario.label;
+  const fieldsEl = document.getElementById("scn-modal-fields");
   const paramFields = _activeScenario.params
     .map(
       (p) => `
-      <div>
-        <label for="param-${escapeHtml(p)}">${escapeHtml(p)}</label>
+      <label for="param-${escapeHtml(p)}">${escapeHtml(p)}
         <input id="param-${escapeHtml(p)}" data-param="${escapeHtml(p)}">
-      </div>`
+      </label>`
     )
     .join("");
-  holder.innerHTML = `
-    <div class="scn-form">
-      ${paramFields || `<div style="font-size:11px;color:var(--text-dim);">Этот сценарий не требует параметров.</div>`}
-      <button id="run-scenario-btn">Запустить на выбранных узлах</button>
-    </div>`;
-  document.getElementById("run-scenario-btn").addEventListener("click", runActiveScenario);
+  fieldsEl.innerHTML =
+    paramFields || `<div style="font-size:12px;color:var(--text-dim);">Этот сценарий не требует параметров.</div>`;
+  document.getElementById("scn-modal").showModal();
 }
+
+document.getElementById("scn-modal-cancel").addEventListener("click", () => {
+  document.getElementById("scn-modal").close();
+});
+document.getElementById("run-scenario-btn").addEventListener("click", runActiveScenario);
 
 // Учётка — центральная (Настройки → Учётки), своя на группу узла;
 // ручной prompt — только если сервер ответит, что нет ни центральной,
@@ -204,6 +205,7 @@ async function runActiveScenario() {
       method: "POST",
       body: JSON.stringify({ node_ids: [..._selected], params }),
     });
+    document.getElementById("scn-modal").close();
     toast(`Запущено на ${started.nodes} узлах`);
     if (started.skipped && started.skipped.length) {
       toast(`Пропущены: ${started.skipped.join(", ")}`, true);
@@ -244,13 +246,15 @@ function renderResults(data) {
     .sort((a, b) => naturalCompare(a.node_name, b.node_name))
     .map((r) => {
       if (r.ok === null) {
-        return `<div class="result-row"><b>${escapeHtml(r.node_name)}</b> <span class="addr">— выполняется…</span></div>`;
+        return `<details class="result-row"><summary><b>${escapeHtml(r.node_name)}</b> <span class="pending-text">выполняется…</span></summary></details>`;
       }
-      const head = r.ok
-        ? `<span class="ok-dot up"></span><b>${escapeHtml(r.node_name)}</b>`
-        : `<span class="ok-dot down"></span><b>${escapeHtml(r.node_name)}</b> <span style="color:var(--crit)">${escapeHtml(r.error || "ошибка")}</span>`;
+      const dot = r.ok ? `<span class="ok-dot up"></span>` : `<span class="ok-dot down"></span>`;
+      const status = r.ok ? "" : `<span class="err-text">${escapeHtml(r.error || "ошибка")}</span>`;
       const body = r.output ? `<pre>${escapeHtml(r.output)}</pre>` : "";
-      return `<div class="result-row">${head}${body}</div>`;
+      // Открыто по умолчанию только у ошибок — успешные узлы сворачиваем,
+      // чтобы длинный вывод (например, текст баннера) не растягивал
+      // список на весь экран и не мешал искать неудачные узлы.
+      return `<details class="result-row"${r.ok ? "" : " open"}><summary>${dot}<b>${escapeHtml(r.node_name)}</b>${status}</summary>${body}</details>`;
     })
     .join("");
 }
