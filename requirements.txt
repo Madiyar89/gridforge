@@ -14,7 +14,22 @@ python-multipart>=0.0.9
 # app/domain_scan_engine.py) — перенос из NetOpsHub (там то же самое,
 # только через Ansible-плейбук + отдельный скрипт).
 pywinrm>=0.4
-impacket>=0.11
+# impacket сам НЕ ставится через pip здесь — его .whl стабильно рвёт
+# соединение через прокси этой инфраструктуры (реальная находка, тот же
+# BrokenPipeError и на локальной сборке, и на проде, и даже при повторном
+# скачивании из контейнера ansible-runner, где он уже когда-то был
+# установлен — не баг сборки GridForge, а нестабильность именно этого
+# файла на прокси). Пакет вместо этого ВЕНДОРЁН (см. vendor/impacket/,
+# Dockerfile COPY) — файлы взяты из уже рабочей установки в
+# netops-ansible-runner (та же версия 0.12.0). Здесь — только его
+# реальные рантайм-зависимости для использованного кода (SMBConnection/
+# NTLM/SMB2), не полный список impacket (pyOpenSSL/flask/ldapdomaindump
+# нужны только для инструментов атаки в impacket/examples/, которые
+# GridForge не импортирует).
+pyasn1>=0.2.3
+pyasn1-modules
+pycryptodomex
+six
 # MySQL/MariaDB драйвер (2026-09-20) — чистый Python, без компилируемых
 # зависимостей (в отличие от mysqlclient) — проще ставить на разные ОС.
 # Нужен только если GRIDFORGE_DATABASE_URL указывает на mysql+pymysql://.

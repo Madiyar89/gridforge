@@ -12,6 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --retries 10 --timeout 120 --cert /usr/local/share/ca-certificates/corporate-ca.crt -r requirements.txt
+# impacket вендорён (см. requirements.txt — комментарий про BrokenPipeError
+# на прокси), файлы взяты из уже рабочей установки, кладём напрямую в
+# site-packages вместо pip install.
+COPY vendor/impacket /usr/local/lib/python3.12/site-packages/impacket
+COPY vendor/impacket-0.12.0.dist-info /usr/local/lib/python3.12/site-packages/impacket-0.12.0.dist-info
 COPY app/ ./app/
 COPY static/ ./static/
 RUN mkdir -p /app/data
