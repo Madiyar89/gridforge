@@ -325,7 +325,17 @@ async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | Non
 
     entry["method_used"] = used_method
     if data is None:
-        entry["error_reason"] = last_error or "метод(ы) опроса недоступны на этом хосте"
+        # WinRM/SMB не ответили вообще, но HTTP-баннер что-то нашёл — это
+        # НЕ ошибка, а честно определённое устройство без домена в
+        # принципе (принтер, камера, свитч с веб-мордой), по прямому
+        # запросу пользователя: раньше такие хосты попадали в общую кучу
+        # "ошибка" вперемешку с реально недоступными/сбойными, теперь
+        # отдельная категория — фильтруется и просматривается так же,
+        # как "в домене"/"не в домене".
+        if entry["http_banner"]:
+            entry["status"] = "device"
+        else:
+            entry["error_reason"] = last_error or "метод(ы) опроса недоступны на этом хосте"
         return entry
 
     entry["domain"] = data.get("domain")
