@@ -299,6 +299,10 @@ a{color:var(--accent);}
 #ad-report-fleet-body,#ad-report-domain-body,#net-report-fleet-body,#net-report-domain-body{
   max-height:none;overflow-y:visible;
 }
+/* Инвентарь (список узлов) — тот же приём: список из 24+ узлов не должен
+   жить в тесном окошке 560px с внутренним скроллом, по прямому запросу
+   пользователя. */
+#nodes-body{max-height:none;overflow-y:visible;}
 /* Тот же overflow:hidden-у-предка ломает sticky (см. #legacy-panel выше) —
    risk-sticky-head внутри report-domain-body должен липнуть к прокрутке
    страницы, а не к границам своей .panel. */

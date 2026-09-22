@@ -177,11 +177,25 @@
 <dialog id="action-modal">
   <form method="dialog" id="action-form">
     <h3>Новое действие — <span id="action-modal-watch"></span></h3>
-    <p class="hint" style="padding:0">Выполняется по SSH на узле условия, при каждом открытии нового инцидента. Логин можно не указывать — тогда используется центральная учётка узла.</p>
-    <label>Порт <input id="a-port" type="number" value="22"></label>
-    <label>Логин <input id="a-user" placeholder="пусто — взять центральную учётку узла (Настройки → Учётки)"></label>
-    <label>Путь к приватному ключу <input id="a-key" placeholder="нужен только если логин указан вручную"></label>
-    <label>Команда <input id="a-cmd" placeholder="systemctl restart nginx"></label>
+    <p class="hint" style="padding:0">Что это: когда условие срабатывает и открывается новый инцидент, GridForge сам заходит по SSH на узел этого условия и выполняет команду ниже — не уведомление, а реальное действие на устройстве (например, отбить порт, перезапустить сервис).</p>
+    <label>Порт <span class="hint" style="padding:2px 0 0">TCP-порт SSH на узле — почти всегда 22, меняй только если он реально другой.</span>
+      <input id="a-port" type="number" value="22">
+    </label>
+    <label>Учётка <span class="hint" style="padding:2px 0 0">Каким логином подключаться. «Автоматически» — та же учётка, что уже назначена на этот узел в Настройки → Учётки (по узлу/группе/вендору/по умолчанию). Можно явно выбрать другую учётку из списка, если для этого действия нужен не тот логин, что для обычного опроса.</span>
+      <select id="a-cred">
+        <option value="">Автоматически — по узлу (как везде в GridForge)</option>
+        <option value="manual">Ввести логин/ключ вручную</option>
+      </select>
+    </label>
+    <div id="a-manual-fields" hidden>
+      <label>Логин <input id="a-user" placeholder="admin"></label>
+      <label>Путь к приватному ключу <span class="hint" style="padding:2px 0 0">Только если вход по ключу, не по паролю — оставь пустым для пароля.</span>
+        <input id="a-key" placeholder="/home/user/.ssh/id_ed25519">
+      </label>
+    </div>
+    <label>Команда <span class="hint" style="padding:2px 0 0">Одна команда, которая реально выполнится на устройстве этим логином — сетевая команда IOS/Junos (например, "shutdown"/"no shutdown" на интерфейсе) или shell-команда, если узел — сервер, а не свитч.</span>
+      <input id="a-cmd" placeholder="например: show interfaces status">
+    </label>
     <div class="modal-actions">
       <button type="button" value="cancel" class="btn-ghost" id="action-cancel">Отмена</button>
       <button type="submit" value="ok" id="action-submit">Создать</button>

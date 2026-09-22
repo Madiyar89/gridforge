@@ -10,7 +10,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.credentials_engine import resolve_credential
-from app.models import Action, ActionKind, ActionRun, Incident, Node
+from app.models import Action, ActionKind, ActionRun, Credential, Incident, Node
 from app.secrets_crypto import decrypt_secret
 from app.ssh_client import run_ssh_command
 
@@ -25,20 +25,34 @@ async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool
     if not command:
         return False, "config.command обязателен"
 
-    # username/key_path/password в форме действия — явный override (как
-    # раньше, обязателен). Не указан — падаем на центральную учётку узла
-    # (Credential, тот же resolve_credential, что уже использует Рубка/
-    # Сценарии/бэкап), по прямому запросу пользователя: раньше Action был
-    # единственным местом в GridForge, где учётку всегда приходилось
-    # печатать руками, даже если для этого узла уже есть центральная.
+    # Три источника учётки, по приоритету (по прямому запросу
+    # пользователя — раньше Action был единственным местом в GridForge,
+    # где логин/пароль всегда приходилось печатать руками):
+    #   1. username в config — явный ручной override, как было раньше.
+    #   2. credential_id в config — КОНКРЕТНАЯ учётка из Настройки →
+    #      Учётки, выбранная в форме действия явно (не обязательно та,
+    #      что резолвится по узлу — иногда для действия нужен другой
+    #      логин, чем для обычного опроса).
+    #   3. Ничего не указано — та же учётка, что резолвилась бы для
+    #      этого узла везде (resolve_credential: узел -> группа ->
+    #      вендор -> дефолт).
     username = cfg.get("username")
     key_path = cfg.get("key_path")
     password = decrypt_secret(cfg["password"]) if cfg.get("password") else None
     if not username:
-        cred = resolve_credential(db, node)
-        if cred is None:
-            return False, "нет ни username в действии, ни центральной учётки для этого узла"
-        username, key_path, password = cred["username"], cred["key_path"], cred["password"]
+        cred_id = cfg.get("credential_id")
+        if cred_id:
+            cred_row = db.get(Credential, int(cred_id))
+            if cred_row is None:
+                return False, f"учётка id={cred_id} не найдена (удалена?)"
+            username = cred_row.username
+            key_path = cred_row.key_path
+            password = decrypt_secret(cred_row.password) if cred_row.password else None
+        else:
+            cred = resolve_credential(db, node)
+            if cred is None:
+                return False, "нет ни username в действии, ни центральной учётки для этого узла"
+            username, key_path, password = cred["username"], cred["key_path"], cred["password"]
 
     result = await run_ssh_command(
         host=node.address,

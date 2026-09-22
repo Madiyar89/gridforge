@@ -370,28 +370,70 @@ const actionModal = document.getElementById("action-modal");
 const actionForm = document.getElementById("action-form");
 let actionModalWatchId = null;
 
+function credentialOptionLabel(c) {
+  const scope = c.node_name
+    ? c.node_name
+    : c.group_name
+    ? `группа ${c.group_name}`
+    : c.vendor
+    ? `вендор ${c.vendor}`
+    : "по умолчанию";
+  return `${c.label || c.username} (${c.username}) — ${scope}`;
+}
+
+async function loadActionCredentials() {
+  const select = document.getElementById("a-cred");
+  const manualOption = select.querySelector('option[value="manual"]');
+  let creds = [];
+  try {
+    creds = await api("/api/credentials");
+  } catch (e) {
+    return; // нет прав/сбой — оставим только "автоматически"/"вручную"
+  }
+  creds.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = String(c.id);
+    opt.textContent = credentialOptionLabel(c);
+    select.insertBefore(opt, manualOption);
+  });
+}
+
 function openActionModal(watchId, watchLabel) {
   actionModalWatchId = watchId;
   document.getElementById("action-modal-watch").textContent = watchLabel;
   actionForm.reset();
   document.getElementById("a-port").value = 22;
+  document.getElementById("a-manual-fields").hidden = true;
+  // Список учёток мог измениться с прошлого открытия (добавили/удалили) —
+  // перезагружаем каждый раз, а не один раз при загрузке страницы.
+  const select = document.getElementById("a-cred");
+  select.querySelectorAll("option:not([value=''],[value='manual'])").forEach((o) => o.remove());
+  loadActionCredentials();
   actionModal.showModal();
 }
+
+document.getElementById("a-cred").addEventListener("change", (e) => {
+  document.getElementById("a-manual-fields").hidden = e.target.value !== "manual";
+});
 
 document.getElementById("action-cancel").addEventListener("click", () => actionModal.close());
 
 actionForm.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const payload = {
-    watch_id: Number(actionModalWatchId),
-    kind: "ssh_command",
-    config: {
-      port: Number(document.getElementById("a-port").value) || 22,
-      username: document.getElementById("a-user").value.trim(),
-      key_path: document.getElementById("a-key").value.trim(),
-      command: document.getElementById("a-cmd").value.trim(),
-    },
+  const credValue = document.getElementById("a-cred").value;
+  const config = {
+    port: Number(document.getElementById("a-port").value) || 22,
+    command: document.getElementById("a-cmd").value.trim(),
   };
+  if (credValue === "manual") {
+    config.username = document.getElementById("a-user").value.trim();
+    config.key_path = document.getElementById("a-key").value.trim();
+  } else if (credValue) {
+    config.credential_id = Number(credValue);
+  }
+  // credValue === "" ("Автоматически") — ни username, ни credential_id
+  // не передаём, сервер сам резолвит учётку по узлу (см. actions_engine.py).
+  const payload = { watch_id: Number(actionModalWatchId), kind: "ssh_command", config };
   try {
     await api("/api/actions", { method: "POST", body: JSON.stringify(payload) });
     actionModal.close();
