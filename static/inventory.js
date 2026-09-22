@@ -3,6 +3,7 @@
 async function refreshGroups() {
   const body = document.getElementById("groups-body");
   const select = document.getElementById("new-node-group");
+  const filterSelect = document.getElementById("nodes-group-filter");
   let groups;
   try {
     groups = await api("/api/groups");
@@ -17,6 +18,13 @@ async function refreshGroups() {
     `<option value="">без группы</option>` +
     groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
   select.value = prevSelected;
+
+  const prevFilter = filterSelect.value;
+  filterSelect.innerHTML =
+    `<option value="">все группы</option>` +
+    groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("") +
+    `<option value="__none__">без группы</option>`;
+  filterSelect.value = prevFilter;
 
   if (groups.length === 0) {
     body.innerHTML = `<div class="empty">Групп нет — все узлы в общем списке</div>`;
@@ -46,12 +54,18 @@ async function refreshGroups() {
 
 async function refreshNodes() {
   const body = document.getElementById("nodes-body");
+  const filterValue = document.getElementById("nodes-group-filter").value;
   let nodes;
   try {
     nodes = sortNodesNatural(await api("/api/nodes"));
   } catch (e) {
     body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
     return;
+  }
+  if (filterValue === "__none__") {
+    nodes = nodes.filter((n) => !n.group_id);
+  } else if (filterValue) {
+    nodes = nodes.filter((n) => String(n.group_id) === filterValue);
   }
   document.getElementById("nodes-count").textContent = nodes.length;
 
@@ -95,10 +109,13 @@ async function refreshNodes() {
     return a.localeCompare(b);
   });
 
+  // При выбранном фильтре группа и так одна — повторять её название
+  // заголовком над списком не нужно, это просто шум.
+  const showHeadings = !filterValue && groupNames.length > 1;
   body.innerHTML = groupNames
     .map((groupName) => {
       const rows = byGroup.get(groupName).map(renderNodeItem).join("");
-      return `<div class="group-heading">${escapeHtml(groupName)}</div>${rows}`;
+      return showHeadings ? `<div class="group-heading">${escapeHtml(groupName)}</div>${rows}` : rows;
     })
     .join("");
 
@@ -488,6 +505,8 @@ async function refreshAll() {
 function onKeySaved() {
   refreshAll();
 }
+
+document.getElementById("nodes-group-filter").addEventListener("change", refreshNodes);
 
 refreshAll();
 setInterval(refreshAll, REFRESH_MS);

@@ -565,7 +565,7 @@ def list_node_probes(node_id: int, db: Session = Depends(_db), key: Principal = 
     """Для веб-интерфейса (static/app.js) — Probe каждого Node вместе с
     последней Sample, чтобы не делать по отдельному запросу на probe."""
     require_node_access(db, key, node_id)
-    probes = db.query(Probe).filter(Probe.node_id == node_id).all()
+    probes = db.query(Probe).filter(Probe.node_id == node_id).order_by(Probe.id).all()
     result = []
     for p in probes:
         latest = (
@@ -634,7 +634,7 @@ def list_probe_watches(probe_id: int, db: Session = Depends(_db), key: Principal
     каждой проверкой, с количеством уже настроенных действий (Action), не
     только сам факт существования Watch."""
     require_probe_access(db, key, probe_id)
-    watches = db.query(Watch).filter(Watch.probe_id == probe_id).all()
+    watches = db.query(Watch).filter(Watch.probe_id == probe_id).order_by(Watch.id).all()
     result = []
     for w in watches:
         action_count = db.query(Action).filter(Action.watch_id == w.id).count()
