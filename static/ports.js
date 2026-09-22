@@ -5,6 +5,8 @@ let _lastPortsData = null;
 let _nodesById = {};
 let _allNodes = [];
 let _selectedNodeId = null;
+let _multiMode = false;
+let _pickedPorts = new Set();
 
 const STATE_LABEL = {
   up: "линк есть",
@@ -68,6 +70,8 @@ function renderNodeChips() {
 
 function selectNode(nodeId) {
   _selectedNodeId = String(nodeId);
+  _pickedPorts.clear();
+  if (document.getElementById("bulk-port-status")) document.getElementById("bulk-port-status").textContent = "";
   renderNodeChips();
   loadPorts();
 }
@@ -136,7 +140,7 @@ async function loadPorts() {
             ? escapeHtml(group.ports[0].name)
             : `${escapeHtml(group.ports[0].name)} … ${escapeHtml(group.ports[group.ports.length - 1].name)} · ${group.ports.length} шт.`
         }</div>
-        <div class="port-grid">
+        <div class="port-grid${_multiMode ? " multi-mode" : ""}">
           ${group.ports
             .map((p) => {
               const num = p.name.split("/").pop();
@@ -144,7 +148,8 @@ async function loadPorts() {
               const cls =
                 `port ${p.state}` +
                 (p.is_trunk ? " trunk" : "") +
-                (prot && prot.leftover_settings ? " leftover" : "");
+                (prot && prot.leftover_settings ? " leftover" : "") +
+                (_multiMode && _pickedPorts.has(p.name) ? " multi-picked" : "");
               const lock = prot && prot.port_security ? '<span class="lock">🔒</span>' : "";
               return `<div class="${cls}" data-name="${escapeHtml(p.name)}" title="${escapeHtml(p.name)}">${escapeHtml(num)}${lock}</div>`;
             })
@@ -167,12 +172,87 @@ async function loadPorts() {
   data.groups.forEach((g) => g.ports.forEach((p) => (byName[p.name] = p)));
   body.querySelectorAll(".port").forEach((el) => {
     el.addEventListener("click", () => {
+      if (_multiMode) {
+        toggleMultiPick(el.dataset.name, el);
+        return;
+      }
       body.querySelectorAll(".port.selected").forEach((s) => s.classList.remove("selected"));
       el.classList.add("selected");
       showPortDetail(byName[el.dataset.name]);
     });
   });
 }
+
+// --- Массовый выбор портов (вкл/выкл сразу нескольких) ---
+
+function toggleMultiPick(name, el) {
+  if (_pickedPorts.has(name)) {
+    _pickedPorts.delete(name);
+    el.classList.remove("multi-picked");
+  } else {
+    _pickedPorts.add(name);
+    el.classList.add("multi-picked");
+  }
+  updateBulkPortBar();
+}
+
+function updateBulkPortBar() {
+  document.getElementById("bulk-port-count").textContent = `Выбрано: ${_pickedPorts.size}`;
+}
+
+document.getElementById("multi-select-toggle").addEventListener("click", () => {
+  _multiMode = !_multiMode;
+  _pickedPorts.clear();
+  document.getElementById("multi-select-toggle").textContent = _multiMode ? "Отменить выбор" : "Выбрать несколько";
+  document.getElementById("bulk-port-bar").hidden = !_multiMode;
+  document.getElementById("bulk-port-status").textContent = "";
+  updateBulkPortBar();
+  loadPorts();
+});
+
+document.getElementById("bulk-port-clear").addEventListener("click", () => {
+  _pickedPorts.clear();
+  document.getElementById("bulk-port-status").textContent = "";
+  loadPorts();
+});
+
+async function bulkApplyPortState(state) {
+  if (_pickedPorts.size === 0) return toast("Сначала выбери порты на схеме", true);
+  const label = state === "up" ? "включить (no shutdown)" : "выключить (shutdown)";
+  const names = [..._pickedPorts];
+  if (!confirm(`${state === "up" ? "Включить" : "Выключить"} ${names.length} порт(ов): ${names.join(", ")}?`)) return;
+
+  const nodeId = _selectedNodeId;
+  const status = document.getElementById("bulk-port-status");
+  const upBtn = document.getElementById("bulk-port-up");
+  const downBtn = document.getElementById("bulk-port-down");
+  upBtn.disabled = true;
+  downBtn.disabled = true;
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < names.length; i++) {
+    status.textContent = `${i + 1}/${names.length} — ${names[i]}…`;
+    try {
+      const result = await apiWithCredentials(`/api/nodes/${nodeId}/ports/${encodeURIComponent(names[i])}/apply`, {
+        method: "POST",
+        body: JSON.stringify({ state }),
+      });
+      if (result.ok) ok++;
+      else failed++;
+    } catch (e) {
+      failed++;
+    }
+  }
+  upBtn.disabled = false;
+  downBtn.disabled = false;
+  status.textContent = `готово: успешно ${ok}, ошибок ${failed}`;
+  toast(`Порты ${label}: успешно ${ok}, ошибок ${failed}`, failed > 0 && ok === 0);
+  _pickedPorts.clear();
+  loadPorts();
+}
+
+document.getElementById("bulk-port-up").addEventListener("click", () => bulkApplyPortState("up"));
+document.getElementById("bulk-port-down").addEventListener("click", () => bulkApplyPortState("down"));
 
 // В `show interfaces status` имена сокращённые (Gi1/0/1), а в
 // конфигурации полные (GigabitEthernet1/0/1) — сопоставляем по числовой

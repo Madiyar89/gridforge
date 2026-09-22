@@ -22,6 +22,15 @@
   .port.err-disabled{background:#4a1a16;border-color:#a33a2f;color:#ffb3a7;}
   .port.unknown{background:#2a2214;border-color:#6b5a2f;color:#d9c48e;}
   .port.selected{outline:2px solid var(--accent);outline-offset:1px;}
+  /* Режим множественного выбора: галочка поверх плитки, отдельно от
+     цвета состояния и outline одиночного выбора — три разных признака
+     не должны конкурировать за один и тот же визуальный канал. */
+  .port-grid.multi-mode .port{cursor:pointer;}
+  .port.multi-picked{outline:2px solid var(--accent);outline-offset:1px;}
+  .port.multi-picked::before{
+    content:"✓";position:absolute;top:1px;left:2px;font-size:9px;line-height:1;
+    color:var(--accent);font-weight:700;
+  }
   /* Уголок у trunk-порта: цветом состояние уже занято, нужен отдельный
      признак, который читается поверх любого фона. */
   .port.trunk::after{
@@ -66,6 +75,12 @@
   .node-chip.active .addr{opacity:.75;}
   .ports-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);}
   .ports-toolbar select{min-width:200px;}
+
+  .bulk-port-bar{
+    display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    padding:10px 16px;border-bottom:1px solid var(--border);background:var(--info-bg);
+  }
+  .bulk-port-bar #bulk-port-count{font-family:var(--mono);font-size:12px;color:var(--info);font-weight:600;}
 </style>
 </head>
 <body>
@@ -101,10 +116,18 @@
   <h2>
     <span>Схема <span class="count" id="ports-summary"></span></span>
     <span style="display:flex;align-items:center;gap:10px;font-weight:400;">
+      <button id="multi-select-toggle" class="btn-ghost">Выбрать несколько</button>
       <button id="refresh-ports">Снять состояние</button>
       <span id="snapshot-age" style="color:var(--text-dim);font-size:12px;"></span>
     </span>
   </h2>
+  <div id="bulk-port-bar" class="bulk-port-bar" hidden>
+    <span id="bulk-port-count">Выбрано: 0</span>
+    <button id="bulk-port-up" class="btn-ghost">Включить (no shutdown)</button>
+    <button id="bulk-port-down" class="btn-ghost">Выключить (shutdown)</button>
+    <button id="bulk-port-clear" class="btn-ghost">Снять выбор</button>
+    <span id="bulk-port-status" style="color:var(--text-dim);font-size:12px;"></span>
+  </div>
   <div class="body" id="ports-body"><div class="empty">Выбери узел</div></div>
 </div>
 

@@ -197,7 +197,11 @@ def group_ports(ports: list[Port]) -> list[dict]:
     отдельно 4 аплинка, и рисовать их одной лентой неправильно."""
     groups: dict[str, list[Port]] = {}
     for port in ports:
-        match = re.match(r"^([A-Za-z]+[0-9]+(?:/[0-9]+)*)/[0-9]+$", port.name)
+        # "-?" — у Juniper буквенный префикс отделён дефисом (ge-0/0/0),
+        # у Cisco дефиса нет (Gi1/0/1). Без него каждый Juniper-порт
+        # попадал в собственную группу из одного порта: regex не совпадал
+        # вообще, и весь port.name уходил в prefix как есть.
+        match = re.match(r"^([A-Za-z]+-?[0-9]+(?:/[0-9]+)*)/[0-9]+$", port.name)
         prefix = match.group(1) if match else port.name
         groups.setdefault(prefix, []).append(port)
 

@@ -157,6 +157,17 @@ def test_ports_grouped_by_module():
     assert [p.name for p in groups[0]["ports"]] == ["Gi1/0/1", "Gi1/0/2"]
 
 
+def test_junos_ports_grouped_by_pic_not_one_per_port():
+    """Регрессия: у Juniper буквенный префикс отделён дефисом (ge-0/0/0),
+    и старая регулярка (без "-?") вообще не совпадала с таким именем —
+    каждый порт уходил в собственную группу из одного элемента вместо
+    одной сетки на весь PIC, как для Cisco."""
+    groups = group_ports(parse_junos_terse(JUNOS_TERSE))
+    assert len(groups) == 1
+    assert groups[0]["prefix"] == "ge-0/0"
+    assert len(groups[0]["ports"]) > 1
+
+
 def test_ports_sorted_numerically_not_alphabetically():
     """По алфавиту Gi1/0/10 встал бы между Gi1/0/1 и Gi1/0/2 — на схеме
     порты обязаны идти по номерам."""
