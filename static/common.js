@@ -187,7 +187,10 @@ function toast(message, isError = false) {
 }
 
 function timeAgo(iso) {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  // Math.max(0, ...) — часы браузера и сервера не идеально синхронны
+  // (реальный случай: клиент отстаёт от сервера на минуту-две), без
+  // защиты разница уходит в минус и показывает бессмысленное "-93с назад".
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (seconds < 60) return `${seconds}с назад`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}м назад`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}ч назад`;

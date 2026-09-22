@@ -20,11 +20,33 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
 from app.models import DomainScan, DomainScanCredentialSet, DomainScanHost, DomainScanMethod, ScanStatus, _now
 from app.secrets_crypto import decrypt_secret
+
+
+@dataclass(frozen=True)
+class _CredSetSnapshot:
+    """Плоский снимок ScanCredentialSet вне сессии SQLAlchemy — реальный
+    найденный баг (2026-09-22): каждый из N живых хостов открывал СВОЮ
+    сессию только чтобы перечитать один и тот же список наборов (он не
+    меняется за время скана) — на 254 хостах это 254 параллельных
+    SQLite-подключения разом, не ограниченных семафором (тот лимитирует
+    только сетевой опрос ниже), и скан вставал колом на много минут без
+    единого результата. Набор читается из БД РОВНО ОДИН РАЗ в
+    run_domain_scan(), дальше эти снимки просто передаются в память —
+    ни одного лишнего чтения на хост."""
+
+    group_id: int | None
+    range_cidr: str | None
+    method: DomainScanMethod
+    fallback_method: DomainScanMethod | None
+    domain: str | None
+    username: str | None
+    password: str | None  # уже зашифровано, как в БД — расшифровывается позже, лениво
 
 PING_SCAN_TIMEOUT_SECONDS = 120
 PROBE_TIMEOUT_SECONDS = 6.0
@@ -89,8 +111,8 @@ async def ping_sweep(cidr: str) -> list[str]:
 # глобальный > глобальный дефолт) ===
 
 
-def resolve_credential_set(ip: str, group_id: int | None, sets: list[DomainScanCredentialSet]) -> DomainScanCredentialSet | None:
-    def matches_cidr(s: DomainScanCredentialSet) -> bool:
+def resolve_credential_set(ip: str, group_id: int | None, sets: list[_CredSetSnapshot]) -> _CredSetSnapshot | None:
+    def matches_cidr(s: _CredSetSnapshot) -> bool:
         if not s.range_cidr:
             return False
         try:
@@ -188,13 +210,13 @@ async def _run_method(method: DomainScanMethod, ip: str, creds: dict | None) -> 
     raise RuntimeError(f"неизвестный метод: {method}")
 
 
-def _credential_dict(cred_set: DomainScanCredentialSet) -> dict | None:
+def _credential_dict(cred_set: _CredSetSnapshot) -> dict | None:
     if not cred_set.domain or not cred_set.username or not cred_set.password:
         return None
     return {"domain": cred_set.domain, "username": cred_set.username, "password": decrypt_secret(cred_set.password)}
 
 
-async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | None, sets: list[DomainScanCredentialSet]) -> dict:
+async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | None, sets: list[_CredSetSnapshot]) -> dict:
     entry = {
         "address": ip, "computer_name": None, "domain": None, "os_caption": None,
         "status": "error", "error_reason": None, "method_used": None,
@@ -250,15 +272,24 @@ async def _probe_host(semaphore: asyncio.Semaphore, ip: str, group_id: int | Non
 
 
 async def run_domain_scan(scan_id: int, cidr: str, group_id: int | None, get_session) -> None:
-    """Фоновая часть: ping-скан + опрос живых хостов. Своя сессия на
-    каждую запись (та же причина, что у Sweep — задачи идут параллельно,
-    сессия SQLAlchemy не рассчитана на конкурентный доступ)."""
+    """Фоновая часть: ping-скан + опрос живых хостов. Credential-наборы
+    читаются из БД РОВНО ОДИН РАЗ здесь (см. _CredSetSnapshot — почему это
+    важно), дальше только по одной сессии на запись результата, как у
+    Sweep — задачи идут параллельно, сессия SQLAlchemy не рассчитана на
+    конкурентный доступ."""
     db = get_session()
     try:
         scan = db.get(DomainScan, scan_id)
-        sets = db.query(DomainScanCredentialSet).filter(
+        rows = db.query(DomainScanCredentialSet).filter(
             (DomainScanCredentialSet.group_id == group_id) | (DomainScanCredentialSet.group_id.is_(None))
         ).all()
+        sets = [
+            _CredSetSnapshot(
+                group_id=s.group_id, range_cidr=s.range_cidr, method=s.method,
+                fallback_method=s.fallback_method, domain=s.domain, username=s.username, password=s.password,
+            )
+            for s in rows
+        ]
         if not sets:
             scan.status = ScanStatus.failed
             scan.error = "Ни одного credential-набора не подходит под эту группу — заведи хотя бы один ниже"
@@ -281,12 +312,9 @@ async def run_domain_scan(scan_id: int, cidr: str, group_id: int | None, get_ses
     semaphore = asyncio.Semaphore(MAX_PARALLEL)
 
     async def _one(ip: str) -> None:
+        entry = await _probe_host(semaphore, ip, group_id, sets)
         db2 = get_session()
         try:
-            sets2 = db2.query(DomainScanCredentialSet).filter(
-                (DomainScanCredentialSet.group_id == group_id) | (DomainScanCredentialSet.group_id.is_(None))
-            ).all()
-            entry = await _probe_host(semaphore, ip, group_id, sets2)
             db2.add(DomainScanHost(scan_id=scan_id, **entry))
             db2.commit()
         finally:
