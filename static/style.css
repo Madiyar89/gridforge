@@ -302,6 +302,25 @@ a{color:var(--accent);}
 .form-row button:hover{background:var(--accent);color:var(--accent-ink);}
 .hint{font-size:11px;color:var(--text-dim);padding:0 16px 12px;}
 
+/* Базовые стили для select и .btn-ghost вне .form-row/.modal-actions —
+   реальный баг (2026-09-23): оба класса использовались на десятке
+   страниц как самостоятельные (не внутри .form-row), но стилизовались
+   только внутри конкретных контейнеров — вне них падали на белый
+   браузерный дефолт, не в тему сайта. Специфичность .form-row
+   select/.modal-actions button выше (класс+элемент против одного
+   класса) — там, где обёртка есть, ничего не меняется, только
+   заполняет пробел там, где её нет. */
+select{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+  border-radius:6px;padding:7px 9px;font-size:12.5px;font-family:var(--sans);
+}
+.btn-ghost{
+  background:none;border:1px solid var(--border);color:var(--text-dim);
+  border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-family:var(--sans);
+}
+.btn-ghost:hover{color:var(--text);border-color:var(--accent);}
+.btn-ghost:disabled{opacity:.5;cursor:default;}
+
 .channel-row,.group-row,.template-row{
   padding:10px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;
   align-items:center;gap:10px;font-size:12.5px;
