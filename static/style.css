@@ -122,7 +122,13 @@ a{color:var(--accent);}
   background:var(--surface);border:1px solid var(--border);border-radius:10px;
   padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.45);
 }
-.topbar:not(.pinned) .nav-group:hover .nav-flyout{display:block;}
+/* По запросу пользователя (2026-09-23) — работает и в закреплённой
+   развёрнутой панели тоже, не только в узкой рельсе: наведение на
+   ЗАКРЫТУЮ группу сразу показывает флайаут, не дожидаясь клика по
+   стрелке-аккордеону. Если группа уже открыта инлайн (.open) — её
+   пункты и так видны строками, второй флайаут поверх был бы лишним. */
+.nav-group:hover .nav-flyout{display:block;}
+.nav-group:has(.nav-group-title.open):hover .nav-flyout{display:none;}
 .nav-flyout-title{
   font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
   color:var(--text-dim);padding:6px 10px 4px;white-space:nowrap;
