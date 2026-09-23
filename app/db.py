@@ -32,7 +32,25 @@ _IS_SQLITE = _DATABASE_URL.startswith("sqlite")
 # check_same_thread — специфичен для SQLite-драйвера (позволяет делить
 # соединение между потоками asyncio-обработчиков); MySQL-драйвер (pymysql)
 # такого аргумента не знает и упадёт, если передать его туда тоже.
-engine = create_engine(_DATABASE_URL, connect_args={"check_same_thread": False} if _IS_SQLITE else {})
+#
+# pool_size/max_overflow — реальный инцидент на проде (2026-09-23):
+# дефолтные 5+10=15 соединений исчерпались под обычной нагрузкой (24 узла
+# в планировщике + syslog UDP + несколько открытых вкладок, каждая
+# опрашивает API раз в 5с) — сайт встал целиком на 504, а не деградировал
+# частично, потому что pool_timeout по умолчанию 30с: каждый новый запрос
+# ждал свободное соединение все 30с вместо быстрого отказа, и очередь
+# только росла. Симптомов утечки (незакрытых сессий) в коде не нашлось —
+# все get_session() в scheduler.py/syslog_server.py/console_ws.py
+# закрываются в finally. Пул просто был мал для реальной параллельной
+# нагрузки. pool_timeout короче — чтобы при повторном исчерпании сайт
+# быстро отдавал ошибку отдельным запросам, а не вис целиком минутами.
+engine = create_engine(
+    _DATABASE_URL,
+    connect_args={"check_same_thread": False} if _IS_SQLITE else {},
+    pool_size=20,
+    max_overflow=30,
+    pool_timeout=10,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
