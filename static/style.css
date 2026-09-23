@@ -64,7 +64,12 @@ a{color:var(--accent);}
   background:var(--surface);z-index:20;overflow:hidden;
   transition:width .16s ease;
 }
-.topbar:hover{width:var(--sidebar-w-open);overflow-y:auto;box-shadow:4px 0 16px rgba(0,0,0,.35);}
+/* Разворот — явной кнопкой-стрелкой (закрепляемое состояние, см.
+   #sidebar-pin в common.js), не по наведению: наведение на иконку при
+   этом не двигает всю панель, а показывает точечный тултип рядом с ней
+   (см. [data-tooltip] ниже) — так рекомендует источник пользователя
+   (infogra.ru, 2026-09-23) про экономные боковые панели. */
+.topbar.pinned{width:var(--sidebar-w-open);overflow-y:auto;box-shadow:4px 0 16px rgba(0,0,0,.35);}
 /* Полоса прокрутки панели: системная на тёмном фоне выглядит инородно и
    бросается в глаза сильнее, чем сами пункты. Оставляем тонкую и
    приглушённую — на невысоком экране прокрутка всё равно нужна. */
@@ -82,13 +87,26 @@ a{color:var(--accent);}
    через ::after с дублирующим текстом — иначе он читался бы скринридером
    вторым «ridForge» и ломал бы поиск по странице. */
 .brand-rest{opacity:0;transition:opacity .12s ease;}
-.topbar:hover .brand-rest{opacity:1;}
+.topbar.pinned .brand-rest{opacity:1;}
 .brand span{
   font-family:var(--mono);font-size:10px;color:var(--text-dim);
   opacity:0;transition:opacity .12s ease;
 }
-.topbar:hover .brand span{opacity:1;}
+.topbar.pinned .brand span{opacity:1;}
 .topbar-right{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;}
+
+/* Кнопка-стрелка закрепления панели (§2 источника: "стрелка влево —
+   свернуть, вправо — развернуть", правый верхний угол панели). */
+.sidebar-pin{
+  position:absolute;top:14px;right:-11px;width:22px;height:22px;
+  border-radius:50%;border:1px solid var(--border);background:var(--surface);
+  color:var(--text-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  padding:0;z-index:21;
+}
+.sidebar-pin:hover{color:var(--text);border-color:var(--accent);}
+.sidebar-pin svg{width:12px;height:12px;transition:transform .16s ease;}
+.topbar.pinned .sidebar-pin svg{transform:rotate(180deg);}
+@media (max-width:820px){.sidebar-pin{display:none;}}
 
 .nav{display:flex;flex-direction:column;gap:2px;}
 .nav-group{margin-top:6px;}
@@ -102,9 +120,10 @@ a{color:var(--accent);}
   border-top:1px solid var(--border);margin:6px 4px 2px;
   transition:opacity .12s ease;
 }
-.topbar:hover .nav-group-title{opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;}
+.topbar.pinned .nav-group-title{opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;}
 
 .nav a{
+  position:relative;
   display:flex;align-items:center;gap:10px;
   color:var(--text-dim);text-decoration:none;
   font-size:13px;font-weight:600;padding:6px 9px;border-radius:10px;
@@ -113,8 +132,24 @@ a{color:var(--accent);}
 }
 .nav-icon{width:20px;height:20px;flex:none;}
 .nav-label{opacity:0;transition:opacity .12s ease;}
-.topbar:hover .nav-label{opacity:1;}
+.topbar.pinned .nav-label{opacity:1;}
 .nav a:hover{color:var(--text);background:var(--surface-2);}
+
+/* Тултипы на иконках в свёрнутом виде (§3 источника: "белый текст на
+   тёмном фоне, справа от иконки, выровнен по горизонтали"). Название —
+   в атрибуте data-tooltip (initTopbar в common.js), рисуем сами через
+   ::after: нативный title слишком медленный и не стилизуется. Скрыт,
+   когда панель закреплена развёрнутой — там подпись и так видна
+   текстом, второй тултип рядом был бы избыточен. */
+.nav a[data-tooltip]::after{
+  content:attr(data-tooltip);
+  position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);
+  background:#0a0d10;color:#fff;font-size:11.5px;font-weight:600;
+  padding:5px 9px;border-radius:6px;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:opacity .1s ease;
+  box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:25;
+}
+.topbar:not(.pinned) .nav a[data-tooltip]:hover::after{opacity:1;transition-delay:.25s;}
 /* Активный пункт — плотная «таблетка» с лёгким свечением в цвет акцента
    (по референсу пользователя, 2026-09-23): в развёрнутом виде это целая
    строка, в свёрнутой рельсе та же заливка сжимается до квадрата вокруг
@@ -154,9 +189,9 @@ a{color:var(--accent);}
   display:flex;flex-direction:column;gap:8px;margin-top:auto;
   opacity:0;pointer-events:none;transition:opacity .12s ease;
 }
-.topbar:hover .keybox{opacity:1;pointer-events:auto;}
+.topbar.pinned .keybox{opacity:1;pointer-events:auto;}
 .role-pill{opacity:0;transition:opacity .12s ease;}
-.topbar:hover .role-pill{opacity:1;}
+.topbar.pinned .role-pill{opacity:1;}
 .keybox input{
   background:var(--surface-2);border:1px solid var(--border);color:var(--text);
   border-radius:6px;padding:7px 10px;font-family:var(--mono);font-size:12px;width:100%;

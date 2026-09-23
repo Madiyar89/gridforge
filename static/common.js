@@ -36,6 +36,7 @@ const NAV_ICONS = {
   credentials: '<circle cx="7" cy="10" r="3.5"/><path d="M10.2 10h7.3"/><path d="M14.5 10v3"/><path d="M17 10v2.2"/>',
   integrations: '<circle cx="5.5" cy="5.5" r="2.3"/><circle cx="14.5" cy="5.5" r="2.3"/><circle cx="5.5" cy="14.5" r="2.3"/><circle cx="14.5" cy="14.5" r="2.3"/><path d="M7.6 5.5h4.6"/><path d="M5.5 7.6v4.6"/><path d="M14.5 7.6v4.6"/>',
   ldap: '<rect x="3" y="4" width="14" height="4" rx="1"/><rect x="3" y="9" width="14" height="4" rx="1"/><rect x="3" y="14" width="14" height="2.5" rx="1"/><circle cx="6" cy="6" r=".6"/><circle cx="6" cy="11" r=".6"/>',
+  vuln: '<path d="M10 2.5 16.5 5v5c0 4-3 6.5-6.5 7.5C6.5 16.5 3.5 14 3.5 10V5z"/><path d="M10 6.5v4.5"/><circle cx="10" cy="13.2" r=".7" fill="currentColor" stroke="none"/>',
 };
 
 function navIcon(name) {
@@ -82,6 +83,7 @@ const NAV_GROUPS = [
     title: "Разведка",
     items: [
       { href: "scan.html", label: "Скан", icon: "scan" },
+      { href: "vuln.html", label: "Уязвимости", icon: "vuln" },
       { href: "capture.html", label: "Трафик", icon: "capture" },
       { href: "ad-audit.html", label: "AD-аудит", icon: "adaudit" },
       { href: "network-audit.html", label: "Аудит сети", icon: "netaudit" },
@@ -287,6 +289,35 @@ function setupNavToggle() {
   );
 }
 
+// Закрепление развёрнутого состояния панели — явная кнопка-стрелка
+// вместо наведения (см. .sidebar-pin в style.css и разбор источника
+// infogra.ru, 2026-09-23: "стрелка влево — свернуть, вправо —
+// развернуть"). Выбор запоминается в localStorage — на телефоне (см.
+// .topbar.open, отдельный механизм для <820px) кнопка не показывается.
+const SIDEBAR_PIN_KEY = "gridforge_sidebar_pinned";
+const PIN_ARROW_SVG =
+  '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 5l5 5-5 5"/></svg>';
+
+function setupSidebarPin() {
+  const bar = document.querySelector(".topbar");
+  if (!bar || document.getElementById("sidebar-pin")) return;
+  const pinned = localStorage.getItem(SIDEBAR_PIN_KEY) === "1";
+  bar.classList.toggle("pinned", pinned);
+
+  const btn = document.createElement("button");
+  btn.id = "sidebar-pin";
+  btn.className = "sidebar-pin";
+  btn.innerHTML = PIN_ARROW_SVG;
+  btn.setAttribute("aria-label", "Закрепить панель развёрнутой");
+  btn.addEventListener("click", () => {
+    const next = !bar.classList.contains("pinned");
+    bar.classList.toggle("pinned", next);
+    localStorage.setItem(SIDEBAR_PIN_KEY, next ? "1" : "0");
+  });
+  bar.appendChild(btn);
+}
+
 function initTopbar() {
   const nav = document.getElementById("nav");
   if (nav) {
@@ -298,7 +329,7 @@ function initTopbar() {
           ${group.items
             .map(
               (item) =>
-                `<a href="${item.href}" class="${item.href === here ? "active" : ""}" title="${item.label}">` +
+                `<a href="${item.href}" class="${item.href === here ? "active" : ""}" data-tooltip="${item.label}">` +
                 `${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`
             )
             .join("")}
@@ -306,6 +337,7 @@ function initTopbar() {
     ).join("");
   }
   setupNavToggle();
+  setupSidebarPin();
 
   // Название режем на первую букву и хвост: в свёрнутой панели виден
   // только «G», при наведении дорисовывается остальное.
