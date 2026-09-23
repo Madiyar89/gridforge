@@ -35,16 +35,10 @@
         <button id="add-group">+ группа</button>
       </div>
     </div>
-  </div>
 
-  <div>
     <div class="panel">
-      <h2>Узлы и проверки <span class="count" id="nodes-count"></span></h2>
-      <div class="form-row" style="margin-bottom:10px">
-        <select id="nodes-group-filter"><option value="">все группы</option></select>
-      </div>
-      <div class="body" id="nodes-body"><div class="empty">Загрузка…</div></div>
-      <div class="form-row">
+      <h2>Добавить узел</h2>
+      <div class="body" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;">
         <input id="new-node-name" placeholder="имя узла">
         <input id="new-node-addr" placeholder="адрес (IP/hostname)">
         <select id="new-node-group"><option value="">без группы</option></select>
@@ -57,6 +51,16 @@
         </select>
         <button id="add-node">+ узел</button>
       </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Узлы и проверки <span class="count" id="nodes-count"></span></h2>
+      <div class="form-row" style="margin-bottom:10px">
+        <select id="nodes-group-filter"><option value="">все группы</option></select>
+      </div>
+      <div class="body" id="nodes-body"><div class="empty">Загрузка…</div></div>
     </div>
   </div>
 </div>
