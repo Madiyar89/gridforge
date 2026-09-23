@@ -109,8 +109,32 @@ a{color:var(--accent);}
 @media (max-width:820px){.sidebar-pin{display:none;}}
 
 .nav{display:flex;flex-direction:column;gap:2px;}
-.nav-group{margin-top:6px;}
+.nav-group{position:relative;margin-top:6px;}
 .nav-group:first-child{margin-top:0;}
+
+/* Флайаут группы в свёрнутой рельсе (по референсу пользователя,
+   2026-09-23: наведение на группу показывает всплывающую карточку со
+   списком её пунктов, вместо тултипа на каждой иконке по отдельности).
+   left:100% без зазора — иначе мышь теряет :hover в пустом промежутке
+   между рельсой и карточкой, не успевая доехать до неё. */
+.nav-flyout{
+  display:none;position:absolute;left:100%;top:0;min-width:180px;z-index:26;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.45);
+}
+.topbar:not(.pinned) .nav-group:hover .nav-flyout{display:block;}
+.nav-flyout-title{
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-dim);padding:6px 10px 4px;white-space:nowrap;
+}
+.nav-flyout a{
+  display:flex;align-items:center;gap:10px;
+  color:var(--text-dim);text-decoration:none;
+  font-size:13px;font-weight:600;padding:7px 10px;border-radius:8px;white-space:nowrap;
+}
+.nav-flyout a:hover{color:var(--text);background:var(--surface-2);}
+.nav-flyout a.active{color:var(--accent-ink);background:var(--accent);}
+.nav-flyout .nav-icon{width:18px;height:18px;flex:none;}
 /* Заголовок группы в свёрнутом виде превращается в разделительную
    черту: текст всё равно не прочитать, а границу групп видеть полезно.
    В развёрнутом (pinned) виде — кликабельная кнопка-аккордеон (2026-09-23,

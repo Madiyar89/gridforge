@@ -350,10 +350,15 @@ function initTopbar() {
 
     nav.innerHTML = NAV_GROUPS.map((group) => {
       const isOpen = !group.title || openGroups.has(group.title);
+      // Тултип на отдельной иконке — только у пунктов без группы (сейчас
+      // это один Дашборд): у групповых пунктов в свёрнутой рельсе вместо
+      // тултипа на каждой иконке — один флайаут на всю группу (см. ниже),
+      // два всплывающих подсказчика поверх одной иконки были бы лишним.
       const itemsHtml = group.items
         .map(
           (item) =>
-            `<a href="${item.href}" class="${item.href === here ? "active" : ""}" data-tooltip="${item.label}">` +
+            `<a href="${item.href}" class="${item.href === here ? "active" : ""}"` +
+            `${group.title ? "" : ` data-tooltip="${item.label}"`}>` +
             `${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`
         )
         .join("");
@@ -361,9 +366,25 @@ function initTopbar() {
         ? `<button type="button" class="nav-group-title${isOpen ? " open" : ""}" data-group="${escapeHtml(group.title)}">` +
           `<span>${group.title}</span>${navIcon("chevron")}</button>`
         : "";
+      // Флайаут группы (по референсу пользователя, 2026-09-23: наведение
+      // на группу в свёрнутой рельсе — всплывающая карточка со списком её
+      // пунктов) — свои ссылки, не дублируют .nav a из рельсы визуально,
+      // подписи видны всегда, не только при pinned.
+      const flyoutHtml = group.title
+        ? `<div class="nav-flyout">
+             <div class="nav-flyout-title">${group.title}</div>
+             ${group.items
+               .map(
+                 (item) =>
+                   `<a href="${item.href}" class="${item.href === here ? "active" : ""}">` +
+                   `${navIcon(item.icon)}<span>${item.label}</span></a>`
+               )
+               .join("")}
+           </div>`
+        : "";
       return (
         `<div class="nav-group">${titleHtml}` +
-        `<div class="nav-group-items${isOpen ? "" : " collapsed"}">${itemsHtml}</div></div>`
+        `<div class="nav-group-items${isOpen ? "" : " collapsed"}">${itemsHtml}</div>${flyoutHtml}</div>`
       );
     }).join("");
 
