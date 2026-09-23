@@ -62,7 +62,7 @@ a{color:var(--accent);}
   display:flex;flex-direction:column;gap:10px;
   padding:14px 8px;border-right:1px solid var(--border);
   background:var(--surface);z-index:20;overflow:hidden;
-  transition:width .16s ease;
+  transition:width .3s ease;
 }
 /* Разворот — явной кнопкой-стрелкой (закрепляемое состояние, см.
    #sidebar-pin в common.js), не по наведению: наведение на иконку при
@@ -81,11 +81,20 @@ a{color:var(--accent);}
 /* В столбик: рядом с названием подпись не помещается в 196px и
    обрезается на середине слова. */
 .brand{display:flex;flex-direction:column;gap:1px;padding-inline:8px;white-space:nowrap;}
-.brand b{font-size:17px;letter-spacing:-.01em;}
-/* В свёрнутом виде от названия остаётся первая буква: остальное не
-   поместится в 52 пикселя. Хвост прячется как отдельный элемент, а не
-   через ::after с дублирующим текстом — иначе он читался бы скринридером
-   вторым «ridForge» и ломал бы поиск по странице. */
+.brand b{display:flex;align-items:center;gap:7px;font-size:17px;letter-spacing:-.01em;}
+/* Плашка логотипа (ТЗ, 2026-09-23: "фирменный бирюзовый/мятный цвет для
+   ... плашки логотипа") — акцентный квадрат с буквой G, виден и в
+   свёрнутой рельсе (badge не участвует в fade вместе с brand-rest, это
+   постоянный якорь бренда). */
+.brand-badge{
+  display:inline-flex;align-items:center;justify-content:center;flex:none;
+  width:22px;height:22px;border-radius:7px;
+  background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:13px;
+}
+/* В свёрнутом виде от названия остаётся бирюзовая плашка G: остальной
+   текст не поместится в 52 пикселя. Хвост прячется как отдельный
+   элемент, а не через ::after с дублирующим текстом — иначе он читался
+   бы скринридером вторым «ridForge» и ломал бы поиск по странице. */
 .brand-rest{opacity:0;transition:opacity .12s ease;}
 .topbar.pinned .brand-rest{opacity:1;}
 .brand span{
@@ -118,17 +127,27 @@ a{color:var(--accent);}
    left:100% без зазора — иначе мышь теряет :hover в пустом промежутке
    между рельсой и карточкой, не успевая доехать до неё. */
 .nav-flyout{
-  display:none;position:absolute;left:100%;top:0;min-width:180px;z-index:26;
+  position:absolute;left:100%;top:0;min-width:180px;z-index:26;
   background:var(--surface);border:1px solid var(--border);border-radius:10px;
   padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.45);
+  opacity:0;visibility:hidden;pointer-events:none;transform:translateX(-4px);
+  transition:opacity .15s ease,transform .15s ease,visibility 0s linear .15s;
 }
 /* По запросу пользователя (2026-09-23) — работает и в закреплённой
    развёрнутой панели тоже, не только в узкой рельсе: наведение на
    ЗАКРЫТУЮ группу сразу показывает флайаут, не дожидаясь клика по
    стрелке-аккордеону. Если группа уже открыта инлайн (.open) — её
-   пункты и так видны строками, второй флайаут поверх был бы лишним. */
-.nav-group:hover .nav-flyout{display:block;}
-.nav-group:has(.nav-group-title.open):hover .nav-flyout{display:none;}
+   пункты и так видны строками, второй флайаут поверх был бы лишним.
+   Плавное появление (ТЗ, 2026-09-23) — opacity+сдвиг вместо резкого
+   display:none/block, с небольшой задержкой на наведение, чтобы не
+   мигало при быстром проходе мышью мимо. */
+.nav-group:hover .nav-flyout{
+  opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);
+  transition:opacity .15s ease .1s,transform .15s ease .1s,visibility 0s linear;
+}
+.nav-group:has(.nav-group-title.open):hover .nav-flyout{
+  opacity:0;visibility:hidden;pointer-events:none;transition:none;
+}
 .nav-flyout-title{
   font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
   color:var(--text-dim);padding:6px 10px 4px;white-space:nowrap;

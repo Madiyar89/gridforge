@@ -415,7 +415,9 @@ function initTopbar() {
   const brandName = document.querySelector(".brand b");
   if (brandName && !brandName.querySelector(".brand-rest")) {
     const full = brandName.textContent;
-    brandName.innerHTML = `${full.slice(0, 1)}<span class="brand-rest">${full.slice(1)}</span>`;
+    brandName.innerHTML =
+      `<span class="brand-badge">${full.slice(0, 1)}</span>` +
+      `<span class="brand-rest">${full.slice(1)}</span>`;
   }
 
   const saveBtn = document.getElementById("save-key");
