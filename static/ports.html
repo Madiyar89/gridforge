@@ -61,6 +61,18 @@
      обрезка общим лимитом .panel .body (560px), рассчитанным на списки. */
   #ports-body{max-height:none;overflow:visible;}
 
+  /* Отчёт по MAC-адресам при массовом выборе портов (перенос функции
+     "Port Security" из NetOpsHub — скан MAC по всем выбранным портам
+     разом, список "сколько устройств реально сидит на каком порту",
+     полезно перед включением Port Security с ограничением). */
+  #bulk-mac-report{padding:12px 16px;border-bottom:1px solid var(--border);}
+  .register-table{width:100%;border-collapse:collapse;font-size:12px;}
+  .register-table th,.register-table td{border:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:top;}
+  .register-table th{background:var(--surface-2);font-weight:600;}
+  .register-table-wrap{overflow-x:auto;}
+  .mac-count.over{color:var(--crit);font-weight:700;}
+  .mac-count.ok{color:var(--ok);}
+
   /* Список узлов группы — плоские чипы вместо выпадающего списка: все
      узлы видно сразу, выбор — один клик, а не поиск по алфавиту в select. */
   .node-pill-list{display:flex;flex-wrap:wrap;gap:6px;padding:12px 16px 14px;}
@@ -125,8 +137,14 @@
     <span id="bulk-port-count">Выбрано: 0</span>
     <button id="bulk-port-up" class="btn-ghost">Включить (no shutdown)</button>
     <button id="bulk-port-down" class="btn-ghost">Выключить (shutdown)</button>
+    <button id="bulk-port-mac" class="btn-ghost">Проверить MAC на портах</button>
     <button id="bulk-port-clear" class="btn-ghost">Снять выбор</button>
     <span id="bulk-port-status" style="color:var(--text-dim);font-size:12px;"></span>
+  </div>
+  <div id="bulk-mac-report" hidden>
+    <div class="register-table-wrap">
+      <table class="register-table" id="bulk-mac-table"></table>
+    </div>
   </div>
   <div class="body" id="ports-body"><div class="empty">Выбери узел</div></div>
 </div>

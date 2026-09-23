@@ -72,6 +72,7 @@ function selectNode(nodeId) {
   _selectedNodeId = String(nodeId);
   _pickedPorts.clear();
   if (document.getElementById("bulk-port-status")) document.getElementById("bulk-port-status").textContent = "";
+  if (document.getElementById("bulk-mac-report")) document.getElementById("bulk-mac-report").hidden = true;
   renderNodeChips();
   loadPorts();
 }
@@ -84,7 +85,14 @@ document.getElementById("ports-group-select").addEventListener("change", () => {
   }
 });
 
-async function loadPorts() {
+// resetUI=false — используется после apply/bounce/refresh НА ТОМ ЖЕ
+// узле, когда пользователь только что смотрел результат в панели
+// "Порт": по умолчанию loadPorts() стирает #port-detail-body и прячет
+// форму STP (нужно при смене узла), и, вызванный сразу после успешного
+// применения, вытирал бы собственное же сообщение об успехе раньше, чем
+// его успевали прочитать — реальный баг, пойманный 2026-09-23 вместе с
+// починкой "Port Security не обновляется на схеме".
+async function loadPorts(resetUI = true) {
   const nodeId = _selectedNodeId;
   const body = document.getElementById("ports-body");
   if (!nodeId) return;
@@ -103,10 +111,26 @@ async function loadPorts() {
   }
   _protection = protection;
   _lastPortsData = data;
-  document.getElementById("stp-body").hidden = true;
-  document.getElementById("stp-toggle").textContent = "Открыть форму";
-  document.getElementById("port-detail-body").innerHTML =
-    `<span style="color:var(--text-dim)">Выбери порт на схеме</span>`;
+  if (resetUI) {
+    document.getElementById("stp-body").hidden = true;
+    document.getElementById("stp-toggle").textContent = "Открыть форму";
+    document.getElementById("port-detail-body").innerHTML =
+      `<span style="color:var(--text-dim)">Выбери порт на схеме</span>`;
+  }
+  renderPortsGrid();
+}
+
+// Перерисовка сетки из уже загруженных _lastPortsData/_protection, без
+// нового запроса к серверу — используется после точечного локального
+// патча _protection (см. applyPortSecurity: реальный баг, 2026-09-23,
+// "включил Port Security, а на схеме замок не появился" — protection
+// приходит из последнего БЭКАПА, а не с устройства напрямую, apply
+// новый бэкап не снимает, так что грузить с сервера после него незачем —
+// перерисовываем тем, что только что реально применили).
+function renderPortsGrid() {
+  const body = document.getElementById("ports-body");
+  const data = _lastPortsData;
+  if (!data) return;
 
   const age = document.getElementById("snapshot-age");
   if (!data.taken_at) {
@@ -206,6 +230,7 @@ document.getElementById("multi-select-toggle").addEventListener("click", () => {
   document.getElementById("multi-select-toggle").textContent = _multiMode ? "Отменить выбор" : "Выбрать несколько";
   document.getElementById("bulk-port-bar").hidden = !_multiMode;
   document.getElementById("bulk-port-status").textContent = "";
+  document.getElementById("bulk-mac-report").hidden = true;
   updateBulkPortBar();
   loadPorts();
 });
@@ -213,6 +238,7 @@ document.getElementById("multi-select-toggle").addEventListener("click", () => {
 document.getElementById("bulk-port-clear").addEventListener("click", () => {
   _pickedPorts.clear();
   document.getElementById("bulk-port-status").textContent = "";
+  document.getElementById("bulk-mac-report").hidden = true;
   loadPorts();
 });
 
@@ -248,11 +274,75 @@ async function bulkApplyPortState(state) {
   status.textContent = `готово: успешно ${ok}, ошибок ${failed}`;
   toast(`Порты ${label}: успешно ${ok}, ошибок ${failed}`, failed > 0 && ok === 0);
   _pickedPorts.clear();
-  loadPorts();
+  // Состояние портов живёт в снимке, не в бэкапе — без живого опроса
+  // схема осталась бы показывать старые цвета (тот же баг, что чинили в
+  // applyPortEdit/bouncePort).
+  refreshPortsLive(nodeId, { silent: true, resetUI: false });
 }
 
 document.getElementById("bulk-port-up").addEventListener("click", () => bulkApplyPortState("up"));
 document.getElementById("bulk-port-down").addEventListener("click", () => bulkApplyPortState("down"));
+
+// Отчёт по MAC-адресам на выбранных портах — перенос функции NetOpsHub
+// (раздел Port Security: при массовом выборе портов показывал скан
+// MAC — сколько устройств реально сидит на каком порту, до включения
+// ограничения по количеству). Здесь: тот же живой запрос, что у кнопки
+// "Показать MAC" в панели одного порта (/ports/{port}/mac), просто по
+// очереди на все выбранные порты разом, с итоговой таблицей.
+document.getElementById("bulk-port-mac").addEventListener("click", async () => {
+  if (_pickedPorts.size === 0) return toast("Сначала выбери порты на схеме", true);
+  const names = [..._pickedPorts];
+  const nodeId = _selectedNodeId;
+  const status = document.getElementById("bulk-port-status");
+  const btn = document.getElementById("bulk-port-mac");
+  const reportBox = document.getElementById("bulk-mac-report");
+  const table = document.getElementById("bulk-mac-table");
+
+  btn.disabled = true;
+  const rows = [];
+  for (let i = 0; i < names.length; i++) {
+    status.textContent = `MAC ${i + 1}/${names.length} — ${names[i]}…`;
+    try {
+      const result = await apiWithCredentials(
+        `/api/nodes/${nodeId}/ports/${encodeURIComponent(names[i])}/mac`,
+        { method: "POST", body: JSON.stringify({}) }
+      );
+      rows.push({ name: names[i], ok: result.ok, macs: result.macs || [], error: result.error });
+    } catch (e) {
+      rows.push({ name: names[i], ok: false, macs: [], error: e.message });
+    }
+  }
+  btn.disabled = false;
+  status.textContent = `MAC: проверено портов ${names.length}`;
+
+  const currentMax = (name) => {
+    const prot = findProtection(name);
+    return prot && prot.max_mac ? prot.max_mac : null;
+  };
+
+  table.innerHTML = `
+    <thead><tr><th>Порт</th><th>MAC-адресов</th><th>Текущий максимум</th><th>Адреса</th></tr></thead>
+    <tbody>
+      ${rows
+        .map((r) => {
+          if (!r.ok) {
+            return `<tr><td>${escapeHtml(r.name)}</td><td colspan="3" style="color:var(--crit)">${escapeHtml(r.error || "не удалось опросить")}</td></tr>`;
+          }
+          const max = currentMax(r.name);
+          const over = max !== null && r.macs.length > max;
+          const countCls = max === null ? "" : over ? "mac-count over" : "mac-count ok";
+          return `
+            <tr>
+              <td>${escapeHtml(r.name)}</td>
+              <td class="${countCls}">${r.macs.length}${over ? " — больше максимума!" : ""}</td>
+              <td>${max === null ? "—" : max}</td>
+              <td style="font-family:var(--mono);font-size:11px;">${r.macs.map((m) => escapeHtml(m.mac)).join(", ") || "—"}</td>
+            </tr>`;
+        })
+        .join("")}
+    </tbody>`;
+  reportBox.hidden = false;
+});
 
 // В `show interfaces status` имена сокращённые (Gi1/0/1), а в
 // конфигурации полные (GigabitEthernet1/0/1) — сопоставляем по числовой
@@ -428,6 +518,10 @@ async function applyPortEdit(port, state) {
       { method: "POST", body: JSON.stringify({ description, vlan, state }) }
     );
     renderApplyResult(resultEl, result);
+    // Описание/VLAN/состояние живут в снимке портов (не в бэкапе) — без
+    // нового живого опроса схема продолжала бы показывать старые
+    // значения до следующего ручного "Снять состояние".
+    if (result.ok) refreshPortsLive(nodeId, { silent: true, resetUI: false });
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
   } finally {
@@ -456,7 +550,7 @@ async function applyPortSecurity(port, portSecurity) {
       }
     );
     renderApplyResult(resultEl, result);
-    if (result.ok) loadPorts();
+    if (result.ok) patchProtectionAfterApply(port.name, portSecurity, maximum);
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
   } finally {
@@ -479,13 +573,47 @@ async function bouncePort(port) {
       { method: "POST", body: JSON.stringify({}) }
     );
     renderApplyResult(resultEl, result);
-    if (result.ok) loadPorts();
+    if (result.ok) refreshPortsLive(nodeId, { silent: true, resetUI: false });
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Отбить порт";
   }
+}
+
+// Тот же дефолт, что DEFAULT_PORT_SECURITY_MAXIMUM в app/port_commands.py
+// — держать в согласии вручную, значение меняется крайне редко.
+const DEFAULT_PORT_SECURITY_MAXIMUM = 2;
+
+// Локальный патч _protection сразу после успешного apply — без нового
+// запроса к серверу (protection читается из последнего БЭКАПА, а apply
+// новый бэкап не снимает, поэтому loadPorts() после Port Security ничего
+// не менял на схеме — реальный баг, 2026-09-23). Зеркалит ровно то, что
+// apply_port реально применил на устройстве (см. build_config_lines в
+// port_commands.py: "on" — port-security + maximum + violation restrict,
+// "off" — полностью снимает все под-настройки).
+function patchProtectionAfterApply(portName, portSecurity, maximum) {
+  if (!_protection.ports) _protection.ports = {};
+  const existing = findProtection(portName) || {};
+  let entry;
+  if (portSecurity === "on") {
+    entry = {
+      ...existing,
+      port_security: true,
+      max_mac: maximum ? Number(maximum) : DEFAULT_PORT_SECURITY_MAXIMUM,
+      violation: "restrict",
+      leftover_settings: false,
+    };
+  } else if (portSecurity === "off") {
+    entry = { ...existing, port_security: false, max_mac: null, violation: null, sticky: false, leftover_settings: false };
+  } else if (maximum) {
+    entry = { ...existing, max_mac: Number(maximum) };
+  } else {
+    return;
+  }
+  _protection.ports[portName] = entry;
+  renderPortsGrid();
 }
 
 function renderApplyResult(resultEl, result) {
@@ -551,6 +679,28 @@ document.getElementById("bulk-refresh").addEventListener("click", async () => {
   if (_selectedNodeId && nodes.some((n) => String(n.id) === String(_selectedNodeId))) loadPorts();
 });
 
+// Живой опрос устройства (то же самое, что кнопка "Снять состояние") —
+// вынесено отдельно, чтобы применение правки порта/отбивка порта тоже
+// могли дёрнуть реальный live-запрос, а не просто перерисовать старый
+// кэш (реальный баг, 2026-09-23: после "Применить" на схеме ничего не
+// менялось, потому что loadPorts() без /refresh читает тот же старый
+// снимок из БД, а вовсе не спрашивает устройство заново).
+async function refreshPortsLive(nodeId, { silent = false, resetUI = true } = {}) {
+  try {
+    const result = await apiWithCredentials(`/api/nodes/${nodeId}/ports/refresh`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (!silent) {
+      if (result.ok) toast(`Снято портов: ${result.ports}`);
+      else toast(result.error || "Не удалось снять состояние", true);
+    }
+  } catch (e) {
+    if (!silent) toast(e.message, true);
+  }
+  await loadPorts(resetUI);
+}
+
 document.getElementById("refresh-ports").addEventListener("click", async () => {
   const nodeId = _selectedNodeId;
   if (!nodeId) return toast("Выбери узел", true);
@@ -562,18 +712,7 @@ document.getElementById("refresh-ports").addEventListener("click", async () => {
   btn.disabled = true;
   btn.textContent = "Опрашиваю…";
   try {
-    const result = await apiWithCredentials(`/api/nodes/${nodeId}/ports/refresh`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    if (result.ok) {
-      toast(`Снято портов: ${result.ports}`);
-    } else {
-      toast(result.error || "Не удалось снять состояние", true);
-    }
-    loadPorts();
-  } catch (e) {
-    toast(e.message, true);
+    await refreshPortsLive(nodeId);
   } finally {
     btn.disabled = false;
     btn.textContent = "Снять состояние";
@@ -676,7 +815,18 @@ async function applyStpProtection() {
       }),
     });
     renderApplyResult(resultEl, result);
-    if (result.ok) loadPorts();
+    if (result.ok) {
+      // bpdu_guard/guard_loop живут в "Защите" (читается из последнего
+      // БЭКАПА, не с устройства напрямую) и не рисуются на самой схеме —
+      // применилось реально, но в панели порта будет видно только после
+      // нового бэкапа. Честно говорим об этом, а не притворяемся, что
+      // синхронизировалось само.
+      // loadPorts() тут намеренно НЕ вызываем: он сбрасывает
+      // stp-body.hidden=true (нужно только при смене узла) и сразу же
+      // спрятал бы только что показанное сообщение об успехе — реальный
+      // баг, пойманный вместе с этим же исправлением.
+      resultEl.innerHTML += `<div style="margin-top:6px;color:var(--text-dim)">Применено на устройстве. В панели «Порт» (Защита) появится после нового бэкапа конфигурации — Бэкапы → Снять бэкап.</div>`;
+    }
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
   } finally {
