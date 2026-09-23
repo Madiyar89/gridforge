@@ -37,6 +37,7 @@ const NAV_ICONS = {
   integrations: '<circle cx="5.5" cy="5.5" r="2.3"/><circle cx="14.5" cy="5.5" r="2.3"/><circle cx="5.5" cy="14.5" r="2.3"/><circle cx="14.5" cy="14.5" r="2.3"/><path d="M7.6 5.5h4.6"/><path d="M5.5 7.6v4.6"/><path d="M14.5 7.6v4.6"/>',
   ldap: '<rect x="3" y="4" width="14" height="4" rx="1"/><rect x="3" y="9" width="14" height="4" rx="1"/><rect x="3" y="14" width="14" height="2.5" rx="1"/><circle cx="6" cy="6" r=".6"/><circle cx="6" cy="11" r=".6"/>',
   vuln: '<path d="M10 2.5 16.5 5v5c0 4-3 6.5-6.5 7.5C6.5 16.5 3.5 14 3.5 10V5z"/><path d="M10 6.5v4.5"/><circle cx="10" cy="13.2" r=".7" fill="currentColor" stroke="none"/>',
+  chevron: '<path d="M6 7.5 10 12l4-4.5"/>',
 };
 
 function navIcon(name) {
@@ -318,23 +319,72 @@ function setupSidebarPin() {
   bar.appendChild(btn);
 }
 
+// Какие группы развёрнуты (аккордеон, по запросу пользователя 2026-09-23:
+// "не удобно на все разом смотреть", пример — сворачивающиеся секции
+// Zabbix). По умолчанию открыта только группа с текущей страницей —
+// остальные не нужно листать глазами, чтобы найти нужный пункт.
+// Работает только в закреплённой (pinned) развёрнутой панели: в узкой
+// иконочной рельсе подписи группы всё равно не видно, сворачивать нечего.
+const NAV_OPEN_GROUPS_KEY = "gridforge_nav_open_groups";
+
+function loadOpenGroups(defaultTitle) {
+  try {
+    const raw = localStorage.getItem(NAV_OPEN_GROUPS_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch (e) {
+    /* битые данные в localStorage — просто откатимся к дефолту */
+  }
+  return new Set(defaultTitle ? [defaultTitle] : []);
+}
+
+function saveOpenGroups(set) {
+  localStorage.setItem(NAV_OPEN_GROUPS_KEY, JSON.stringify([...set]));
+}
+
 function initTopbar() {
   const nav = document.getElementById("nav");
   if (nav) {
     const here = location.pathname.split("/").pop() || "index.html";
-    nav.innerHTML = NAV_GROUPS.map(
-      (group) => `
-        <div class="nav-group">
-          ${group.title ? `<div class="nav-group-title">${group.title}</div>` : ""}
-          ${group.items
-            .map(
-              (item) =>
-                `<a href="${item.href}" class="${item.href === here ? "active" : ""}" data-tooltip="${item.label}">` +
-                `${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`
-            )
-            .join("")}
-        </div>`
-    ).join("");
+    const activeGroup = NAV_GROUPS.find((g) => g.items.some((i) => i.href === here));
+    const openGroups = loadOpenGroups(activeGroup ? activeGroup.title : null);
+
+    nav.innerHTML = NAV_GROUPS.map((group) => {
+      const isOpen = !group.title || openGroups.has(group.title);
+      const itemsHtml = group.items
+        .map(
+          (item) =>
+            `<a href="${item.href}" class="${item.href === here ? "active" : ""}" data-tooltip="${item.label}">` +
+            `${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`
+        )
+        .join("");
+      const titleHtml = group.title
+        ? `<button type="button" class="nav-group-title${isOpen ? " open" : ""}" data-group="${escapeHtml(group.title)}">` +
+          `<span>${group.title}</span>${navIcon("chevron")}</button>`
+        : "";
+      return (
+        `<div class="nav-group">${titleHtml}` +
+        `<div class="nav-group-items${isOpen ? "" : " collapsed"}">${itemsHtml}</div></div>`
+      );
+    }).join("");
+
+    const allTitleButtons = nav.querySelectorAll(".nav-group-title[data-group]");
+    allTitleButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const items = btn.nextElementSibling;
+        const nowOpen = items.classList.toggle("collapsed") === false;
+        btn.classList.toggle("open", nowOpen);
+        // Состояние берём из реально отрисованной панели (а не из
+        // localStorage, где до первого клика ещё ничего не сохранено) —
+        // иначе группа, открытая по умолчанию как "с текущей страницей",
+        // терялась бы из сохранённого набора при первом же клике по
+        // другой группе.
+        const open = new Set();
+        allTitleButtons.forEach((b) => {
+          if (b.classList.contains("open")) open.add(b.dataset.group);
+        });
+        saveOpenGroups(open);
+      });
+    });
   }
   setupNavToggle();
   setupSidebarPin();

@@ -112,15 +112,33 @@ a{color:var(--accent);}
 .nav-group{margin-top:6px;}
 .nav-group:first-child{margin-top:0;}
 /* Заголовок группы в свёрнутом виде превращается в разделительную
-   черту: текст всё равно не прочитать, а границу групп видеть полезно. */
+   черту: текст всё равно не прочитать, а границу групп видеть полезно.
+   В развёрнутом (pinned) виде — кликабельная кнопка-аккордеон (2026-09-23,
+   по запросу пользователя и примеру Zabbix: "не удобно на всё разом
+   смотреть") со стрелкой, которая разворачивает/сворачивает группу. */
 .nav-group-title{
-  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  display:flex;align-items:center;justify-content:space-between;width:100%;
+  font:inherit;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
   color:var(--text-dim);padding:4px 10px;white-space:nowrap;
   opacity:0;height:0;overflow:hidden;
   border-top:1px solid var(--border);margin:6px 4px 2px;
-  transition:opacity .12s ease;
+  background:none;border-left:none;border-right:none;border-bottom:none;
+  text-align:left;cursor:default;
+  transition:opacity .12s ease,color .1s ease;
 }
-.topbar.pinned .nav-group-title{opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;}
+.topbar.pinned .nav-group-title{
+  opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;cursor:pointer;
+}
+.topbar.pinned .nav-group-title:hover{color:var(--text);}
+.nav-group-title svg{width:12px;height:12px;flex:none;transition:transform .12s ease;opacity:0;}
+.topbar.pinned .nav-group-title svg{opacity:1;}
+.nav-group-title.open svg{transform:rotate(180deg);}
+
+.nav-group-items{display:flex;flex-direction:column;gap:2px;overflow:hidden;}
+.nav-group-items.collapsed{display:none;}
+/* В узкой иконочной рельсе (не pinned) подписи группы всё равно не
+   видно — сворачивать там нечего, все иконки показываются как есть. */
+.topbar:not(.pinned) .nav-group-items.collapsed{display:flex;}
 
 .nav a{
   position:relative;
