@@ -63,9 +63,13 @@ def group_with_trunk_node(db):
         node_id=node.id,
         command="show interfaces status",
         ok=True,
+        # Сокращённые имена, как в реальном выводе `show interfaces status`
+        # ("Gi1/0/24") — а не "GigabitEthernet1/0/24", как отдаёт CDP.
+        # Регрессия 2026-09-24: сравнение строк без нормализации давало
+        # 0 совпадений на живом парке при полностью рабочей логике.
         ports=[
-            {"name": "GigabitEthernet1/0/24", "state": "up", "description": "", "vlan": "trunk", "speed": "1G", "is_trunk": True},
-            {"name": "GigabitEthernet1/0/5", "state": "up", "description": "", "vlan": "10", "speed": "1G", "is_trunk": False},
+            {"name": "Gi1/0/24", "state": "up", "description": "", "vlan": "trunk", "speed": "1G", "is_trunk": True},
+            {"name": "Gi1/0/5", "state": "up", "description": "", "vlan": "10", "speed": "1G", "is_trunk": False},
         ],
     )
     db.add(snap)
@@ -90,7 +94,7 @@ def test_discover_trunk_cable_links_creates_only_for_trunk_ports(monkeypatch, db
 
     links = db.query(CableLink).filter(CableLink.group_id == group.id).all()
     assert len(links) == 1
-    assert links[0].port_name == "GigabitEthernet1/0/24"
+    assert links[0].port_name == "Gi1/0/24"  # каноническое имя из снимка, не полное из CDP
     assert links[0].source == "cdp"
     assert "sw-core-2" in links[0].other_label
 
@@ -118,7 +122,7 @@ def test_discover_trunk_cable_links_updates_existing_cdp_row_not_duplicates(monk
 def test_discover_trunk_cable_links_leaves_manual_entries_untouched(monkeypatch, db, group_with_trunk_node):
     group, node = group_with_trunk_node
     manual = CableLink(
-        group_id=group.id, node_id=node.id, port_name="GigabitEthernet1/0/24",
+        group_id=group.id, node_id=node.id, port_name="Gi1/0/24",
         other_label="каб. 305, розетка 2", source="manual",
     )
     db.add(manual)

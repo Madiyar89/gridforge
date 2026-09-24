@@ -361,6 +361,9 @@ DOWNUP_COMMANDS = {
 }
 
 _IFACE_PREFIXES = [
+    ("HundredGigE", "Hu"),
+    ("FortyGigabitEthernet", "Fo"),
+    ("TwentyFiveGigE", "Twe"),
     ("TenGigabitEthernet", "Te"),
     ("GigabitEthernet", "Gi"),
     ("FastEthernet", "Fa"),

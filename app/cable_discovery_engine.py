@@ -30,6 +30,7 @@ import re
 from sqlalchemy.orm import Session
 
 from app.models import CableLink, Node, PortSnapshot, Vendor
+from app.ports_engine import normalize_iface
 
 _CDP_VENDORS = (Vendor.cisco_ios, Vendor.cisco_ios_telnet)
 _CDP_COMMAND = "show cdp neighbors detail"
@@ -43,7 +44,14 @@ def parse_cdp_neighbors_detail(output: str) -> list[dict]:
     """Разбор `show cdp neighbors detail` (Cisco IOS). Блоки разделены
     строкой из дефисов; в каждом — "Device ID: ..." и "Interface: LOCAL,
     Port ID (outgoing port): REMOTE". Соседей без обеих строк (обрезанный
-    вывод, нестандартная платформа) — пропускаем, не гадаем."""
+    вывод, нестандартная платформа) — пропускаем, не гадаем.
+
+    Реальная находка на живом парке (2026-09-24): CDP отдаёт ПОЛНОЕ имя
+    интерфейса ("GigabitEthernet1/0/48"), а PortSnapshot — сокращённое
+    ("Gi1/0/48", как в `show interfaces status`) — прямое сравнение строк
+    в discover_trunk_cable_links всегда давало пустое совпадение и 0
+    записей в журнале. Сравнение и хранение теперь идут через
+    normalize_iface (см. app/ports_engine.py)."""
     neighbors: list[dict] = []
     for block in re.split(r"^-+$", output, flags=re.MULTILINE):
         device_match = _DEVICE_RE.search(block)
@@ -61,7 +69,7 @@ def parse_cdp_neighbors_detail(output: str) -> list[dict]:
 async def _discover_one(
     semaphore: asyncio.Semaphore,
     node: Node,
-    trunk_ports: set[str],
+    trunk_ports_by_norm: dict[str, str],
     *,
     username: str,
     password: str | None,
@@ -84,7 +92,18 @@ async def _discover_one(
     if not result.ok:
         return []
     neighbors = parse_cdp_neighbors_detail(result.stdout)
-    return [n for n in neighbors if n["local_port"] in trunk_ports]
+    matched = []
+    for n in neighbors:
+        canonical = trunk_ports_by_norm.get(normalize_iface(n["local_port"]))
+        if canonical is None:
+            continue
+        # Порт пишем в каноническом виде из PortSnapshot ("Gi1/0/48"), не
+        # тем, что прислал CDP ("GigabitEthernet1/0/48") — так название
+        # совпадает с тем, что предлагает выпадающий список на форме
+        # ручного ввода (/api/nodes/{id}/ports), и повторный опрос узнаёт
+        # уже созданную запись по стабильному ключу.
+        matched.append({**n, "local_port": canonical})
+    return matched
 
 
 async def discover_trunk_cable_links(db: Session, group_id: int, *, resolve_credential) -> dict:
@@ -112,8 +131,8 @@ async def discover_trunk_cable_links(db: Session, group_id: int, *, resolve_cred
         if snapshot is None or not snapshot.ok:
             skipped.append(f"{node.name}: нет снимка портов")
             continue
-        trunk_ports = {p["name"] for p in snapshot.ports if p.get("is_trunk")}
-        if not trunk_ports:
+        trunk_ports_by_norm = {normalize_iface(p["name"]): p["name"] for p in snapshot.ports if p.get("is_trunk")}
+        if not trunk_ports_by_norm:
             continue
         cred = resolve_credential(db, node)
         if cred is None:
@@ -121,7 +140,7 @@ async def discover_trunk_cable_links(db: Session, group_id: int, *, resolve_cred
             continue
         tasks.append(
             _discover_one(
-                semaphore, node, trunk_ports,
+                semaphore, node, trunk_ports_by_norm,
                 username=cred["username"], password=cred["password"], key_path=cred["key_path"],
                 timeout_seconds=20.0,
             )
