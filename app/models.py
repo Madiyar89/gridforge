@@ -621,6 +621,80 @@ class ScanHost(Base):
     scan: Mapped["Scan"] = relationship(back_populates="hosts")
 
 
+class VulnScanProfile(str, enum.Enum):
+    """5 профилей — перенесено из NetOpsHub (playbook_catalog.NMAP_PROFILES),
+    те же имена и подписи, чтобы отчёт для проверяющего выглядел так же,
+    как раньше. vuln — единственный профиль, который реально ищет
+    уязвимости (NSE-скрипты категории vuln); остальные — вспомогательные
+    (обнаружение узлов/портов/ОС), их находки тоже пишутся в реестр, но
+    строкой "не выявлено", если findings нет."""
+
+    ping = "ping"
+    quick = "quick"
+    full_ports = "full_ports"
+    vuln = "vuln"
+    os = "os"
+
+
+VULN_SCAN_PROFILE_LABELS: dict[str, str] = {
+    "ping": "Обнаружение узлов (быстрый ping-скан)",
+    "quick": "Быстрое сканирование портов (top 100)",
+    "full_ports": "Полное сканирование портов (все 65535)",
+    "vuln": "Проверка на известные уязвимости (NSE vuln)",
+    "os": "Определение ОС",
+}
+
+
+class VulnScanStatus(str, enum.Enum):
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+
+class VulnScan(Base):
+    """Скан на известные уязвимости (и вспомогательные nmap-профили) —
+    перенос функции NetOpsHub "проверка на уязвимости". В отличие от
+    Scan (network discovery по CIDR), у VulnScan всегда есть группа: сюда
+    же завязан накопительный гос-отчёт (см. app/vuln_register.py) — один
+    .xlsx на группу, "Отчёт о проведении оценки уязвимости сетевых
+    ресурсов {группа}", формат под официальный бланк (см. заголовки в
+    vuln_register.py)."""
+
+    __tablename__ = "vuln_scans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), nullable=False)
+    profile: Mapped[VulnScanProfile] = mapped_column(Enum(VulnScanProfile), nullable=False)
+    status: Mapped[VulnScanStatus] = mapped_column(Enum(VulnScanStatus), default=VulnScanStatus.running)
+    responsible: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Ф.И.О. и должность — для отчёта
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Заполняется при завершении: попал ли скан в накопительный .xlsx-реестр
+    # (True), или ничего не найдено И встраивать было нечего — на деле
+    # ingest_scan() всегда пишет хотя бы строку "не выявлено", так что
+    # False реально означает только "ещё не дошли/сбой".
+    ingested: Mapped[bool] = mapped_column(default=False)
+
+    group: Mapped["Group"] = relationship()
+    hosts: Mapped[list["VulnScanHost"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
+
+
+class VulnScanHost(Base):
+    __tablename__ = "vuln_scan_hosts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_id: Mapped[int] = mapped_column(ForeignKey("vuln_scans.id"), nullable=False)
+    address: Mapped[str] = mapped_column(String(64), nullable=False)
+    hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default="up")
+    # [{"port": "tcp/80", "script_id": "...", "severity": "vulnerable"|
+    #   "likely"|"unknown", "cves": ["CVE-..."], "summary": "..."}, ...]
+    findings: Mapped[list] = mapped_column(JSON, default=list)
+
+    scan: Mapped["VulnScan"] = relationship(back_populates="hosts")
+
+
 class DomainScanMethod(str, enum.Enum):
     winrm = "winrm"
     smb_domain = "smb_domain"

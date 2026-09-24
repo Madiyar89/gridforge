@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+from urllib.parse import quote
 import secrets
 from contextlib import asynccontextmanager
 
@@ -99,6 +101,9 @@ from app.models import (
     SyslogMessage,
     Template,
     User,
+    Vendor,
+    VulnScan,
+    VULN_SCAN_PROFILE_LABELS,
     Watch,
     iso,
 )
@@ -113,6 +118,14 @@ from app.ldap_engine import LdapTestError, mask_connection, test_bind
 from app.ldap_engine import encrypt_password as encrypt_ldap_password
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot, live_port_downup, live_port_mac
 from app.scan_engine import ScanValidationError, run_scan
+from app.vuln_scan_engine import PROFILE_ARGS as VULN_PROFILE_ARGS, run_vuln_scan
+from app.vuln_register import (
+    HEADERS as VULN_REGISTER_HEADERS,
+    build_excel_with_missing,
+    last_scan_summary,
+    missing_profile_rows as vuln_missing_profile_rows,
+    read_persisted_rows,
+)
 from app.sweep_commands import CommandRejected, command_for_node, preset_catalog, validate_custom_command
 from app.sweep_engine import run_sweep, sweep_progress
 from app.scenarios_engine import ScenarioParamError, render_command, run_scenario, scenario_run_progress
@@ -150,6 +163,7 @@ from app.schemas import (
     TemplateApplyIn,
     TemplateIn,
     UserIn,
+    VulnScanRunIn,
     WatchIn,
 )
 from app.templates_engine import TemplateValidationError, apply_template, validate_probe_defs
@@ -1220,6 +1234,135 @@ def create_node_from_scan_host(host_id: int, payload: ScanHostToNodeIn, db: Sess
     return {"id": node.id}
 
 
+# === Проверка на уязвимости — перенос из NetOpsHub (nmap-профили + gov-
+# отчёт), см. app/vuln_scan_engine.py и app/vuln_register.py. Скан всегда
+# привязан к группе — целями становятся адреса всех узлов группы, и
+# накопительный .xlsx-реестр тоже один на группу.
+
+
+@api_operate.post("/api/groups/{group_id}/vuln-scans", status_code=201)
+async def run_vuln_scan_endpoint(
+    group_id: int,
+    payload: VulnScanRunIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    group = db.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    if payload.profile not in VULN_PROFILE_ARGS:
+        raise HTTPException(status_code=400, detail=f"Неизвестный профиль: {payload.profile!r}")
+
+    targets = [n.address for n in group.nodes]
+    if not targets:
+        raise HTTPException(status_code=400, detail="В группе нет узлов — сканировать нечего")
+
+    scan = VulnScan(group_id=group_id, profile=payload.profile, responsible=payload.responsible)
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    asyncio.create_task(run_vuln_scan(scan.id, targets, payload.profile, get_session))
+    return {"id": scan.id, "targets": len(targets)}
+
+
+@api_read.get("/api/groups/{group_id}/vuln-scans")
+def list_vuln_scans(
+    group_id: int, limit: int = 30, db: Session = Depends(_db), key: Principal = Depends(require_api_key)
+):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    scans = (
+        db.query(VulnScan)
+        .filter(VulnScan.group_id == group_id)
+        .order_by(desc(VulnScan.started_at))
+        .limit(min(limit, 100))
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "profile": s.profile.value,
+            "profile_label": VULN_SCAN_PROFILE_LABELS.get(s.profile.value, s.profile.value),
+            "status": s.status.value,
+            "responsible": s.responsible,
+            "started_at": iso(s.started_at),
+            "finished_at": iso(s.finished_at) if s.finished_at else None,
+            "error": s.error,
+            "host_count": len(s.hosts),
+            "findings_count": sum(1 for h in s.hosts for f in (h.findings or []) if f.get("severity") != "info"),
+        }
+        for s in scans
+    ]
+
+
+@api_read.get("/api/groups/{group_id}/vuln-scans/summary")
+def vuln_scans_summary(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Последний скан по каждому из 5 профилей — карточки на странице
+    (какие профили ещё ни разу не гоняли для этой группы, видно сразу)."""
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if db.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    rows = last_scan_summary(db, group_id)
+    for row in rows:
+        if row["scan"]:
+            row["scan"]["started_at"] = iso(row["scan"]["started_at"])
+            row["scan"]["finished_at"] = iso(row["scan"]["finished_at"]) if row["scan"]["finished_at"] else None
+    return rows
+
+
+@api_read.get("/api/vuln-scans/{scan_id}/hosts")
+def list_vuln_scan_hosts(scan_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    scan = db.get(VulnScan, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Скан не найден")
+    if not key_sees_group(key, scan.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    return [
+        {"address": h.address, "hostname": h.hostname, "state": h.state, "findings": h.findings}
+        for h in scan.hosts
+    ]
+
+
+@api_read.get("/api/groups/{group_id}/vuln-register")
+def get_vuln_register(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if db.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    persisted = read_persisted_rows(group_id)
+    missing = vuln_missing_profile_rows(db, group_id)
+    return {"headers": VULN_REGISTER_HEADERS, "rows": [list(r) for r in persisted] + missing}
+
+
+@api_read.get("/api/groups/{group_id}/vuln-register.xlsx")
+def download_vuln_register(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    group = db.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    wb = build_excel_with_missing(db, group_id, group.name)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    # Имя группы почти всегда кириллица — Content-Disposition это только
+    # latin-1 (реальная находка: голый filename="..." с кириллицей падал
+    # с UnicodeEncodeError прямо на отдаче файла). ASCII-фоллбэк для
+    # старых клиентов + filename* с процент-кодированным UTF-8 (RFC 5987)
+    # для нормального отображения кириллического имени в браузере.
+    encoded_name = quote(f"otchet-ocenka-uyazvimosti-{group.name}.xlsx")
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"otchet-ocenka-uyazvimosti.xlsx\"; filename*=UTF-8''{encoded_name}"
+        },
+    )
+
+
 @api_operate.post("/api/ad-audit", status_code=201)
 async def trigger_ad_audit(payload: AdAuditIn, db: Session = Depends(_db)):
     """Учётка для LDAP-подключения нигде не сохраняется — используется
@@ -1532,6 +1675,34 @@ def get_ports(node_id: int, db: Session = Depends(_db), key: Principal = Depends
     }
 
 
+# Реальный баг пользователя (2026-09-24): включил Port Security на
+# порту, "Снять состояние" тут же показывало "выключен, но настройки
+# остались" — протухший ответ. Панель "Защита" читает /protection из
+# последнего БЭКАПА (см. port_security.py), а apply_port/apply_stp
+# новый бэкап не снимают — старая проблема, раньше прикрытая только
+# точечным клиентским патчем (см. ports.js:patchProtectionAfterApply),
+# который живёт лишь до следующего реального обновления с сервера.
+# Здесь — постоянное решение: сразу после успешного изменения защиты
+# снимаем свежий бэкап теми же учётками, что уже использовались для
+# apply. Тихо (best-effort) — сбой бэкапа не должен рушить успешный
+# apply, а parse_port_protection всё равно понимает только Cisco IOS.
+_PROTECTION_BACKUP_COMMAND = "show running-config"
+_PROTECTION_BACKUP_VENDORS = (Vendor.cisco_ios, Vendor.cisco_ios_telnet)
+
+
+async def _refresh_protection_backup(db, node, *, username, password, key_path, conn_port):
+    if node.vendor not in _PROTECTION_BACKUP_VENDORS:
+        return
+    try:
+        await run_backup(
+            db, node,
+            username=username, command=_PROTECTION_BACKUP_COMMAND,
+            key_path=key_path, password=password, port=conn_port,
+        )
+    except Exception:
+        pass  # снимок статуса портов уже применился — второстепенный бэкап не должен всё портить
+
+
 @api_operate.post("/api/nodes/{node_id}/ports/{port_name:path}/apply")
 async def apply_port_endpoint(
     node_id: int,
@@ -1567,6 +1738,10 @@ async def apply_port_endpoint(
         )
     except PortCommandError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result.get("ok") and (payload.port_security is not None or payload.port_security_maximum):
+        await _refresh_protection_backup(
+            db, node, username=username, password=password, key_path=key_path, conn_port=payload.port
+        )
     return result
 
 
@@ -1609,7 +1784,7 @@ async def apply_stp_protection_endpoint(
     node = require_node_access(db, key, node_id)
     username, password, key_path = _resolve_node_credential(db, node, payload)
     try:
-        return await apply_stp_protection(
+        result = await apply_stp_protection(
             node,
             access_ports=payload.access_ports,
             trunk_ports=payload.trunk_ports,
@@ -1625,6 +1800,11 @@ async def apply_stp_protection_endpoint(
         )
     except StpProtectionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result.get("ok"):
+        await _refresh_protection_backup(
+            db, node, username=username, password=password, key_path=key_path, conn_port=payload.port
+        )
+    return result
 
 
 @api_read.get("/api/nodes/{node_id}/protection")

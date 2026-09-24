@@ -282,6 +282,11 @@ class ScanIn(BaseModel):
     ports: str | None = None
 
 
+class VulnScanRunIn(BaseModel):
+    profile: str  # ping | quick | full_ports | vuln | os
+    responsible: str | None = None  # Ф.И.О. и должность — для отчёта
+
+
 class DomainScanRunIn(BaseModel):
     cidr: str
     group_id: int | None = None

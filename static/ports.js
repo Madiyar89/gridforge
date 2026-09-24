@@ -550,7 +550,14 @@ async function applyPortSecurity(port, portSecurity) {
       }
     );
     renderApplyResult(resultEl, result);
-    if (result.ok) patchProtectionAfterApply(port.name, portSecurity, maximum);
+    if (result.ok) {
+      // Мгновенная подсказка без похода на сервер — сервер к этому
+      // моменту уже сам снял свежий бэкап (см. main.py:
+      // _refresh_protection_backup), так что следом подтверждаем
+      // настоящими данными, а не полагаемся только на локальную догадку.
+      patchProtectionAfterApply(port.name, portSecurity, maximum);
+      loadPorts(false);
+    }
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
   } finally {
@@ -816,16 +823,12 @@ async function applyStpProtection() {
     });
     renderApplyResult(resultEl, result);
     if (result.ok) {
-      // bpdu_guard/guard_loop живут в "Защите" (читается из последнего
-      // БЭКАПА, не с устройства напрямую) и не рисуются на самой схеме —
-      // применилось реально, но в панели порта будет видно только после
-      // нового бэкапа. Честно говорим об этом, а не притворяемся, что
-      // синхронизировалось само.
-      // loadPorts() тут намеренно НЕ вызываем: он сбрасывает
-      // stp-body.hidden=true (нужно только при смене узла) и сразу же
-      // спрятал бы только что показанное сообщение об успехе — реальный
-      // баг, пойманный вместе с этим же исправлением.
-      resultEl.innerHTML += `<div style="margin-top:6px;color:var(--text-dim)">Применено на устройстве. В панели «Порт» (Защита) появится после нового бэкапа конфигурации — Бэкапы → Снять бэкап.</div>`;
+      // Сервер сам снимает свежий бэкап сразу после применения (см.
+      // main.py:_refresh_protection_backup) — bpdu_guard/guard_loop в
+      // панели "Порт" (Защита) обновятся сами, без похода на Бэкапы.
+      // loadPorts(false) — не полный сброс: не трогает stp-body.hidden
+      // (иначе спрятал бы только что показанное сообщение об успехе).
+      loadPorts(false);
     }
   } catch (e) {
     resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
