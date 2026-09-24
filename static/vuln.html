@@ -40,8 +40,23 @@
   .vuln-sched-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:14px 16px;border-bottom:1px solid var(--border);}
   .vuln-sched-form .field{display:flex;flex-direction:column;gap:4px;}
   .vuln-sched-form .field label{font-size:11px;color:var(--text-dim);}
-  .vuln-sched-profiles{display:flex;flex-wrap:wrap;gap:8px;}
-  .vuln-sched-profiles label{display:flex;align-items:center;gap:4px;font-size:12px;font-weight:400;}
+  /* input[type=time] вне .form-row не подхватывает общий стиль формы —
+     без color-scheme:dark браузер рисует и само поле, и всплывающий
+     пикер часов/минут белым по умолчанию, выбивается из тёмной темы. */
+  .vuln-sched-form input[type="time"]{
+    background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+    border-radius:6px;padding:6px 9px;font-size:12.5px;font-family:var(--sans);
+    color-scheme:dark;
+  }
+  .vuln-sched-form select{padding:7px 9px;}
+  .vuln-sched-form #vs-add{
+    background:transparent;border:1px solid var(--accent);color:var(--accent);
+    border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-weight:600;
+  }
+  .vuln-sched-form #vs-add:hover{background:var(--accent);color:var(--accent-ink);}
+  .vuln-sched-profiles{display:flex;flex-wrap:wrap;gap:10px;padding-bottom:7px;}
+  .vuln-sched-profiles label{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:400;color:var(--text);}
+  .vuln-sched-profiles input[type="checkbox"]{accent-color:var(--accent);width:14px;height:14px;}
   .vuln-sched-row{padding:9px 16px;border-bottom:1px solid var(--border);font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
   .vuln-sched-row .meta{color:var(--text-dim);font-size:11.5px;margin-top:2px;}
   .vuln-sched-row .actions{display:flex;gap:6px;flex-shrink:0;}
