@@ -34,10 +34,16 @@ async function refreshSyslog() {
     .map((m) => {
       const icon = m.severity !== null ? SEV_ICON[m.severity] || "⚪" : "⚪";
       const time = new Date(m.received_at).toLocaleTimeString("ru-RU");
+      const geoParts = [];
+      if (m.geo) {
+        if (m.geo.country) geoParts.push(m.geo.country);
+        if (m.geo.as_org) geoParts.push(m.geo.as_org);
+      }
+      const geo = geoParts.length ? ` <span class="geo" style="color:var(--text-dim);font-size:11px">[${escapeHtml(geoParts.join(" · "))}]</span>` : "";
       return `<div class="syslog-row">
         <span class="sev">${icon}</span>
         <span class="time">${time}</span>
-        <span class="src">${escapeHtml(m.source_ip)}</span>
+        <span class="src">${escapeHtml(m.source_ip)}${geo}</span>
         <span class="msg">${escapeHtml(m.message)}</span>
       </div>`;
     })

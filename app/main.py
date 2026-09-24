@@ -44,6 +44,7 @@ from app.hub_detection_engine import find_probable_hubs
 from app.mac_search_engine import search_mac
 from app.domain_scan_engine import DomainScanValidationError, run_domain_scan
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
+from app.geoip_engine import lookup as geoip_lookup
 from app.dashboard_engine import build_dashboard
 from app.metrics_engine import render_prometheus_metrics
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
@@ -2764,9 +2765,23 @@ def list_syslog(
             "id": m.id, "node_id": m.node_id, "source_ip": m.source_ip,
             "received_at": iso(m.received_at), "facility": m.facility,
             "severity": m.severity, "message": m.message,
+            # None для своих же (частных) адресов — источник почти всегда
+            # внутри сети, geo не ошибка отсутствует, а просто неприменима.
+            "geo": geoip_lookup(m.source_ip),
         }
         for m in rows
     ]
+
+
+@api_read.get("/api/geoip-lookup")
+def geoip_lookup_endpoint(ip: str):
+    """Разовый lookup вне контекста Syslog — пригодится для будущих
+    источников внешних адресов (Capture и т.п., docs/landscape-report.md
+    п.4.4), не только для уже подключённого списка сообщений выше."""
+    geo = geoip_lookup(ip)
+    if geo is None:
+        return {"ip": ip, "geo": None}
+    return {"ip": ip, "geo": geo}
 
 
 @api_read.get("/api/ip-lookup")

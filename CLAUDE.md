@@ -176,8 +176,14 @@ docker rmi gridforge-test   # убрать за собой
   `_send_apprise_new_devices`, синхронный вызов через `asyncio.to_thread`,
   не блокирует цикл опроса), webhook/telegram не тронуты. Проверено
   вживую: реальная доставка на `ntfy.sh`-топик.
-- ⬜ 4.4 GeoIP/ASN рядом с внешними адресами (нужен MaxMind-ключ — внешняя
-  зависимость, не только код)
+- ✅ **4.4** GeoIP/ASN рядом с внешними адресами — `app/geoip_engine.py`
+  (офлайн-lookup по MaxMind GeoLite2 Country+ASN, `.mmdb` в
+  `data/geoip/`, вне git), учётка — Integration `key="maxmind"` (URL
+  поле переиспользовано под Account ID), еженедельное автообновление из
+  `scheduler.py` (`_run_geoip_refresh_safe`). Подключено к `/api/syslog`
+  (поле `geo` на сообщение) и отдельным `/api/geoip-lookup?ip=`.
+  Проверено вживую реальным MaxMind-ключом: 8.8.8.8 → US/Google,
+  1.1.1.1 → Cloudflare, приватные адреса — `null`, не ошибка.
 - ⬜ 4.5 Приёмник NetFlow/sFlow + дашборд топ-трафика (самая тяжёлая из
   "средних")
 - ⬜ 4.6 Правила жизненного цикла устройств

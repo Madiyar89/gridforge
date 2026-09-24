@@ -18,6 +18,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from app.geoip_engine import GeoipDownloadError, download_databases
 from app.models import Integration
 from app.secrets_crypto import decrypt_secret, encrypt_secret
 
@@ -66,6 +67,19 @@ async def _test_graylog(url: str, api_token: str) -> None:
         raise IntegrationTestError(f"не удалось связаться с Graylog API: {exc}") from exc
 
 
+async def _test_maxmind(account_id: str, license_key: str) -> None:
+    """Здесь "URL" поля интеграции переиспользован под Account ID (у
+    MaxMind нет своего URL — адрес скачивания фиксирован в
+    geoip_engine.py) — проверка это и есть реальное первое скачивание
+    баз GeoLite2 (docs/landscape-report.md, п.4.4), не отдельный
+    холостой запрос: раз учётка рабочая, справочник сразу готов к
+    использованию, а не будет ждать первого планового обновления."""
+    try:
+        await download_databases(account_id, license_key)
+    except GeoipDownloadError as exc:
+        raise IntegrationTestError(str(exc)) from exc
+
+
 @dataclass(frozen=True)
 class IntegrationSpec:
     label: str
@@ -76,6 +90,7 @@ class IntegrationSpec:
 INTEGRATION_REGISTRY: dict[str, IntegrationSpec] = {
     "graylog": IntegrationSpec("Graylog", "http://192.0.2.115:9000", _test_graylog),
     "zabbix": IntegrationSpec("Zabbix", "http://192.0.2.243:8080/api_jsonrpc.php", _test_zabbix),
+    "maxmind": IntegrationSpec("MaxMind GeoLite2 (GeoIP/ASN)", "Account ID, например 1416588", _test_maxmind),
 }
 
 

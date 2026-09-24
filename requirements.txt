@@ -45,3 +45,9 @@ pytest>=8.3
 # ChannelKind (уже есть, работают, не ломать), apprise — third вариант
 # для всего остального.
 apprise>=1.13
+# GeoIP/ASN офлайн-справочник по внешним адресам (docs/landscape-report.md,
+# п.4.4) — офлайн-чтение .mmdb-баз MaxMind GeoLite2, без запроса в
+# интернет на каждый IP. Сами .mmdb-файлы лежат в data/geoip/ (в
+# .gitignore вместе с остальным data/, лицензия MaxMind запрещает
+# коммитить их в репозиторий).
+geoip2>=5.0

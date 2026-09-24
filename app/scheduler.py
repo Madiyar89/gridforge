@@ -24,7 +24,9 @@ from app import actions_engine, signal as signal_module
 from app.cable_discovery_engine import run_due_cable_discovery_schedules
 from app.db import get_session
 from app.escalation_engine import run_escalations
-from app.models import Probe, ProbeKind, Sample, _now
+from app.geoip_engine import GeoipDownloadError, download_databases, needs_refresh
+from app.integrations_engine import decrypt_token
+from app.models import Integration, Probe, ProbeKind, Sample, _now
 from app.probes import run_probe
 from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
@@ -105,6 +107,27 @@ class Scheduler:
         except Exception:
             logger.exception("сбой планового скана новых устройств")
 
+    async def _run_geoip_refresh_safe(self) -> None:
+        """Проверка дешёвая (stat() двух файлов) — сама сеть только если
+        база реально устарела (needs_refresh(), раз в ~7 дней) или её ещё
+        нет. Без настроенной интеграции "maxmind" просто выходит — GeoIP
+        опционален, отсутствие учётки не ошибка."""
+        if not needs_refresh():
+            return
+        db = get_session()
+        try:
+            integration = db.query(Integration).filter(Integration.key == "maxmind").first()
+            if integration is None:
+                return
+            account_id = integration.url
+            license_key = decrypt_token(integration.api_token)
+        finally:
+            db.close()
+        try:
+            await download_databases(account_id, license_key)
+        except GeoipDownloadError:
+            logger.exception("сбой планового обновления баз GeoLite2")
+
     async def run_forever(
         self,
         reload_interval_seconds: float = 5.0,
@@ -113,6 +136,7 @@ class Scheduler:
         vuln_schedule_interval_seconds: float = 60.0,
         cable_schedule_interval_seconds: float = 60.0,
         discovery_schedule_interval_seconds: float = 60.0,
+        geoip_refresh_interval_seconds: float = 3600.0,
     ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
@@ -121,6 +145,7 @@ class Scheduler:
             last_vuln_schedule_check = 0.0
             last_cable_schedule_check = 0.0
             last_discovery_schedule_check = 0.0
+            last_geoip_check = 0.0
             # Первая очистка — не сразу при старте, а через сутки работы:
             # перезапуск сервиса не должен каждый раз запускать удаление.
             last_retention = time.monotonic()
@@ -161,6 +186,12 @@ class Scheduler:
                     # vuln/cable-schedule.
                     asyncio.create_task(self._run_due_discovery_schedules_safe())
                     last_discovery_schedule_check = now
+                if now - last_geoip_check >= geoip_refresh_interval_seconds:
+                    # Час — дёшево проверить (needs_refresh() почти всегда
+                    # просто stat() двух файлов), реальное скачивание раз в
+                    # ~7 дней, см. _run_geoip_refresh_safe.
+                    asyncio.create_task(self._run_geoip_refresh_safe())
+                    last_geoip_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
                     try:

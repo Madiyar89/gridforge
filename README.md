@@ -452,6 +452,30 @@ curl "localhost:8100/api/syslog?node_id=1" -H 'X-API-Key: <ключ>'
 разобран верно (`<131>` → facility 16/severity 3), сообщение без PRI не
 потеряно, оба привязались к `Node` по IP, фильтр по `node_id` работает.
 
+## GeoIP/ASN для внешних адресов (`app/geoip_engine.py`)
+
+Каждое сообщение в `/api/syslog` несёт поле `geo` — страна и автономная
+система (провайдер/сеть) внешнего `source_ip`, офлайн-lookup по локальным
+базам MaxMind GeoLite2 (Country + ASN), без запроса наружу на каждый IP.
+Для своих же (частных/loopback/link-local) адресов — `null`, это не
+ошибка, просто неприменимо. Отдельный `/api/geoip-lookup?ip=` — разовый
+lookup вне контекста Syslog.
+
+Учётка MaxMind (Account ID + License key, оба бесплатные на geolite.
+maxmind.com) хранится как обычная запись `Integration` (`key="maxmind"`,
+страница «Интеграции» в вебе) — переиспользует уже существующий
+Integration/`encrypt_secret`-механизм, не отдельная таблица под одну
+пару учётных данных. Сами `.mmdb`-файлы лежат в `data/geoip/`, вне git
+(лицензия GeoLite2 запрещает коммитить базы в репозиторий) и
+автообновляются раз в ~7 дней фоновой задачей в `scheduler.py`.
+
+```bash
+curl "localhost:8100/api/geoip-lookup?ip=8.8.8.8" -H 'X-API-Key: <ключ>'
+```
+
+Проверено вживую реальным MaxMind-ключом: `8.8.8.8` → `US`/`Google LLC`,
+`1.1.1.1` → `Cloudflare, Inc.`, приватные адреса (`192.168.x.x`) — `null`.
+
 ## Захват и анализ трафика (`Capture`)
 
 Своя версия захвата трафика из NetOpsHub — та же честная граница: видим
