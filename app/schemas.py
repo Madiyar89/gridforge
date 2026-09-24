@@ -287,6 +287,15 @@ class VulnScanRunIn(BaseModel):
     responsible: str | None = None  # Ф.И.О. и должность — для отчёта
 
 
+class VulnScanScheduleIn(BaseModel):
+    profiles: list[str]  # ping | quick | full_ports | vuln | os
+    weekday: int  # 0=понедельник .. 6=воскресенье
+    start_time: str  # "HH:MM"
+    end_time: str | None = None  # ориентировочно, не жёсткий обрыв
+    responsible: str | None = None
+    enabled: bool = True
+
+
 class DomainScanRunIn(BaseModel):
     cidr: str
     group_id: int | None = None

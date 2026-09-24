@@ -206,3 +206,121 @@ def test_group_scoped_key_cannot_scan_other_group(client, db, group_with_node):
         headers=_h(scoped_key),
     )
     assert resp.status_code == 403
+
+
+# --- Плановый (по расписанию) запуск ---
+
+
+def test_create_and_list_vuln_schedule(client, operator_key, group_with_node):
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/vuln-schedules",
+        json={
+            "profiles": ["ping", "quick"],
+            "weekday": 0,
+            "start_time": "12:00",
+            "end_time": "13:30",
+            "responsible": "Иванов И.И.",
+        },
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 201
+    sched_id = resp.json()["id"]
+
+    rows = client.get(f"/api/groups/{group_with_node.id}/vuln-schedules", headers=_h(operator_key)).json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == sched_id
+    assert rows[0]["profiles"] == ["ping", "quick"]
+    assert rows[0]["weekday"] == 0
+    assert rows[0]["start_time"] == "12:00"
+    assert rows[0]["enabled"] is True
+    assert rows[0]["last_triggered_on"] is None
+
+
+def test_create_vuln_schedule_rejects_unknown_profile(client, operator_key, group_with_node):
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/vuln-schedules",
+        json={"profiles": ["not-a-profile"], "weekday": 0, "start_time": "12:00"},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 400
+
+
+def test_update_and_delete_vuln_schedule(client, operator_key, group_with_node):
+    sched_id = client.post(
+        f"/api/groups/{group_with_node.id}/vuln-schedules",
+        json={"profiles": ["ping"], "weekday": 0, "start_time": "12:00"},
+        headers=_h(operator_key),
+    ).json()["id"]
+
+    resp = client.patch(
+        f"/api/vuln-schedules/{sched_id}",
+        json={"profiles": ["ping"], "weekday": 1, "start_time": "09:00", "enabled": False},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 200
+    rows = client.get(f"/api/groups/{group_with_node.id}/vuln-schedules", headers=_h(operator_key)).json()
+    assert rows[0]["weekday"] == 1
+    assert rows[0]["enabled"] is False
+
+    resp = client.delete(f"/api/vuln-schedules/{sched_id}", headers=_h(operator_key))
+    assert resp.status_code == 204
+    rows = client.get(f"/api/groups/{group_with_node.id}/vuln-schedules", headers=_h(operator_key)).json()
+    assert rows == []
+
+
+def test_viewer_cannot_create_vuln_schedule(client, db, group_with_node):
+    viewer_key = generate_key(db, label="смотритель", role=ApiKeyRole.viewer)
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/vuln-schedules",
+        json={"profiles": ["ping"], "weekday": 0, "start_time": "12:00"},
+        headers=_h(viewer_key),
+    )
+    assert resp.status_code == 403
+
+
+def test_run_due_vuln_schedules_triggers_matching_and_skips_others(db, group_with_node):
+    """Прямая проверка движка (без прохода через реальный планировщик):
+    расписание "сегодня, уже наступило время" должно запустить сканы и
+    выставить last_triggered_on; расписание "не сегодня" и "уже
+    запускалось сегодня" — не должны трогаться."""
+    import datetime as dt
+
+    from app.db import SessionLocal
+    from app.models import VulnScan, VulnScanSchedule
+    from app.vuln_scan_engine import run_due_vuln_schedules
+
+    now = dt.datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    past_hm = (now - dt.timedelta(minutes=5)).strftime("%H:%M")
+    future_hm = (now + dt.timedelta(hours=1)).strftime("%H:%M")
+    other_weekday = (now.weekday() + 1) % 7
+
+    due = VulnScanSchedule(
+        group_id=group_with_node.id, profiles=["ping"], weekday=now.weekday(), start_time=past_hm,
+    )
+    not_yet = VulnScanSchedule(
+        group_id=group_with_node.id, profiles=["ping"], weekday=now.weekday(), start_time=future_hm,
+    )
+    wrong_day = VulnScanSchedule(
+        group_id=group_with_node.id, profiles=["ping"], weekday=other_weekday, start_time=past_hm,
+    )
+    already_ran = VulnScanSchedule(
+        group_id=group_with_node.id, profiles=["ping"], weekday=now.weekday(), start_time=past_hm,
+        last_triggered_on=today_str,
+    )
+    db.add_all([due, not_yet, wrong_day, already_ran])
+    db.commit()
+
+    asyncio.run(run_due_vuln_schedules(SessionLocal))
+
+    db.refresh(due)
+    db.refresh(not_yet)
+    db.refresh(wrong_day)
+    assert due.last_triggered_on == today_str
+    assert not_yet.last_triggered_on is None
+    assert wrong_day.last_triggered_on is None
+
+    scans = db.query(VulnScan).filter(VulnScan.group_id == group_with_node.id).all()
+    assert len(scans) == 1
+    assert scans[0].profile.value == "ping"
+    assert scans[0].responsible == "плановый запуск по расписанию"

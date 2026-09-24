@@ -695,6 +695,35 @@ class VulnScanHost(Base):
     scan: Mapped["VulnScan"] = relationship(back_populates="hosts")
 
 
+class VulnScanSchedule(Base):
+    """Плановый (по расписанию) запуск сканов уязвимостей — раз в неделю,
+    в заданный день/время, по выбранному набору профилей, без ручного
+    нажатия "Запустить". Проверяется Scheduler.run_forever() (см.
+    app/scheduler.py, run_due_vuln_schedules) раз в минуту: если сейчас
+    нужный weekday и текущее время >= start_time, а сегодня ещё не
+    запускали (last_triggered_on != today) — запускаются все профили
+    из profiles последовательно (не параллельно — один и тот же набор
+    хостов, гонка по одной цели ни к чему)."""
+
+    __tablename__ = "vuln_scan_schedules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), nullable=False)
+    # список ключей VulnScanProfile, например ["ping","quick","full_ports","vuln","os"]
+    profiles: Mapped[list] = mapped_column(JSON, default=list)
+    weekday: Mapped[int] = mapped_column(nullable=False)  # 0=понедельник .. 6=воскресенье (datetime.weekday())
+    start_time: Mapped[str] = mapped_column(String(5), nullable=False)  # "HH:MM"
+    end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)  # ориентировочно, не жёсткий обрыв
+    responsible: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    # "YYYY-MM-DD" даты последнего запуска — простой строковый guard от повторного
+    # срабатывания в тот же день (проверка идёт раз в минуту)
+    last_triggered_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    group: Mapped["Group"] = relationship()
+
+
 class DomainScanMethod(str, enum.Enum):
     winrm = "winrm"
     smb_domain = "smb_domain"

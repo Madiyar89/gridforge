@@ -182,3 +182,57 @@ async def run_vuln_scan(scan_id: int, targets: list[str], profile: str, get_sess
             db.commit()
     finally:
         db.close()
+
+
+async def run_due_vuln_schedules(get_session) -> None:
+    """Проверяется раз в минуту из Scheduler.run_forever() (app/scheduler.py).
+    Находит расписания (VulnScanSchedule), у которых сегодня нужный день
+    недели, текущее время уже дошло до start_time, и сегодня ещё не
+    запускали — и прогоняет для них все выбранные профили ПОСЛЕДОВАТЕЛЬНО
+    (await, не create_task): общий набор хостов группы, гонять nmap на них
+    параллельно из нескольких профилей незачем и рискованно по ресурсам."""
+    from app.models import Group, VulnScanSchedule
+
+    db = get_session()
+    try:
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        current_hm = now.strftime("%H:%M")
+        due = (
+            db.query(VulnScanSchedule)
+            .filter(
+                VulnScanSchedule.enabled.is_(True),
+                VulnScanSchedule.weekday == now.weekday(),
+            )
+            .all()
+        )
+        for sched in due:
+            if sched.last_triggered_on == today_str or current_hm < sched.start_time:
+                continue
+            # Помечаем сразу — не после прогона (который может занять до ~40
+            # минут) — иначе следующая проверка через минуту запустит его же
+            # ещё раз, пока предыдущий прогон ещё не закончился.
+            sched.last_triggered_on = today_str
+            db.commit()
+
+            group = db.get(Group, sched.group_id)
+            if group is None:
+                continue
+            targets = [n.address for n in group.nodes if n.address]
+            if not targets:
+                continue
+
+            for profile in sched.profiles:
+                if profile not in PROFILE_ARGS:
+                    continue
+                scan = VulnScan(
+                    group_id=sched.group_id,
+                    profile=profile,
+                    responsible=sched.responsible or "плановый запуск по расписанию",
+                )
+                db.add(scan)
+                db.commit()
+                db.refresh(scan)
+                await run_vuln_scan(scan.id, targets, profile, get_session)
+    finally:
+        db.close()

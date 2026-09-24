@@ -32,6 +32,7 @@ function onVulnGroupChange() {
     document.getElementById("vuln-scans-body").innerHTML = `<div class="empty">Выбери группу выше</div>`;
     document.getElementById("vuln-register-table").innerHTML = `<tbody><tr><td class="empty">Выбери группу выше</td></tr></tbody>`;
     document.getElementById("vuln-register-download").removeAttribute("data-href");
+    document.getElementById("vuln-schedules-body").innerHTML = `<div class="empty">Выбери группу выше</div>`;
     return;
   }
   refreshVulnAll();
@@ -44,6 +45,18 @@ responsibleInput.addEventListener("change", () => {
 });
 
 const PROFILE_ORDER = ["ping", "quick", "full_ports", "vuln", "os"];
+const PROFILE_LABELS = {
+  ping: "Обнаружение узлов",
+  quick: "Быстрое сканирование портов",
+  full_ports: "Полное сканирование портов",
+  vuln: "Проверка на известные уязвимости",
+  os: "Определение ОС",
+};
+const WEEKDAY_LABELS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+
+document.getElementById("vs-profiles").innerHTML = PROFILE_ORDER.map(
+  (key) => `<label><input type="checkbox" value="${key}"> ${escapeHtml(PROFILE_LABELS[key])}</label>`
+).join("");
 
 async function refreshVulnProfiles() {
   const grid = document.getElementById("vuln-profile-grid");
@@ -210,10 +223,100 @@ document.getElementById("vuln-register-download").addEventListener("click", (ev)
   window.location.href = href;
 });
 
+async function refreshVulnSchedules() {
+  const body = document.getElementById("vuln-schedules-body");
+  if (!_vulnGroupId) return;
+  let rows;
+  try {
+    rows = await api(`/api/groups/${_vulnGroupId}/vuln-schedules`);
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  if (rows.length === 0) {
+    body.innerHTML = `<div class="empty">Расписаний ещё нет</div>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((s) => {
+      const last = s.last_triggered_on ? `, последний запуск: ${escapeHtml(s.last_triggered_on)}` : "";
+      const endBit = s.end_time ? `–${escapeHtml(s.end_time)}` : "";
+      return `
+        <div class="vuln-sched-row${s.enabled ? "" : " disabled"}" data-id="${s.id}">
+          <div>
+            <div>${WEEKDAY_LABELS[s.weekday]}, ${escapeHtml(s.start_time)}${endBit}</div>
+            <div class="meta">${s.profile_labels.map(escapeHtml).join(", ")}${last}</div>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn-ghost sched-toggle" data-id="${s.id}" data-enabled="${s.enabled}">${s.enabled ? "выключить" : "включить"}</button>
+            <button type="button" class="btn-ghost sched-delete" data-id="${s.id}">удалить</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+  body.querySelectorAll(".sched-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => toggleVulnSchedule(rows.find((r) => String(r.id) === btn.dataset.id)));
+  });
+  body.querySelectorAll(".sched-delete").forEach((btn) => {
+    btn.addEventListener("click", () => deleteVulnSchedule(btn.dataset.id));
+  });
+}
+
+async function toggleVulnSchedule(sched) {
+  if (!sched) return;
+  try {
+    await api(`/api/vuln-schedules/${sched.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        profiles: sched.profiles,
+        weekday: sched.weekday,
+        start_time: sched.start_time,
+        end_time: sched.end_time,
+        responsible: sched.responsible,
+        enabled: !sched.enabled,
+      }),
+    });
+    refreshVulnSchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteVulnSchedule(id) {
+  if (!confirm("Удалить расписание?")) return;
+  try {
+    await api(`/api/vuln-schedules/${id}`, { method: "DELETE" });
+    refreshVulnSchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById("vs-add").addEventListener("click", async () => {
+  if (!_vulnGroupId) return toast("Выбери группу", true);
+  const profiles = Array.from(document.querySelectorAll("#vs-profiles input:checked")).map((c) => c.value);
+  if (profiles.length === 0) return toast("Выбери хотя бы один профиль", true);
+  const weekday = Number(document.getElementById("vs-weekday").value);
+  const start_time = document.getElementById("vs-start").value;
+  const end_time = document.getElementById("vs-end").value || null;
+  if (!start_time) return toast("Укажи время начала", true);
+  try {
+    await api(`/api/groups/${_vulnGroupId}/vuln-schedules`, {
+      method: "POST",
+      body: JSON.stringify({ profiles, weekday, start_time, end_time, responsible: responsibleInput.value.trim() || null }),
+    });
+    toast("Расписание добавлено");
+    refreshVulnSchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
 function refreshVulnAll() {
   refreshVulnProfiles();
   refreshVulnScans();
   refreshVulnRegister();
+  refreshVulnSchedules();
 }
 
 function onKeySaved() {

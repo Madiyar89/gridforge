@@ -105,6 +105,7 @@ from app.models import (
     User,
     Vendor,
     VulnScan,
+    VulnScanSchedule,
     VulnScanStatus,
     VULN_SCAN_PROFILE_LABELS,
     Watch,
@@ -167,6 +168,7 @@ from app.schemas import (
     TemplateIn,
     UserIn,
     VulnScanRunIn,
+    VulnScanScheduleIn,
     WatchIn,
 )
 from app.templates_engine import TemplateValidationError, apply_template, validate_probe_defs
@@ -1404,6 +1406,106 @@ def download_vuln_register(group_id: int, db: Session = Depends(_db), key: Princ
             "Content-Disposition": f"attachment; filename=\"otchet-ocenka-uyazvimosti.xlsx\"; filename*=UTF-8''{encoded_name}"
         },
     )
+
+
+@api_operate.post("/api/groups/{group_id}/vuln-schedules", status_code=201)
+def create_vuln_schedule(
+    group_id: int,
+    payload: VulnScanScheduleIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if db.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    if not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday должен быть 0..6")
+    unknown = [p for p in payload.profiles if p not in VULN_PROFILE_ARGS]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Неизвестные профили: {unknown}")
+    if not payload.profiles:
+        raise HTTPException(status_code=400, detail="Выберите хотя бы один профиль")
+
+    sched = VulnScanSchedule(
+        group_id=group_id,
+        profiles=payload.profiles,
+        weekday=payload.weekday,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        responsible=payload.responsible,
+        enabled=payload.enabled,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return {"id": sched.id}
+
+
+@api_read.get("/api/groups/{group_id}/vuln-schedules")
+def list_vuln_schedules(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    rows = (
+        db.query(VulnScanSchedule)
+        .filter(VulnScanSchedule.group_id == group_id)
+        .order_by(VulnScanSchedule.weekday, VulnScanSchedule.start_time)
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "profiles": s.profiles,
+            "profile_labels": [VULN_SCAN_PROFILE_LABELS.get(p, p) for p in s.profiles],
+            "weekday": s.weekday,
+            "start_time": s.start_time,
+            "end_time": s.end_time,
+            "responsible": s.responsible,
+            "enabled": s.enabled,
+            "last_triggered_on": s.last_triggered_on,
+        }
+        for s in rows
+    ]
+
+
+@api_operate.patch("/api/vuln-schedules/{schedule_id}")
+def update_vuln_schedule(
+    schedule_id: int,
+    payload: VulnScanScheduleIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    sched = db.get(VulnScanSchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Расписание не найдено")
+    if not key_sees_group(key, sched.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday должен быть 0..6")
+    unknown = [p for p in payload.profiles if p not in VULN_PROFILE_ARGS]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Неизвестные профили: {unknown}")
+
+    sched.profiles = payload.profiles
+    sched.weekday = payload.weekday
+    sched.start_time = payload.start_time
+    sched.end_time = payload.end_time
+    sched.responsible = payload.responsible
+    sched.enabled = payload.enabled
+    db.commit()
+    return {"ok": True}
+
+
+@api_operate.delete("/api/vuln-schedules/{schedule_id}", status_code=204)
+def delete_vuln_schedule(schedule_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    sched = db.get(VulnScanSchedule, schedule_id)
+    if sched is None:
+        return Response(status_code=204)
+    if not key_sees_group(key, sched.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    db.delete(sched)
+    db.commit()
+    return Response(status_code=204)
 
 
 @api_operate.post("/api/ad-audit", status_code=201)

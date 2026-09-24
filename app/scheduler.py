@@ -27,6 +27,7 @@ from app.models import Probe, ProbeKind, Sample, _now
 from app.probes import run_probe
 from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
+from app.vuln_scan_engine import run_due_vuln_schedules
 from app.watch_engine import evaluate_probe
 
 logger = logging.getLogger("gridforge.scheduler")
@@ -84,16 +85,24 @@ class Scheduler:
             finally:
                 db.close()
 
+    async def _run_due_vuln_schedules_safe(self) -> None:
+        try:
+            await run_due_vuln_schedules(get_session)
+        except Exception:
+            logger.exception("сбой планового запуска сканов уязвимостей")
+
     async def run_forever(
         self,
         reload_interval_seconds: float = 5.0,
         escalation_interval_seconds: float = 30.0,
         retention_interval_seconds: float = 24 * 3600,
+        vuln_schedule_interval_seconds: float = 60.0,
     ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
             last_reload = 0.0
             last_escalation_check = 0.0
+            last_vuln_schedule_check = 0.0
             # Первая очистка — не сразу при старте, а через сутки работы:
             # перезапуск сервиса не должен каждый раз запускать удаление.
             last_retention = time.monotonic()
@@ -115,6 +124,14 @@ class Scheduler:
                     finally:
                         db.close()
                     last_escalation_check = now
+                if now - last_vuln_schedule_check >= vuln_schedule_interval_seconds:
+                    # В фоне отдельной задачей, не await здесь: прогон всех
+                    # профилей расписания может занять до ~40 минут (5
+                    # профилей, full_ports/vuln по 900с каждый) — если ждать
+                    # его прямо в этом цикле, всё это время встанет опрос
+                    # Probe (куча/heap ждать не умеет, пока цикл занят).
+                    asyncio.create_task(self._run_due_vuln_schedules_safe())
+                    last_vuln_schedule_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
                     try:
