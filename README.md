@@ -59,6 +59,42 @@ admin отзывает ключ → тот же ключ даёт 401.
 Все примеры curl ниже добавлены до появления авторизации — на реальном
 запуске к каждому из них нужно дописать `-H 'X-API-Key: <ключ>'`.
 
+## Вход через OIDC SSO (`app/oidc_auth.py`)
+
+Отдельная от LDAP (`app/ad_auth.py`) схема входа (docs/landscape-report.md,
+§4.8) — любой провайдер со стандартным OpenID Connect Discovery
+(Keycloak/Azure AD/Google Workspace и т.п.), заводит того же `User`, что
+и локальный/AD-вход (роль и область по группе — у нас, в провайдере их
+взять неоткуда). Личность подтверждается через `userinfo_endpoint` с
+`access_token`, а не самостоятельной проверкой подписи `id_token` —
+провайдер сам валидирует токен на своей стороне, не нужна отдельная
+JWT/JWKS-библиотека в зависимостях.
+
+```
+GRIDFORGE_OIDC_ISSUER          адрес issuer, например https://keycloak.example/realms/gridforge
+GRIDFORGE_OIDC_CLIENT_ID       client_id, заведённый на стороне провайдера
+GRIDFORGE_OIDC_CLIENT_SECRET   пусто — public-клиент, только PKCE
+GRIDFORGE_OIDC_DEFAULT_ROLE    роль при первом входе (viewer по умолчанию)
+```
+
+Состояние между `/auth/oidc/login` и `/auth/oidc/callback` (state для
+CSRF + code_verifier для PKCE, RFC 7636) — НЕ отдельная таблица в БД, а
+короткоживущая (5 минут) httponly-кука, зашифрованная тем же Fernet-
+механизмом, что и секреты Channel/Credential/Integration
+(`secrets_crypto.py`).
+
+Кнопка «Войти через SSO» на `login.html` появляется, только если OIDC
+включён (`GET /api/oidc-status`, без авторизации — сам факт
+включённости не секрет).
+
+Проверено вживую реальным локальным Keycloak (Docker, `start-dev`,
+собственный realm/client/тестовый пользователь) — полный браузерный
+цикл через headless Chromium: клик «Войти через SSO» → редирект на
+форму логина Keycloak → реальный логин/пароль тестового пользователя →
+редирект обратно с `code`/`state` → обмен на токены → `userinfo` →
+сессия GridForge создана, `User.source="oidc"`. Контейнер убран после
+теста.
+
 ## Запуск
 
 ```bash

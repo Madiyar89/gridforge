@@ -6,6 +6,17 @@ const form = document.getElementById("login-form");
 const errorBox = document.getElementById("login-error");
 const submitBtn = document.getElementById("login-submit");
 
+fetch("/api/oidc-status")
+  .then((r) => r.json())
+  .then((data) => {
+    if (data.enabled) document.getElementById("oidc-block").style.display = "";
+  })
+  .catch(() => {});
+
+document.getElementById("oidc-login-btn").addEventListener("click", () => {
+  window.location.href = "/auth/oidc/login";
+});
+
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   errorBox.textContent = "";

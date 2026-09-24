@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 from datetime import timedelta
 from urllib.parse import quote
 import secrets
@@ -14,8 +15,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -38,6 +39,15 @@ from app.scenario_catalog import seed_default_scenarios
 from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
 from app.network_audit_engine import build_network_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
+from app.oidc_auth import (
+    OidcError,
+    STATE_COOKIE_NAME,
+    build_authorize_url,
+    exchange_code_for_userinfo,
+    oidc_enabled,
+    sync_oidc_user,
+    unpack_state_cookie,
+)
 from app.audit_engine import run_audit
 from app.compliance_engine import check_compliance
 from app.config_search import search_configs
@@ -2004,6 +2014,74 @@ def logout(response: Response, gridforge_session: str | None = Cookie(default=No
     revoke_session(db, gridforge_session)
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"status": "logged_out"}
+
+
+@app.get("/api/oidc-status")
+def oidc_status():
+    """login.html дёргает это без авторизации, чтобы решить, показывать
+    ли кнопку «Войти через SSO» — сам факт включённости OIDC не секрет."""
+    return {"enabled": oidc_enabled()}
+
+
+def _oidc_redirect_uri(request: Request) -> str:
+    override = os.environ.get("GRIDFORGE_OIDC_REDIRECT_URI")
+    if override:
+        return override
+    return str(request.url_for("oidc_callback"))
+
+
+@app.get("/auth/oidc/login")
+async def oidc_login(request: Request, next: str = "/index.html"):
+    """Namespace `/auth/` — не `/api/` — сознательно: это не JSON-эндпоинт
+    для fetch(), а полноценный редирект браузера, `next` — куда вернуть
+    пользователя после успешного входа (по умолчанию дашборд)."""
+    if not oidc_enabled():
+        raise HTTPException(status_code=404, detail="OIDC не настроен")
+    try:
+        authorize_url, state_cookie = await build_authorize_url(_oidc_redirect_uri(request), next)
+    except OidcError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    response = RedirectResponse(authorize_url, status_code=302)
+    response.set_cookie(
+        STATE_COOKIE_NAME, state_cookie, httponly=True, samesite="lax", max_age=300, path="/auth/oidc"
+    )
+    return response
+
+
+@app.get("/auth/oidc/callback", name="oidc_callback")
+async def oidc_callback(
+    request: Request,
+    response: Response,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    gridforge_oidc_state: str | None = Cookie(default=None),
+    db: Session = Depends(_db),
+):
+    if error:
+        raise HTTPException(status_code=401, detail=f"провайдер отклонил вход: {error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="в ответе провайдера нет code/state")
+    saved = unpack_state_cookie(gridforge_oidc_state)
+    if saved is None or saved.get("state") != state:
+        # Кука протухла/подделана/пользователь открыл callback без
+        # предшествующего /auth/oidc/login — не 500, честная 401.
+        raise HTTPException(status_code=401, detail="состояние входа не найдено или истекло — попробуй войти заново")
+    try:
+        userinfo = await exchange_code_for_userinfo(code, saved["code_verifier"], _oidc_redirect_uri(request))
+        user = sync_oidc_user(db, userinfo)
+    except OidcError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    if not user.active:
+        raise HTTPException(status_code=401, detail="учётка отключена администратором GridForge")
+
+    raw_token = create_session(db, user)
+    redirect = RedirectResponse(saved.get("redirect_after") or "/index.html", status_code=302)
+    redirect.set_cookie(
+        COOKIE_NAME, raw_token, httponly=True, samesite="lax", max_age=int(SESSION_TTL.total_seconds()), path="/"
+    )
+    redirect.delete_cookie(STATE_COOKIE_NAME, path="/auth/oidc")
+    return redirect
 
 
 @api_write.post("/api/users", status_code=201)
