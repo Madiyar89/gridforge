@@ -66,6 +66,7 @@ from app.sessions import (
 )
 from app.signal import encrypt_channel_config, mask_channel_config
 from app.backups_engine import diff_backups, run_backup
+from app.cable_discovery_engine import discover_trunk_cable_links
 from app.models import (
     Action,
     ActionRun,
@@ -75,6 +76,7 @@ from app.models import (
     AuditFinding,
     AuditRule,
     Backup,
+    CableDiscoverySchedule,
     CableLink,
     CableLinkStatus,
     CABLE_LINK_STATUS_LABELS,
@@ -144,6 +146,7 @@ from app.schemas import (
     ApiKeyIn,
     AuditRuleIn,
     BackupTriggerIn,
+    CableDiscoveryScheduleIn,
     CableLinkIn,
     CaptureIn,
     ChannelIn,
@@ -1579,6 +1582,7 @@ def _cable_link_json(link: CableLink) -> dict:
         "responsible": link.responsible,
         "laid_on": link.laid_on,
         "comment": link.comment,
+        "source": link.source,
         "created_at": iso(link.created_at),
     }
 
@@ -1687,6 +1691,97 @@ def download_cable_links(group_id: int, db: Session = Depends(_db), key: Princip
             "Content-Disposition": f"attachment; filename=\"kabelnye-soedineniya.xlsx\"; filename*=UTF-8''{encoded_name}"
         },
     )
+
+
+@api_operate.post("/api/groups/{group_id}/cable-links/discover-trunks")
+async def discover_cable_links_endpoint(
+    group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)
+):
+    """Опрос вручную (кнопка на странице Кабели) — см. app/cable_discovery_engine.py.
+    Синхронно, тем же принципом, что и /api/hubs (find_probable_hubs):
+    только транковые Cisco-порты группы, CDP, обычно секунды-десятки
+    секунд на группу, отдельный фон не нужен."""
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if db.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    return await discover_trunk_cable_links(db, group_id, resolve_credential=resolve_credential)
+
+
+@api_operate.post("/api/groups/{group_id}/cable-schedules", status_code=201)
+def create_cable_schedule(
+    group_id: int,
+    payload: CableDiscoveryScheduleIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if db.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    if not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday должен быть 0..6")
+
+    sched = CableDiscoverySchedule(
+        group_id=group_id, weekday=payload.weekday, start_time=payload.start_time, enabled=payload.enabled,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return {"id": sched.id}
+
+
+@api_read.get("/api/groups/{group_id}/cable-schedules")
+def list_cable_schedules(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    rows = (
+        db.query(CableDiscoverySchedule)
+        .filter(CableDiscoverySchedule.group_id == group_id)
+        .order_by(CableDiscoverySchedule.weekday, CableDiscoverySchedule.start_time)
+        .all()
+    )
+    return [
+        {
+            "id": s.id, "weekday": s.weekday, "start_time": s.start_time,
+            "enabled": s.enabled, "last_triggered_on": s.last_triggered_on,
+        }
+        for s in rows
+    ]
+
+
+@api_operate.patch("/api/cable-schedules/{schedule_id}")
+def update_cable_schedule(
+    schedule_id: int,
+    payload: CableDiscoveryScheduleIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    sched = db.get(CableDiscoverySchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Расписание не найдено")
+    if not key_sees_group(key, sched.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday должен быть 0..6")
+
+    sched.weekday = payload.weekday
+    sched.start_time = payload.start_time
+    sched.enabled = payload.enabled
+    db.commit()
+    return {"ok": True}
+
+
+@api_operate.delete("/api/cable-schedules/{schedule_id}", status_code=204)
+def delete_cable_schedule(schedule_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    sched = db.get(CableDiscoverySchedule, schedule_id)
+    if sched is None:
+        return Response(status_code=204)
+    if not key_sees_group(key, sched.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    db.delete(sched)
+    db.commit()
+    return Response(status_code=204)
 
 
 @api_operate.post("/api/ad-audit", status_code=201)

@@ -35,6 +35,7 @@ async function onCableGroupChange() {
     document.getElementById("cl-table").innerHTML = `<tbody><tr><td class="empty">Выбери группу выше</td></tr></tbody>`;
     document.getElementById("cl-count").textContent = "";
     document.getElementById("cl-download").removeAttribute("data-href");
+    document.getElementById("cl-schedules-body").innerHTML = `<div class="empty">Выбери группу выше</div>`;
     return;
   }
   if (_clAllNodes.length === 0) {
@@ -50,6 +51,7 @@ async function onCableGroupChange() {
     nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("");
   portSelect.innerHTML = `<option value="">сначала выбери узел…</option>`;
   refreshCableLinks();
+  refreshCableSchedules();
 }
 
 document.getElementById("cl-node").addEventListener("change", onCableNodeChange);
@@ -147,7 +149,7 @@ async function refreshCableLinks() {
     table.innerHTML = `<tbody><tr><td class="empty">Записей ещё нет</td></tr></tbody>`;
     return;
   }
-  const headers = ["Узел", "Порт", "Второй конец", "Тип", "Длина, м", "Статус", "Ответственный", "Дата", "Комментарий", ""];
+  const headers = ["Узел", "Порт", "Второй конец", "Тип", "Длина, м", "Статус", "Источник", "Ответственный", "Дата", "Комментарий", ""];
   const thead = `<thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>`;
   const tbody = links
     .map(
@@ -159,6 +161,7 @@ async function refreshCableLinks() {
         <td>${escapeHtml(l.cable_type || "")}</td>
         <td>${l.length_m ?? ""}</td>
         <td><span class="status-badge ${l.status}">${escapeHtml(l.status_label)}</span></td>
+        <td><span class="source-badge ${l.source}">${l.source === "cdp" ? "авто (CDP)" : "вручную"}</span></td>
         <td>${escapeHtml(l.responsible || "")}</td>
         <td>${escapeHtml(l.laid_on || "")}</td>
         <td>${escapeHtml(l.comment || "")}</td>
@@ -211,6 +214,105 @@ document.getElementById("cl-download").addEventListener("click", (ev) => {
   const href = ev.currentTarget.getAttribute("data-href");
   if (!href) return toast("Выбери группу", true);
   window.location.href = href;
+});
+
+document.getElementById("cl-discover").addEventListener("click", async () => {
+  if (!_clGroupId) return toast("Выбери группу", true);
+  const btn = document.getElementById("cl-discover");
+  btn.disabled = true;
+  btn.textContent = "Опрашиваю…";
+  try {
+    const result = await api(`/api/groups/${_clGroupId}/cable-links/discover-trunks`, { method: "POST" });
+    const parts = [`узлов проверено: ${result.checked_nodes}`, `новых: ${result.created}`, `обновлено: ${result.updated}`];
+    if (result.skipped && result.skipped.length) parts.push(`пропущено: ${result.skipped.length}`);
+    toast(parts.join(", "));
+    refreshCableLinks();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Опросить транки сейчас";
+  }
+});
+
+const CABLE_WEEKDAY_LABELS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+
+async function refreshCableSchedules() {
+  const body = document.getElementById("cl-schedules-body");
+  if (!_clGroupId) return;
+  let rows;
+  try {
+    rows = await api(`/api/groups/${_clGroupId}/cable-schedules`);
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  if (rows.length === 0) {
+    body.innerHTML = `<div class="empty">Расписаний ещё нет — опрос только вручную</div>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((s) => {
+      const last = s.last_triggered_on ? `, последний запуск: ${escapeHtml(s.last_triggered_on)}` : "";
+      return `
+        <div class="cable-sched-row${s.enabled ? "" : " disabled"}" data-id="${s.id}">
+          <div>
+            <div>${CABLE_WEEKDAY_LABELS[s.weekday]}, ${escapeHtml(s.start_time)}</div>
+            <div class="meta">автоопрос транков (CDP)${last}</div>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn-ghost cs-toggle" data-id="${s.id}">${s.enabled ? "выключить" : "включить"}</button>
+            <button type="button" class="btn-ghost cs-delete" data-id="${s.id}">удалить</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+  body.querySelectorAll(".cs-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => toggleCableSchedule(rows.find((r) => String(r.id) === btn.dataset.id)));
+  });
+  body.querySelectorAll(".cs-delete").forEach((btn) => {
+    btn.addEventListener("click", () => deleteCableSchedule(btn.dataset.id));
+  });
+}
+
+async function toggleCableSchedule(sched) {
+  if (!sched) return;
+  try {
+    await api(`/api/cable-schedules/${sched.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ weekday: sched.weekday, start_time: sched.start_time, enabled: !sched.enabled }),
+    });
+    refreshCableSchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteCableSchedule(id) {
+  if (!confirm("Удалить расписание?")) return;
+  try {
+    await api(`/api/cable-schedules/${id}`, { method: "DELETE" });
+    refreshCableSchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById("cs-add").addEventListener("click", async () => {
+  if (!_clGroupId) return toast("Выбери группу", true);
+  const weekday = Number(document.getElementById("cs-weekday").value);
+  const start_time = document.getElementById("cs-start").value;
+  if (!start_time) return toast("Укажи время", true);
+  try {
+    await api(`/api/groups/${_clGroupId}/cable-schedules`, {
+      method: "POST",
+      body: JSON.stringify({ weekday, start_time, enabled: true }),
+    });
+    toast("Расписание добавлено");
+    refreshCableSchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
 });
 
 function onKeySaved() {

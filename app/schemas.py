@@ -299,6 +299,12 @@ class CableLinkIn(BaseModel):
     comment: str | None = None
 
 
+class CableDiscoveryScheduleIn(BaseModel):
+    weekday: int  # 0=понедельник .. 6=воскресенье
+    start_time: str  # "HH:MM"
+    enabled: bool = True
+
+
 class VulnScanScheduleIn(BaseModel):
     profiles: list[str]  # ping | quick | full_ports | vuln | os
     weekday: int  # 0=понедельник .. 6=воскресенье

@@ -21,6 +21,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app import actions_engine, signal as signal_module
+from app.cable_discovery_engine import run_due_cable_discovery_schedules
 from app.db import get_session
 from app.escalation_engine import run_escalations
 from app.models import Probe, ProbeKind, Sample, _now
@@ -91,18 +92,26 @@ class Scheduler:
         except Exception:
             logger.exception("сбой планового запуска сканов уязвимостей")
 
+    async def _run_due_cable_discovery_schedules_safe(self) -> None:
+        try:
+            await run_due_cable_discovery_schedules(get_session)
+        except Exception:
+            logger.exception("сбой планового автоопроса кабельных соединений")
+
     async def run_forever(
         self,
         reload_interval_seconds: float = 5.0,
         escalation_interval_seconds: float = 30.0,
         retention_interval_seconds: float = 24 * 3600,
         vuln_schedule_interval_seconds: float = 60.0,
+        cable_schedule_interval_seconds: float = 60.0,
     ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
             last_reload = 0.0
             last_escalation_check = 0.0
             last_vuln_schedule_check = 0.0
+            last_cable_schedule_check = 0.0
             # Первая очистка — не сразу при старте, а через сутки работы:
             # перезапуск сервиса не должен каждый раз запускать удаление.
             last_retention = time.monotonic()
@@ -132,6 +141,11 @@ class Scheduler:
                     # Probe (куча/heap ждать не умеет, пока цикл занят).
                     asyncio.create_task(self._run_due_vuln_schedules_safe())
                     last_vuln_schedule_check = now
+                if now - last_cable_schedule_check >= cable_schedule_interval_seconds:
+                    # Тоже в фоне отдельной задачей — CDP-опрос группы узлов
+                    # по SSH не мгновенный, тот же довод, что у vuln-schedule.
+                    asyncio.create_task(self._run_due_cable_discovery_schedules_safe())
+                    last_cable_schedule_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
                     try:

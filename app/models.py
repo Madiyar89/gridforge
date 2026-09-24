@@ -761,10 +761,34 @@ class CableLink(Base):
     responsible: Mapped[str | None] = mapped_column(String(255), nullable=True)
     laid_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "YYYY-MM-DD"
     comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # "manual" (руками) | "cdp" (автоопрос, см. app/cable_discovery_engine.py).
+    # Автоопрос обновляет на месте только свои же source="cdp" записи,
+    # ручные записи никогда не трогает, даже на том же порту.
+    source: Mapped[str] = mapped_column(String(16), default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     group: Mapped["Group"] = relationship()
     node: Mapped["Node"] = relationship()
+
+
+class CableDiscoverySchedule(Base):
+    """Плановый (по расписанию) автоопрос транковых соединений через CDP
+    (app/cable_discovery_engine.py) — та же идея, что у VulnScanSchedule,
+    но без набора профилей: тут ровно одно действие (опросить транки),
+    просто когда его включать. Проверяется тем же Scheduler.run_forever()
+    раз в минуту."""
+
+    __tablename__ = "cable_discovery_schedules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), nullable=False)
+    weekday: Mapped[int] = mapped_column(nullable=False)  # 0=понедельник .. 6=воскресенье
+    start_time: Mapped[str] = mapped_column(String(5), nullable=False)  # "HH:MM"
+    enabled: Mapped[bool] = mapped_column(default=True)
+    last_triggered_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "YYYY-MM-DD"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    group: Mapped["Group"] = relationship()
 
 
 class DomainScanMethod(str, enum.Enum):

@@ -98,6 +98,9 @@ def _migrate_missing_columns() -> None:
             ("model", "VARCHAR(255)"),
             ("http_banner", "VARCHAR(500)"),
         ],
+        "cable_links": [
+            ("source", "VARCHAR(16) DEFAULT 'manual'"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:
