@@ -46,6 +46,7 @@ from app.mac_search_engine import search_mac
 from app.domain_scan_engine import DomainScanValidationError, run_domain_scan
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.geoip_engine import lookup as geoip_lookup
+from app.lifecycle_engine import suggest_offline_archival, suggest_vendor_grouping
 from app.dashboard_engine import build_dashboard
 from app.metrics_engine import render_prometheus_metrics
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
@@ -733,6 +734,21 @@ def dashboard(db: Session = Depends(_db), key: Principal = Depends(require_api_k
     """Всё для главной страницы одним запросом — она обновляется каждые
     5 секунд, и десяток отдельных вызовов на виджет тут заметен."""
     return build_dashboard(db, key)
+
+
+@api_read.get("/api/lifecycle/suggestions")
+def lifecycle_suggestions(db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Подсказки движка правил жизненного цикла (docs/landscape-report.md,
+    §4.6) — сам эндпоинт ничего не меняет, только читает. Применяются
+    через уже существующие POST /api/groups и PATCH /api/nodes (см.
+    app/lifecycle_engine.py).
+
+    RBAC: vendor_grouping всегда про узлы БЕЗ группы (group_id IS NULL) —
+    ключ, ограниченный группой, их не видит в принципе (key_sees_group),
+    поэтому для него список пустой, не частично отфильтрованный."""
+    vendor_grouping = suggest_vendor_grouping(db) if key_sees_group(key, None) else []
+    offline_archival = [s for s in suggest_offline_archival(db) if key_sees_group(key, db.get(Node, s["node_id"]).group_id)]
+    return {"vendor_grouping": vendor_grouping, "offline_archival": offline_archival}
 
 
 @api_read.get("/metrics")

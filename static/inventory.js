@@ -498,8 +498,81 @@ document.getElementById("add-node").addEventListener("click", async () => {
   }
 });
 
+// Подсказки движка правил жизненного цикла устройств (docs/
+// landscape-report.md, §4.6) — сам эндпоинт только читает, применение
+// подсказки — обычные POST /api/groups / PATCH /api/nodes, те же вызовы,
+// что делает остальной инвентарь руками.
+
+async function refreshLifecycle() {
+  const panel = document.getElementById("lifecycle-panel");
+  const body = document.getElementById("lifecycle-body");
+  let data;
+  try {
+    data = await api("/api/lifecycle/suggestions");
+  } catch (e) {
+    panel.style.display = "none";
+    return;
+  }
+  const rows = [];
+
+  data.vendor_grouping.forEach((s, idx) => {
+    rows.push(`
+      <div class="channel-row" data-vendor-idx="${idx}">
+        <span>${s.node_count} узл(ов) вендора <b>${escapeHtml(s.vendor)}</b> без группы → ${s.existing_group_id ? `добавить в группу «${escapeHtml(s.suggested_group_name)}»` : `создать группу «${escapeHtml(s.suggested_group_name)}»`}</span>
+        <button type="button" class="apply-vendor-grouping" data-idx="${idx}">Применить</button>
+      </div>`);
+  });
+
+  data.offline_archival.forEach((s) => {
+    const lastOk = s.last_ok_at ? new Date(s.last_ok_at).toLocaleDateString("ru-RU") : "никогда";
+    rows.push(`
+      <div class="channel-row">
+        <span>Узел <b>${escapeHtml(s.name)}</b> (${escapeHtml(s.address)}) не отвечает ≥${s.offline_days} дней (последний успешный опрос: ${lastOk}) → заархивировать?</span>
+        <button type="button" class="apply-offline-archive" data-node-id="${s.node_id}">Архивировать</button>
+      </div>`);
+  });
+
+  if (rows.length === 0) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+  body.innerHTML = rows.join("");
+
+  body.querySelectorAll(".apply-vendor-grouping").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const s = data.vendor_grouping[Number(btn.dataset.idx)];
+      try {
+        let groupId = s.existing_group_id;
+        if (!groupId) {
+          const created = await api("/api/groups", { method: "POST", body: JSON.stringify({ name: s.suggested_group_name }) });
+          groupId = created.id;
+        }
+        await Promise.all(s.node_ids.map((nodeId) => api(`/api/nodes/${nodeId}`, { method: "PATCH", body: JSON.stringify({ group_id: groupId }) })));
+        toast(`Применено: ${s.node_ids.length} узл(ов) → «${s.suggested_group_name}»`);
+        refreshAll();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+  });
+
+  body.querySelectorAll(".apply-offline-archive").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const nodeId = btn.dataset.nodeId;
+      try {
+        await api(`/api/nodes/${nodeId}`, { method: "PATCH", body: JSON.stringify({ active: false }) });
+        toast("Узел заархивирован");
+        refreshAll();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+  });
+}
+
 async function refreshAll() {
-  await Promise.all([refreshGroups(), refreshNodes(), updateRolePill()]);
+  await Promise.all([refreshGroups(), refreshNodes(), updateRolePill(), refreshLifecycle()]);
 }
 
 function onKeySaved() {

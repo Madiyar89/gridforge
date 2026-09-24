@@ -9,6 +9,7 @@ from pathlib import Path
 
 os.environ.setdefault("GRIDFORGE_DB_PATH", "/tmp/gridforge-tests.db")
 os.environ.setdefault("GRIDFORGE_SYSLOG_PORT", "15999")
+os.environ.setdefault("GRIDFORGE_NETFLOW_PORT", "15998")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
