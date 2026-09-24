@@ -193,7 +193,7 @@ function renderDsResult() {
   }
   meta.textContent =
     data.status === "running"
-      ? `выполняется · опрошено ${data.hosts.length}${data.live_hosts != null ? " из " + data.live_hosts : ""}`
+      ? `выполняется · опрошено ${data.hosts.length}${data.live_addresses != null ? " из " + data.live_addresses : ""}`
       : `готово · ${data.hosts.length} хост(ов)`;
 
   const hosts = _dsStatusFilter ? data.hosts.filter((h) => h.status === _dsStatusFilter) : data.hosts;

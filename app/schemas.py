@@ -50,7 +50,7 @@ class LdapConnectionIn(BaseModel):
     LdapConnection в models.py."""
 
     label: str
-    dc_host: str
+    dc_address: str
     port: int = 636
     domain: str
     base_dn: str

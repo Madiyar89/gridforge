@@ -32,7 +32,7 @@ def decrypt_password(password: str) -> str:
 
 def bind_kwargs(conn: LdapConnection, password: str) -> dict:
     return {
-        "dc_host": conn.dc_host,
+        "dc_address": conn.dc_address,
         "port": conn.port,
         "user": f"{conn.username}@{conn.domain}",
         "password": password,
@@ -40,12 +40,12 @@ def bind_kwargs(conn: LdapConnection, password: str) -> dict:
     }
 
 
-def test_bind(*, dc_host: str, port: int, domain: str, username: str, password: str, use_ssl: bool) -> None:
+def test_bind(*, dc_address: str, port: int, domain: str, username: str, password: str, use_ssl: bool) -> None:
     """Лёгкая проверка при сохранении — тот же принцип, что у Credential/
     Integration: подключение реально пробуется один раз, чтобы опечатка в
     домене/пароле не всплыла только при первом настоящем аудите."""
     tls = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None  # самоподписанные AD-сертификаты — норма в лабораторных доменах
-    server = ldap3.Server(dc_host, port=port, use_ssl=use_ssl, tls=tls, connect_timeout=5)
+    server = ldap3.Server(dc_address, port=port, use_ssl=use_ssl, tls=tls, connect_timeout=5)
     try:
         conn = ldap3.Connection(
             server,
@@ -63,7 +63,7 @@ def mask_connection(conn: LdapConnection) -> dict:
     return {
         "id": conn.id,
         "label": conn.label,
-        "dc_host": conn.dc_host,
+        "dc_address": conn.dc_address,
         "port": conn.port,
         "domain": conn.domain,
         "base_dn": conn.base_dn,

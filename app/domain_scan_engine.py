@@ -386,7 +386,7 @@ async def run_domain_scan(scan_id: int, cidr: str, group_id: int | None, get_ses
             scan.finished_at = _now()
             db.commit()
             return
-        scan.live_hosts = len(targets)
+        scan.live_addresses = len(targets)
         db.commit()
     finally:
         db.close()

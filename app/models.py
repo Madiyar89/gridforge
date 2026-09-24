@@ -166,7 +166,7 @@ class LdapConnection(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     label: Mapped[str] = mapped_column(String(128), nullable=False)
-    dc_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    dc_address: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(default=636)
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
     base_dn: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -862,7 +862,7 @@ class DomainScan(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    live_hosts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    live_addresses: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     hosts: Mapped[list["DomainScanHost"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
     group: Mapped["Group | None"] = relationship()

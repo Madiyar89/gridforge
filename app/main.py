@@ -486,7 +486,7 @@ def list_ldap_connections(db: Session = Depends(_db)):
 def create_ldap_connection(payload: LdapConnectionIn, db: Session = Depends(_db)):
     try:
         test_bind(
-            dc_host=payload.dc_host,
+            dc_address=payload.dc_address,
             port=payload.port,
             domain=payload.domain,
             username=payload.username,
@@ -497,7 +497,7 @@ def create_ldap_connection(payload: LdapConnectionIn, db: Session = Depends(_db)
         raise HTTPException(status_code=400, detail=f"Не удалось подключиться: {exc}")
     conn = LdapConnection(
         label=payload.label,
-        dc_host=payload.dc_host,
+        dc_address=payload.dc_address,
         port=payload.port,
         domain=payload.domain,
         base_dn=payload.base_dn,
@@ -1324,7 +1324,7 @@ def list_domain_scans(db: Session = Depends(_db)):
             "group_name": s.group.name if s.group else None,
             "status": s.status.value, "started_at": iso(s.started_at),
             "finished_at": iso(s.finished_at) if s.finished_at else None,
-            "error": s.error, "live_hosts": s.live_hosts, "host_count": len(s.hosts),
+            "error": s.error, "live_addresses": s.live_addresses, "host_count": len(s.hosts),
         }
         for s in db.query(DomainScan).order_by(desc(DomainScan.started_at)).limit(30).all()
     ]
@@ -1339,7 +1339,7 @@ def get_domain_scan(scan_id: int, db: Session = Depends(_db)):
         "id": scan.id, "cidr": scan.cidr, "status": scan.status.value,
         "started_at": iso(scan.started_at),
         "finished_at": iso(scan.finished_at) if scan.finished_at else None,
-        "error": scan.error, "live_hosts": scan.live_hosts,
+        "error": scan.error, "live_addresses": scan.live_addresses,
         "hosts": [
             {
                 "address": h.address, "computer_name": h.computer_name, "domain": h.domain,

@@ -50,9 +50,9 @@ def uac_has(uac: int | None, bit: int) -> bool:
     return bool((uac or 0) & bit)
 
 
-def _connect(dc_host: str, port: int, use_ssl: bool, user: str, password: str) -> ldap3.Connection:
+def _connect(dc_address: str, port: int, use_ssl: bool, user: str, password: str) -> ldap3.Connection:
     tls = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None
-    server = ldap3.Server(dc_host, port=port, use_ssl=use_ssl, tls=tls, connect_timeout=5)
+    server = ldap3.Server(dc_address, port=port, use_ssl=use_ssl, tls=tls, connect_timeout=5)
     return ldap3.Connection(server, user=user, password=password, auto_bind=True, receive_timeout=15)
 
 
@@ -81,10 +81,10 @@ def _attr_list(entry, name) -> list:
     return val if isinstance(val, list) else [val]
 
 
-def collect_ad_facts(*, dc_host: str, port: int, use_ssl: bool, user: str, password: str, base_dn: str) -> dict:
+def collect_ad_facts(*, dc_address: str, port: int, use_ssl: bool, user: str, password: str, base_dn: str) -> dict:
     """Синхронная часть (ldap3 не asyncio-нативна) — вызывающая сторона
     оборачивает в asyncio.to_thread, см. run_domain_report."""
-    conn = _connect(dc_host, port, use_ssl, user, password)
+    conn = _connect(dc_address, port, use_ssl, user, password)
     now = datetime.now(timezone.utc)
 
     users = _entries(

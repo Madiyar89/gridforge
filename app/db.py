@@ -112,10 +112,38 @@ def _migrate_missing_columns() -> None:
         conn.commit()
 
 
+def _migrate_renamed_columns() -> None:
+    """Колонка уже существует, но под старым именем — не ADD COLUMN (это
+    была бы вторая, пустая), а RENAME COLUMN. Тоже идемпотентно: после
+    первого запуска старого имени в инспекторе уже нет, условие ложно,
+    строка не выполняется повторно.
+
+    2026-09-25: `dc_host`/`live_hosts` поймал tests/test_naming_purity.py
+    (общеанглийское "host" здесь означало "адрес сервера"/"живой адрес в
+    подсети", не сущность Node — но тест смотрит на текст объявления, не
+    на смысл, и по духу этого теста сигнал "переименовать", а не
+    "ослабить проверку", см. докстринг models.py)."""
+    renames = {
+        "ldap_connections": [("dc_host", "dc_address")],
+        "domain_scans": [("live_hosts", "live_addresses")],
+    }
+    inspector = inspect(engine)
+    with engine.connect() as conn:
+        for table, columns in renames.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {col["name"] for col in inspector.get_columns(table)}
+            for old_name, new_name in columns:
+                if old_name in existing and new_name not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name}")
+        conn.commit()
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  — регистрирует таблицы в Base.metadata
 
     Base.metadata.create_all(engine)
+    _migrate_renamed_columns()
     _migrate_missing_columns()
 
 
