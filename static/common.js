@@ -204,12 +204,20 @@ function emptyOrError(e) {
   return e && e.status === 401 ? "введи API-ключ выше" : escapeHtml(e?.message || "ошибка");
 }
 
+function setAvatarState(letter, online) {
+  const letterEl = document.querySelector("#user-avatar .user-avatar-letter");
+  const dotEl = document.querySelector("#user-avatar .user-avatar-dot");
+  if (letterEl) letterEl.textContent = letter;
+  if (dotEl) dotEl.classList.toggle("on", online);
+}
+
 async function updateRolePill() {
   const pill = document.getElementById("role-pill");
   if (!pill) return;
   if (!apiKey()) {
     pill.textContent = "не авторизован";
     pill.className = "role-pill";
+    setAvatarState("?", false);
     return;
   }
   let me;
@@ -218,10 +226,13 @@ async function updateRolePill() {
   } catch (e) {
     pill.textContent = "неверный ключ";
     pill.className = "role-pill bad";
+    setAvatarState("!", false);
     return;
   }
   pill.textContent = me.kind === "user" ? `${me.label} · ${me.role}` : me.role;
   pill.className = me.role === "admin" ? "role-pill ok" : "role-pill";
+  const label = me.kind === "user" ? me.label : me.role;
+  setAvatarState((label || "?").slice(0, 1).toUpperCase(), true);
   if (me.kind === "user") showLogoutButton();
   if (me.default_password) showDefaultPasswordWarning();
 }
@@ -341,6 +352,129 @@ function saveOpenGroups(set) {
   localStorage.setItem(NAV_OPEN_GROUPS_KEY, JSON.stringify([...set]));
 }
 
+// Флайаут группы и тултип одиночной иконки — вынесены в <body>
+// ("портал") и управляются JS вместо чистого CSS :hover (2026-09-24,
+// реальный баг: оба поп-апа раньше были потомками .topbar{overflow:
+// hidden} с position:absolute и физически обрезались панелью — скорее
+// всего вообще не показывались в браузере). Общие элементы на весь
+// сайт: #floating-tooltip (для пунктов без группы) и #floating-flyout
+// (для групп), создаются один раз и переиспользуются под текущий
+// наведённый пункт. Раздельные таймеры показа/скрытия — задержка перед
+// появлением (не мигать при быстром проходе мышью мимо) и перед
+// исчезновением (успеть довести курсор до самого поп-апа).
+function createPopupController(el, showDelay) {
+  let showTimer = null;
+  let hideTimer = null;
+  return {
+    show(positionAndFill) {
+      clearTimeout(hideTimer);
+      clearTimeout(showTimer);
+      showTimer = setTimeout(() => {
+        positionAndFill();
+        el.classList.add("visible");
+      }, showDelay);
+    },
+    cancelShow() {
+      clearTimeout(showTimer);
+    },
+    scheduleHide() {
+      clearTimeout(showTimer);
+      hideTimer = setTimeout(() => el.classList.remove("visible"), 150);
+    },
+    cancelHide() {
+      clearTimeout(hideTimer);
+    },
+  };
+}
+
+function setupFloatingPopups(nav) {
+  let tooltipEl = document.getElementById("floating-tooltip");
+  if (!tooltipEl) {
+    tooltipEl = document.createElement("div");
+    tooltipEl.id = "floating-tooltip";
+    document.body.appendChild(tooltipEl);
+  }
+  let flyoutEl = document.getElementById("floating-flyout");
+  if (!flyoutEl) {
+    flyoutEl = document.createElement("div");
+    flyoutEl.id = "floating-flyout";
+    flyoutEl.className = "nav-flyout";
+    document.body.appendChild(flyoutEl);
+  }
+
+  const tooltip = createPopupController(tooltipEl, 250);
+  tooltipEl.addEventListener("mouseenter", tooltip.cancelHide);
+  tooltipEl.addEventListener("mouseleave", tooltip.scheduleHide);
+
+  nav.querySelectorAll("a[data-tooltip]").forEach((a) => {
+    a.addEventListener("mouseenter", () => {
+      const bar = document.querySelector(".topbar");
+      if (!bar || bar.classList.contains("pinned")) return;
+      tooltip.show(() => {
+        const rect = a.getBoundingClientRect();
+        tooltipEl.textContent = a.dataset.tooltip;
+        tooltipEl.style.top = `${rect.top + rect.height / 2}px`;
+        tooltipEl.style.left = `${rect.right + 10}px`;
+      });
+    });
+    a.addEventListener("mouseleave", () => {
+      tooltip.cancelShow();
+      tooltip.scheduleHide();
+    });
+  });
+
+  const flyout = createPopupController(flyoutEl, 100);
+  flyoutEl.addEventListener("mouseenter", flyout.cancelHide);
+  flyoutEl.addEventListener("mouseleave", flyout.scheduleHide);
+
+  const here = location.pathname.split("/").pop() || "index.html";
+  nav.querySelectorAll(".nav-group").forEach((group) => {
+    const titleBtn = group.querySelector(".nav-group-title[data-group]");
+    if (!titleBtn) return; // группа без заголовка (Дашборд) — флайаута нет
+    const groupData = NAV_GROUPS.find((g) => g.title === titleBtn.dataset.group);
+    if (!groupData) return;
+
+    const showFlyout = (anchorEl) => {
+      const bar = document.querySelector(".topbar");
+      if (!bar) return;
+      // Группа уже открыта инлайн в закреплённой панели — пункты и так
+      // видны строками, второй флайаут поверх был бы лишним.
+      if (bar.classList.contains("pinned") && titleBtn.classList.contains("open")) return;
+      flyout.show(() => {
+        flyoutEl.innerHTML =
+          `<div class="nav-flyout-title">${escapeHtml(groupData.title)}</div>` +
+          groupData.items
+            .map(
+              (item) =>
+                `<a href="${item.href}" class="${item.href === here ? "active" : ""}">` +
+                `${navIcon(item.icon)}<span>${escapeHtml(item.label)}</span></a>`
+            )
+            .join("");
+        const barRect = bar.getBoundingClientRect();
+        const anchorRect = anchorEl.getBoundingClientRect();
+        flyoutEl.style.left = `${barRect.right + 6}px`;
+        flyoutEl.style.top = `${anchorRect.top}px`;
+        // Зажимаем по нижнему краю экрана уже после того, как контент
+        // отрисован и известна реальная высота карточки.
+        requestAnimationFrame(() => {
+          const maxTop = window.innerHeight - flyoutEl.offsetHeight - 8;
+          flyoutEl.style.top = `${Math.min(anchorRect.top, Math.max(8, maxTop))}px`;
+        });
+      });
+    };
+    const hideFlyout = () => {
+      flyout.cancelShow();
+      flyout.scheduleHide();
+    };
+
+    const triggers = [titleBtn, ...group.querySelectorAll(".nav-group-items a")];
+    triggers.forEach((el) => {
+      el.addEventListener("mouseenter", () => showFlyout(el));
+      el.addEventListener("mouseleave", hideFlyout);
+    });
+  });
+}
+
 function initTopbar() {
   const nav = document.getElementById("nav");
   if (nav) {
@@ -406,6 +540,8 @@ function initTopbar() {
         saveOpenGroups(open);
       });
     });
+
+    setupFloatingPopups(nav);
   }
   setupNavToggle();
   setupSidebarPin();
@@ -418,6 +554,19 @@ function initTopbar() {
     brandName.innerHTML =
       `<span class="brand-badge">${full.slice(0, 1)}</span>` +
       `<span class="brand-rest">${full.slice(1)}</span>`;
+  }
+
+  // Аватар со статусом — виден и в свёрнутой рельсе, не только в
+  // закреплённой панели (п.6 сравнения с референсом, 2026-09-24).
+  // Вставляется перед #role-pill, буква/точка заполняются в
+  // updateRolePill() ниже.
+  const rolePillEl = document.getElementById("role-pill");
+  if (rolePillEl && !document.getElementById("user-avatar")) {
+    const avatar = document.createElement("div");
+    avatar.id = "user-avatar";
+    avatar.className = "user-avatar";
+    avatar.innerHTML = `<span class="user-avatar-letter">?</span><span class="user-avatar-dot"></span>`;
+    rolePillEl.parentElement.insertBefore(avatar, rolePillEl);
   }
 
   const saveBtn = document.getElementById("save-key");

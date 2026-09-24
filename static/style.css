@@ -18,6 +18,7 @@
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --sidebar-w:52px;      /* свёрнутая: только иконки */
   --sidebar-w-open:196px; /* развёрнутая при наведении */
+  --sidebar-gutter:10px;  /* отступ плавающей панели от края окна (п.1/10 сравнения с референсом) */
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 }
 *{box-sizing:border-box;}
@@ -25,7 +26,7 @@ body{
   margin:0;background:var(--bg);color:var(--text);
   font-family:var(--sans);font-size:14px;line-height:1.5;
   padding-inline:20px;padding-block:0 40px;
-  padding-left:calc(var(--sidebar-w) + 20px);
+  padding-left:calc(var(--sidebar-w) + var(--sidebar-gutter) + 20px);
 }
 a{color:var(--accent);}
 
@@ -57,11 +58,16 @@ a{color:var(--accent);}
    Панель разворачивается ПОВЕРХ страницы, а отступ body остаётся под
    свёрнутую ширину: иначе содержимое дёргалось бы вбок при каждом
    наведении мыши. */
+/* Плавающая карточка с отступом от края окна и скруглением по всем
+   углам (п.1/4/10 сравнения с референсом, 2026-09-24) — раньше панель
+   была прижата к краю с прямыми углами и бордером только справа. */
 .topbar{
-  position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);
+  position:fixed;left:var(--sidebar-gutter);top:var(--sidebar-gutter);bottom:var(--sidebar-gutter);
+  width:var(--sidebar-w);border-radius:16px;
   display:flex;flex-direction:column;gap:10px;
-  padding:14px 8px;border-right:1px solid var(--border);
+  padding:16px 10px;border:1px solid var(--border);
   background:var(--surface);z-index:20;overflow:hidden;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
   transition:width .3s ease;
 }
 /* Разворот — явной кнопкой-стрелкой (закрепляемое состояние, см.
@@ -69,7 +75,7 @@ a{color:var(--accent);}
    этом не двигает всю панель, а показывает точечный тултип рядом с ней
    (см. [data-tooltip] ниже) — так рекомендует источник пользователя
    (infogra.ru, 2026-09-23) про экономные боковые панели. */
-.topbar.pinned{width:var(--sidebar-w-open);overflow-y:auto;box-shadow:4px 0 16px rgba(0,0,0,.35);}
+.topbar.pinned{width:var(--sidebar-w-open);overflow-y:auto;}
 /* Полоса прокрутки панели: системная на тёмном фоне выглядит инородно и
    бросается в глаза сильнее, чем сами пункты. Оставляем тонкую и
    приглушённую — на невысоком экране прокрутка всё равно нужна. */
@@ -106,8 +112,12 @@ a{color:var(--accent);}
 
 /* Кнопка-стрелка закрепления панели (§2 источника: "стрелка влево —
    свернуть, вправо — развернуть", правый верхний угол панели). */
+/* По центру верхнего края панели (п.2 сравнения с референсом,
+   2026-09-24) — раньше висела наполовину за правым краем рельсы.
+   left:50%+translateX сам пересчитывается при смене ширины панели
+   (52px свёрнутая / 196px закреплённая), без отдельных медиа-правил. */
 .sidebar-pin{
-  position:absolute;top:14px;right:-11px;width:22px;height:22px;
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);width:22px;height:22px;
   border-radius:50%;border:1px solid var(--border);background:var(--surface);
   color:var(--text-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;
   padding:0;z-index:21;
@@ -124,29 +134,23 @@ a{color:var(--accent);}
 /* Флайаут группы в свёрнутой рельсе (по референсу пользователя,
    2026-09-23: наведение на группу показывает всплывающую карточку со
    списком её пунктов, вместо тултипа на каждой иконке по отдельности).
-   left:100% без зазора — иначе мышь теряет :hover в пустом промежутке
-   между рельсой и карточкой, не успевая доехать до неё. */
+   Реальный баг (2026-09-24, сравнение с референсом): раньше был
+   потомком .topbar{overflow:hidden} с position:absolute — физически
+   обрезался и не показывался. Теперь #floating-flyout — потомок
+   <body>, position:fixed, координаты (в т.ч. выравнивание по
+   конкретной наведённой иконке и зазор от рельсы) считает JS
+   (common.js:setupFloatingPopups), показ/скрытие — классом .visible
+   вместо CSS :hover-цепочки (которая тоже не переживает портал в body). */
 .nav-flyout{
-  position:absolute;left:100%;top:0;min-width:180px;z-index:26;
+  position:fixed;min-width:180px;z-index:1000;
   background:var(--surface);border:1px solid var(--border);border-radius:10px;
   padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.45);
   opacity:0;visibility:hidden;pointer-events:none;transform:translateX(-4px);
   transition:opacity .15s ease,transform .15s ease,visibility 0s linear .15s;
 }
-/* По запросу пользователя (2026-09-23) — работает и в закреплённой
-   развёрнутой панели тоже, не только в узкой рельсе: наведение на
-   ЗАКРЫТУЮ группу сразу показывает флайаут, не дожидаясь клика по
-   стрелке-аккордеону. Если группа уже открыта инлайн (.open) — её
-   пункты и так видны строками, второй флайаут поверх был бы лишним.
-   Плавное появление (ТЗ, 2026-09-23) — opacity+сдвиг вместо резкого
-   display:none/block, с небольшой задержкой на наведение, чтобы не
-   мигало при быстром проходе мышью мимо. */
-.nav-group:hover .nav-flyout{
+.nav-flyout.visible{
   opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);
-  transition:opacity .15s ease .1s,transform .15s ease .1s,visibility 0s linear;
-}
-.nav-group:has(.nav-group-title.open):hover .nav-flyout{
-  opacity:0;visibility:hidden;pointer-events:none;transition:none;
+  transition:opacity .15s ease,transform .15s ease,visibility 0s linear;
 }
 .nav-flyout-title{
   font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
@@ -199,7 +203,7 @@ a{color:var(--accent);}
   position:relative;
   display:flex;align-items:center;gap:10px;
   color:var(--text-dim);text-decoration:none;
-  font-size:13px;font-weight:600;padding:6px 9px;border-radius:10px;
+  font-size:13px;font-weight:600;padding:7px 10px;border-radius:10px;
   white-space:nowrap;
   transition:background .1s ease,color .1s ease,box-shadow .1s ease;
 }
@@ -208,21 +212,25 @@ a{color:var(--accent);}
 .topbar.pinned .nav-label{opacity:1;}
 .nav a:hover{color:var(--text);background:var(--surface-2);}
 
-/* Тултипы на иконках в свёрнутом виде (§3 источника: "белый текст на
-   тёмном фоне, справа от иконки, выровнен по горизонтали"). Название —
-   в атрибуте data-tooltip (initTopbar в common.js), рисуем сами через
-   ::after: нативный title слишком медленный и не стилизуется. Скрыт,
-   когда панель закреплена развёрнутой — там подпись и так видна
-   текстом, второй тултип рядом был бы избыточен. */
-.nav a[data-tooltip]::after{
-  content:attr(data-tooltip);
-  position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);
+/* Тултип на одиночной иконке (§3 источника: "белый текст на тёмном
+   фоне, справа от иконки, выровнен по горизонтали") — реальный
+   элемент #floating-tooltip (создаётся и позиционируется в
+   common.js:setupFloatingPopups), не CSS ::after: раньше был
+   псевдоэлементом внутри .topbar{overflow:hidden} и физически
+   обрезался — реальный баг, найденный сравнением с референсом
+   2026-09-24. Теперь — потомок <body>, position:fixed, координаты
+   через getBoundingClientRect, показ/скрытие классом .visible. */
+#floating-tooltip{
+  position:fixed;
   background:#0a0d10;color:#fff;font-size:11.5px;font-weight:600;
   padding:5px 9px;border-radius:6px;white-space:nowrap;
-  opacity:0;pointer-events:none;transition:opacity .1s ease;
-  box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:25;
+  opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-50%);
+  transition:opacity .1s ease,visibility 0s linear .1s;
+  box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:1000;
 }
-.topbar:not(.pinned) .nav a[data-tooltip]:hover::after{opacity:1;transition-delay:.25s;}
+#floating-tooltip.visible{
+  opacity:1;visibility:visible;transition:opacity .1s ease,visibility 0s linear;
+}
 /* Активный пункт — плотная «таблетка» с лёгким свечением в цвет акцента
    (по референсу пользователя, 2026-09-23): в развёрнутом виде это целая
    строка, в свёрнутой рельсе та же заливка сжимается до квадрата вокруг
@@ -257,6 +265,28 @@ a{color:var(--accent);}
   .topbar .nav a{padding:12px 10px;}
   .nav-toggle{display:block;}
 }
+
+/* Аватар/статус пользователя — виден и в свёрнутой рельсе, и в
+   закреплённой панели (п.6 сравнения с референсом, 2026-09-24; раньше
+   роль/ключ были доступны только в .pinned, в узкой рельсе там просто
+   пусто). Вставляется через JS (common.js:initTopbar, тот же приём,
+   что уже применён для .brand-badge/#sidebar-pin — не трогаем разметку
+   всех 13+ страниц). Буква и точка статуса обновляются в updateRolePill(). */
+.user-avatar{
+  position:relative;flex:none;width:26px;height:26px;border-radius:50%;
+  background:var(--surface-2);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  margin-inline:auto;
+}
+/* В закреплённой панели — вровень с левым краем role-pill/nav-пунктов,
+   не по центру (там уже есть текст роли строкой ниже). */
+.topbar.pinned .user-avatar{margin-inline:0;}
+.user-avatar-letter{font-size:11px;font-weight:700;color:var(--text);}
+.user-avatar-dot{
+  position:absolute;right:-1px;bottom:-1px;width:8px;height:8px;border-radius:50%;
+  background:var(--ok);border:2px solid var(--surface);opacity:0;transition:opacity .12s ease;
+}
+.user-avatar-dot.on{opacity:1;}
 
 .keybox{
   display:flex;flex-direction:column;gap:8px;margin-top:auto;
