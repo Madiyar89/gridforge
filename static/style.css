@@ -106,21 +106,15 @@ a{color:var(--accent);}
    бы скринридером вторым «ridForge» и ломал бы поиск по странице. */
 .brand-rest{opacity:0;transition:opacity .12s ease;}
 .topbar.pinned .brand-rest{opacity:1;}
-.brand span{
-  font-family:var(--mono);font-size:10px;color:var(--text-dim);
-  opacity:0;transition:opacity .12s ease;
-}
-.topbar.pinned .brand span{opacity:1;}
 /* Реальный баг ("букву не видно", 2026-09-24): невидимый (opacity:0)
    хвост названия "ridForge" всё равно занимал полную ширину внутри
    .brand b{display:flex} — тот же класс проблемы, что уже чинили для
-   .nav-group-title/.nav-label. В свёрнутой рельсе убираем его (и
-   строку статуса под названием) из потока полностью, чтобы бейдж G
-   был единственным реальным содержимым и не мог оказаться обрезан
-   .topbar{overflow:hidden} из-за overflow невидимого текста рядом. */
+   .nav-group-title/.nav-label. В свёрнутой рельсе убираем его из потока
+   полностью, чтобы бейдж G был единственным реальным содержимым и не
+   мог оказаться обрезан .topbar{overflow:hidden} из-за overflow
+   невидимого текста рядом. */
 .topbar:not(.pinned) .brand b{gap:0;}
-.topbar:not(.pinned) .brand-rest,
-.topbar:not(.pinned) .brand span{width:0;margin:0;overflow:hidden;}
+.topbar:not(.pinned) .brand-rest{width:0;margin:0;overflow:hidden;}
 .topbar-right{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;}
 
 /* Кнопка-стрелка закрепления панели (§2 источника: "стрелка влево —
@@ -282,7 +276,7 @@ a{color:var(--accent);}
   body{padding-left:20px;padding-top:56px;}
   .topbar{transform:translateX(-100%);transition:transform .15s ease;width:240px;overflow-y:auto;}
   .topbar.open{transform:translateX(0);box-shadow:0 0 0 100vmax rgba(0,0,0,.5);}
-  .topbar .nav-label,.topbar .brand span,.topbar .keybox,.topbar .role-pill{opacity:1;}
+  .topbar .nav-label,.topbar .keybox,.topbar .role-pill{opacity:1;}
   .topbar .brand b::after{opacity:1;}
   .topbar .keybox{pointer-events:auto;}
   .topbar .nav-group-title{opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;}

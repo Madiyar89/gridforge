@@ -583,6 +583,11 @@ function initTopbar() {
       `<span class="brand-badge">${full.slice(0, 1)}</span>` +
       `<span class="brand-rest">${full.slice(1)}</span>`;
   }
+  // Подпись "сеть · опрос · триггеры" под названием — убрана по запросу
+  // пользователя (2026-09-24, сравнение с Zabbix: под логотипом там
+  // ничего лишнего нет).
+  const brandTagline = document.querySelector(".brand > span");
+  if (brandTagline) brandTagline.remove();
 
   // Аватар со статусом — виден и в свёрнутой рельсе, не только в
   // закреплённой панели (п.6 сравнения с референсом, 2026-09-24).
