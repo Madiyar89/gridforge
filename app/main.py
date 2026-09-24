@@ -93,16 +93,19 @@ from app.models import (
     Sample,
     Scan,
     ScanHost,
+    ScanStatus,
     Scenario,
     ScenarioResult,
     ScenarioRun,
     Sweep,
     SweepResult,
+    SweepStatus,
     SyslogMessage,
     Template,
     User,
     Vendor,
     VulnScan,
+    VulnScanStatus,
     VULN_SCAN_PROFILE_LABELS,
     Watch,
     iso,
@@ -202,12 +205,52 @@ def _resolve_node_credential(db: Session, node: Node, payload) -> tuple[str, str
     return cred["username"], cred["password"], cred["key_path"]
 
 
+# Реальный баг пользователя (2026-09-24): запустил "Полное сканирование
+# портов", а сайт в это время перезапускался (деплой правки логотипа) —
+# фоновая asyncio.create_task() задача (см. run_vuln_scan/run_scan/
+# run_domain_scan/run_capture/run_sweep/run_scenario) прервалась вместе
+# с процессом, а строка в БД так и осталась status=running навсегда:
+# ничто её не завершает, кроме самой задачи, которой больше нет. На
+# сайте это выглядело как зависший на 26+ минут скан. Правило: то, что
+# ещё "running" на МОМЕНТ СТАРТА приложения, точно не может быть
+# результатом живой задачи (все фоновые задачи создаются уже ПОСЛЕ
+# этой точки) — значит прервано предыдущим завершением процесса.
+def _recover_interrupted_background_jobs(db: Session) -> None:
+    failed_models = (
+        (Scan, ScanStatus.failed),
+        (DomainScan, ScanStatus.failed),
+        (VulnScan, VulnScanStatus.failed),
+        (Capture, CaptureStatus.failed),
+    )
+    recovered = 0
+    for model, failed_value in failed_models:
+        rows = db.query(model).filter(model.status == "running").all()
+        for row in rows:
+            row.status = failed_value
+            row.error = "прервано перезапуском сервера"
+            recovered += 1
+    # У Sweep/ScenarioRun нет статуса "failed" в схеме (SweepStatus:
+    # только running/done) — заводить новое значение enum рискованно без
+    # миграции (SQLite CHECK-constraint на колонке у уже существующих
+    # БД). Ближайший непротиворечивый вариант — "done": прогон реально
+    # завершился (хоть и не полностью), не завис.
+    for model in (Sweep, ScenarioRun):
+        rows = db.query(model).filter(model.status == "running").all()
+        for row in rows:
+            row.status = SweepStatus.done
+            recovered += 1
+    if recovered:
+        db.commit()
+        print(f"\n  Восстановлено {recovered} прерванных прошлым перезапуском фоновых задач.\n", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
     db = get_session()
     seed_default_scenarios(db)
     try:
+        _recover_interrupted_background_jobs(db)
         raw_key = bootstrap_first_key(db)
         created_admin = bootstrap_first_user(db)
         default_password_still_set = any(
