@@ -57,6 +57,7 @@ from app.domain_scan_engine import DomainScanValidationError, run_domain_scan
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.geoip_engine import lookup as geoip_lookup
 from app.lifecycle_engine import suggest_offline_archival, suggest_vendor_grouping
+from app.ask_engine import AskError, ask_network
 from app.dashboard_engine import build_dashboard
 from app.metrics_engine import render_prometheus_metrics
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
@@ -140,7 +141,7 @@ from app.port_security import parse_port_protection, parse_stp_global, protectio
 from app.port_commands import PortCommandError, apply_port, bounce_port
 from app.stp_protection import StpProtectionError, apply_stp_protection
 from app.credentials_engine import encrypt_password, mask_credential, resolve_credential
-from app.integrations_engine import INTEGRATION_REGISTRY, IntegrationTestError, encrypt_token
+from app.integrations_engine import INTEGRATION_REGISTRY, IntegrationTestError, decrypt_token, encrypt_token
 from app.ldap_engine import LdapTestError, mask_connection, test_bind
 from app.ldap_engine import encrypt_password as encrypt_ldap_password
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot, live_port_downup, live_port_mac
@@ -163,6 +164,7 @@ from app.schemas import (
     ActionIn,
     AdAuditIn,
     ApiKeyIn,
+    AskIn,
     AuditRuleIn,
     BackupTriggerIn,
     CableDiscoveryScheduleIn,
@@ -759,6 +761,23 @@ def lifecycle_suggestions(db: Session = Depends(_db), key: Principal = Depends(r
     vendor_grouping = suggest_vendor_grouping(db) if key_sees_group(key, None) else []
     offline_archival = [s for s in suggest_offline_archival(db) if key_sees_group(key, db.get(Node, s["node_id"]).group_id)]
     return {"vendor_grouping": vendor_grouping, "offline_archival": offline_archival}
+
+
+@api_write.post("/api/ask")
+async def ask_network_endpoint(payload: AskIn, db: Session = Depends(_db)):
+    """«Спроси про сеть» (docs/landscape-report.md, §4.9) — только admin
+    (api_write): инструмент видит ВСЮ БД read-only (см. app/ask_engine.py),
+    ограничение по группе (key_sees_group) здесь бессмысленно навешивать
+    частично — либо доступ к отчёту целиком, либо никакого."""
+    integration = db.query(Integration).filter(Integration.key == "gemini").first()
+    if integration is None:
+        raise HTTPException(status_code=400, detail="Gemini не настроен — заведи ключ на странице «Интеграции»")
+    api_key = decrypt_token(integration.api_token)
+    try:
+        result = await ask_network(api_key, payload.question, model=integration.url or None)
+    except AskError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return result
 
 
 @api_read.get("/metrics")

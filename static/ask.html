@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Спроси про сеть</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  .ask-answer{padding:16px;font-size:14px;line-height:1.6;white-space:pre-wrap}
+  .ask-queries{padding:0 16px 14px;font-size:11.5px;color:var(--text-dim);font-family:var(--mono)}
+  .ask-queries summary{cursor:pointer;color:var(--text-dim);font-family:var(--sans);font-size:12px;padding:6px 0}
+  .ask-query-row{padding:4px 0;border-top:1px solid var(--border)}
+  .ask-examples{padding:0 16px 14px;display:flex;flex-wrap:wrap;gap:8px}
+  .ask-example{font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:14px;background:var(--surface-2);cursor:pointer;color:var(--text-dim)}
+  .ask-example:hover{border-color:var(--accent);color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Спроси про сеть</h1>
+  <p>Read-only ИИ-отчёт по уже собранным данным GridForge (Gemini). Ограничение «только чтение» — на уровне самого SQL-доступа, не на честном слове модели. Доступно только admin. Настройка ключа — страница «Интеграции».</p>
+</div>
+
+<div class="panel">
+  <div class="ask-examples">
+    <span class="ask-example">Какие узлы сейчас в критичных инцидентах?</span>
+    <span class="ask-example">Что изменилось в бэкапах за последние 7 дней?</span>
+    <span class="ask-example">Какие каналы уведомлений настроены и на что подписаны?</span>
+  </div>
+  <div class="form-row" style="border-top:none">
+    <input id="ask-question" placeholder="Например: какие узлы не отвечали дольше суток?">
+    <button id="ask-submit">Спросить</button>
+  </div>
+  <div id="ask-body">
+    <div class="empty" id="ask-empty">Задай вопрос выше</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="ask.js"></script>
+</body>
+</html>

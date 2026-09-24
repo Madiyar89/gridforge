@@ -98,6 +98,7 @@ const NAV_GROUPS = [
       { href: "flows.html", label: "Потоки (NetFlow)", icon: "capture" },
       { href: "ad-audit.html", label: "AD-аудит", icon: "adaudit" },
       { href: "network-audit.html", label: "Аудит сети", icon: "netaudit" },
+      { href: "ask.html", label: "Спроси про сеть", icon: "netaudit" },
     ],
   },
   {

@@ -44,6 +44,12 @@ class IntegrationIn(BaseModel):
     api_token: str
 
 
+class AskIn(BaseModel):
+    """Вопрос для «Спроси про сеть» (app/ask_engine.py)."""
+
+    question: str
+
+
 class LdapConnectionIn(BaseModel):
     """Домен для AD-аудита. Пароль хранится зашифрованным, наружу
     (GET /api/ldap-connections) никогда не возвращается — см.

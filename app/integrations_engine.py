@@ -67,6 +67,29 @@ async def _test_graylog(url: str, api_token: str) -> None:
         raise IntegrationTestError(f"не удалось связаться с Graylog API: {exc}") from exc
 
 
+async def _test_gemini(url: str, api_token: str) -> None:
+    """Здесь "URL" поля интеграции переиспользован под имя модели — у
+    Gemini REST API нет пользовательского URL, только ключ, а имя модели
+    всё равно нужно куда-то положить (Integration.url NOT NULL, тот же
+    принцип, что у MaxMind — Account ID вместо URL). Лёгкая проверка —
+    реальный вызов generateContent без tools, не весь цикл ask_network()
+    (тот полезет в БД, здесь просто хотим убедиться, что ключ живой)."""
+    model = url.strip()
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            res = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                params={"key": api_token},
+                json={"contents": [{"role": "user", "parts": [{"text": "ping"}]}]},
+            )
+        except httpx.HTTPError as exc:
+            raise IntegrationTestError(f"не удалось связаться с Gemini API: {exc}") from exc
+    if res.status_code == 400 or res.status_code == 401 or res.status_code == 403:
+        raise IntegrationTestError(f"Gemini отклонил ключ/модель ({res.status_code}): {res.text[:200]}")
+    if res.status_code != 200:
+        raise IntegrationTestError(f"Gemini API вернул {res.status_code}: {res.text[:200]}")
+
+
 async def _test_maxmind(account_id: str, license_key: str) -> None:
     """Здесь "URL" поля интеграции переиспользован под Account ID (у
     MaxMind нет своего URL — адрес скачивания фиксирован в
@@ -91,6 +114,7 @@ INTEGRATION_REGISTRY: dict[str, IntegrationSpec] = {
     "graylog": IntegrationSpec("Graylog", "http://192.0.2.115:9000", _test_graylog),
     "zabbix": IntegrationSpec("Zabbix", "http://192.0.2.243:8080/api_jsonrpc.php", _test_zabbix),
     "maxmind": IntegrationSpec("MaxMind GeoLite2 (GeoIP/ASN)", "Account ID, например 1416588", _test_maxmind),
+    "gemini": IntegrationSpec("Gemini (Спроси про сеть)", "модель, например gemini-3.6-flash", _test_gemini),
 }
 
 
