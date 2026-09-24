@@ -86,7 +86,10 @@ a{color:var(--accent);}
 
 /* В столбик: рядом с названием подпись не помещается в 196px и
    обрезается на середине слова. */
-.brand{display:flex;flex-direction:column;gap:1px;padding-inline:8px;white-space:nowrap;}
+/* padding-left:10px — совпадает с отступом .nav a (10px своего padding
+   поверх .topbar{padding:...10px}), чтобы бейдж G стоял ровно над
+   иконками зон, а не левее/правее них. */
+.brand{display:flex;flex-direction:column;gap:1px;padding-left:10px;padding-right:8px;white-space:nowrap;}
 .brand b{display:flex;align-items:center;gap:7px;font-size:17px;letter-spacing:-.01em;}
 /* Плашка логотипа (ТЗ, 2026-09-23: "фирменный бирюзовый/мятный цвет для
    ... плашки логотипа") — акцентный квадрат с буквой G, виден и в
@@ -108,6 +111,16 @@ a{color:var(--accent);}
   opacity:0;transition:opacity .12s ease;
 }
 .topbar.pinned .brand span{opacity:1;}
+/* Реальный баг ("букву не видно", 2026-09-24): невидимый (opacity:0)
+   хвост названия "ridForge" всё равно занимал полную ширину внутри
+   .brand b{display:flex} — тот же класс проблемы, что уже чинили для
+   .nav-group-title/.nav-label. В свёрнутой рельсе убираем его (и
+   строку статуса под названием) из потока полностью, чтобы бейдж G
+   был единственным реальным содержимым и не мог оказаться обрезан
+   .topbar{overflow:hidden} из-за overflow невидимого текста рядом. */
+.topbar:not(.pinned) .brand b{gap:0;}
+.topbar:not(.pinned) .brand-rest,
+.topbar:not(.pinned) .brand span{width:0;margin:0;overflow:hidden;}
 .topbar-right{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;}
 
 /* Кнопка-стрелка закрепления панели (§2 источника: "стрелка влево —
@@ -198,7 +211,7 @@ a{color:var(--accent);}
    рельсе убираем их из потока полностью (width:0, без gap), тогда
    иконка — единственный реальный элемент строки и стоит на одном и
    том же месте во всех 4 зонах. */
-.topbar:not(.pinned) .nav-group-title{gap:0;}
+.topbar:not(.pinned) .nav-group-title{gap:0;justify-content:center;}
 .topbar:not(.pinned) .nav-group-title span,
 .topbar:not(.pinned) .nav-group-title .nav-chevron{width:0;margin:0;overflow:hidden;}
 
@@ -223,7 +236,7 @@ a{color:var(--accent);}
 .nav a:hover{color:var(--text);background:var(--surface-2);}
 /* Та же защита от "кривых" иконок, что у .nav-group-title выше — скрытая
    подпись не должна влиять на положение иконки в свёрнутой рельсе. */
-.topbar:not(.pinned) .nav a{gap:0;}
+.topbar:not(.pinned) .nav a{gap:0;justify-content:center;}
 .topbar:not(.pinned) .nav-label{width:0;margin:0;overflow:hidden;}
 
 /* Тултип на одиночной иконке (§3 источника: "белый текст на тёмном
