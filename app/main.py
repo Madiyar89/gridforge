@@ -44,6 +44,7 @@ from app.mac_search_engine import search_mac
 from app.domain_scan_engine import DomainScanValidationError, run_domain_scan
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.dashboard_engine import build_dashboard
+from app.metrics_engine import render_prometheus_metrics
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
 from app.ip_lookup import extract_hints
@@ -722,6 +723,20 @@ def dashboard(db: Session = Depends(_db), key: Principal = Depends(require_api_k
     """Всё для главной страницы одним запросом — она обновляется каждые
     5 секунд, и десяток отдельных вызовов на виджет тут заметен."""
     return build_dashboard(db, key)
+
+
+@api_read.get("/metrics")
+def prometheus_metrics(db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Метрики для Prometheus (docs/landscape-report.md, п.4.3) — та же
+    RBAC-область видимости, что у /api/dashboard (ключ, ограниченный
+    группой, видит метрики только по своим узлам).
+
+    Путь без префикса /api — стандартный scrape_path Prometheus,
+    /metrics. Ключ передаётся так же, как в остальном API — заголовком
+    X-API-Key; в scrape_config Prometheus 2.55+ это настраивается
+    через authorization/http_headers, в более старых версиях — только
+    через обратный прокси, добавляющий заголовок."""
+    return Response(render_prometheus_metrics(db, key), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @api_read.get("/api/incidents")
