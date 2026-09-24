@@ -7,7 +7,11 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="vendor/xterm.css">
 <style>
-  #term-wrap{background:#000;border-radius:8px;padding:8px;height:480px;}
+  /* На всю страницу (по запросу пользователя, 2026-09-24) — вместо
+     фиксированных 480px высота считается от вьюпорта минус заголовок
+     страницы и панель подключения сверху; запасной минимум — на
+     случай короткого экрана/мобильного. */
+  #term-wrap{background:#000;border-radius:8px;padding:8px;height:calc(100vh - 300px);min-height:420px;}
   #term{height:100%;}
   .console-status{font-family:var(--mono);font-size:11.5px;color:var(--text-dim);padding:0 16px 12px;}
   .console-status.live{color:var(--ok);}

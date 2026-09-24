@@ -1,10 +1,26 @@
 // SSH-консоль — xterm.js в браузере, WebSocket-мост к app/console_ws.py.
 
+// Классический зелёный терминал на чёрном (по запросу пользователя,
+// 2026-09-24) + сетка покрупнее — панель теперь на всю страницу
+// (см. #term-wrap в console.html), без addon для авто-fit имеющийся
+// xterm.js не подстраивает cols/rows под контейнер сам, поэтому просто
+// берём щедрый фиксированный размер, а не подгоняем в пиксель.
 const term = new Terminal({
   cursorBlink: true,
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
   fontSize: 13,
-  theme: { background: "#000000" },
+  cols: 200,
+  rows: 46,
+  theme: {
+    background: "#000000",
+    foreground: "#33ff66",
+    cursor: "#33ff66",
+    cursorAccent: "#000000",
+    selectionBackground: "#1f6b3a",
+    black: "#000000",
+    green: "#33ff66",
+    brightGreen: "#7dffa3",
+  },
 });
 term.open(document.getElementById("term"));
 term.write("Подключись слева, чтобы начать сессию.\r\n");

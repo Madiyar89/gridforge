@@ -1,4 +1,6 @@
 // Бэкапы конфигураций — выбор узла, снятие снимка, история, diff.
+// Плюс групповой бэкап (по запросу пользователя, 2026-09-24) — та же
+// логика "группа -> цикл по узлам", что уже в ports.js/vuln.js.
 
 let selectedNodeId = null;
 
@@ -11,6 +13,61 @@ async function loadNodePicker() {
     select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
   }
 }
+
+async function loadGroupPicker() {
+  const select = document.getElementById("backup-group-select");
+  try {
+    const groups = await api("/api/groups");
+    select.innerHTML =
+      `<option value="">выбери группу…</option>` +
+      groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (${g.node_count} узел(ов))</option>`).join("");
+  } catch (e) {
+    select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
+  }
+}
+
+document.getElementById("run-group-backup").addEventListener("click", async () => {
+  const groupId = document.getElementById("backup-group-select").value;
+  const command = document.getElementById("bg-cmd").value.trim();
+  if (!groupId) return toast("Выбери группу", true);
+  if (!command) return toast("Укажи команду (например: show running-config)", true);
+
+  const status = document.getElementById("group-backup-status");
+  const btn = document.getElementById("run-group-backup");
+  let nodes;
+  try {
+    nodes = await api(`/api/nodes?group_id=${groupId}`);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  if (nodes.length === 0) return toast("В этой группе узлов нет", true);
+
+  btn.disabled = true;
+  let ok = 0;
+  let changed = 0;
+  let failed = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    status.textContent = `${i + 1}/${nodes.length} — ${n.name}…`;
+    try {
+      const result = await apiWithCredentials(`/api/nodes/${n.id}/backup`, {
+        method: "POST",
+        body: JSON.stringify({ username: null, command, key_path: null, port: 22 }),
+      });
+      if (result.error) failed++;
+      else {
+        ok++;
+        if (result.changed) changed++;
+      }
+    } catch (e) {
+      failed++;
+    }
+  }
+  btn.disabled = false;
+  status.textContent = `готово: снято ${ok}, изменилось ${changed}, ошибок ${failed}`;
+  toast(`Групповой бэкап завершён: снято ${ok}, изменилось ${changed}, ошибок ${failed}`, failed > 0 && ok === 0);
+  if (selectedNodeId && nodes.some((n) => String(n.id) === String(selectedNodeId))) refreshBackups();
+});
 
 document.getElementById("backup-node-select").addEventListener("change", (ev) => {
   selectedNodeId = ev.target.value || null;
@@ -96,6 +153,8 @@ async function showDiff(backupId) {
 
 function onKeySaved() {
   loadNodePicker();
+  loadGroupPicker();
 }
 
 loadNodePicker();
+loadGroupPicker();
