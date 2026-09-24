@@ -43,6 +43,15 @@
 </div>
 
 <div class="panel">
+  <h2>GeoIP/ASN — страна и провайдер по IP</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="geo-q" placeholder="внешний IP, например 8.8.8.8">
+    <button id="run-geo">Найти</button>
+  </div>
+  <div id="geo-result" style="padding:0 16px 14px;font-size:13px"></div>
+</div>
+
+<div class="panel">
   <h2>Сообщения <span class="count" id="syslog-count"></span></h2>
   <div class="form-row" style="border-top:none">
     <select id="syslog-node-filter"><option value="">все узлы</option></select>

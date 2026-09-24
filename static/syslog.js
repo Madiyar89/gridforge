@@ -50,6 +50,37 @@ async function refreshSyslog() {
     .join("");
 }
 
+function countryFlag(iso) {
+  if (!iso || iso.length !== 2) return "";
+  const codePoints = [...iso.toUpperCase()].map((c) => 0x1f1e6 - 65 + c.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+}
+
+async function runGeoLookup() {
+  const ip = document.getElementById("geo-q").value.trim();
+  const out = document.getElementById("geo-result");
+  if (!ip) return toast("Укажи IP", true);
+  out.textContent = "ищу…";
+  try {
+    const r = await api(`/api/geoip-lookup?ip=${encodeURIComponent(ip)}`);
+    if (!r.geo) {
+      out.innerHTML = `<span style="color:var(--text-dim)">Нет данных — приватный/локальный адрес, либо база GeoLite2 ещё не настроена (см. страницу «Интеграции»)</span>`;
+      return;
+    }
+    const flag = countryFlag(r.geo.country);
+    const country = r.geo.country_name ? `${flag} ${escapeHtml(r.geo.country_name)} (${escapeHtml(r.geo.country)})` : "страна неизвестна";
+    const asn = r.geo.asn ? `AS${r.geo.asn} · ${escapeHtml(r.geo.as_org || "")}` : "провайдер неизвестен";
+    out.innerHTML = `<b>${escapeHtml(r.ip)}</b><br>${country}<br>${asn}`;
+  } catch (e) {
+    out.textContent = "ошибка: " + e.message;
+  }
+}
+
+document.getElementById("run-geo").addEventListener("click", runGeoLookup);
+document.getElementById("geo-q").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runGeoLookup();
+});
+
 document.getElementById("run-lookup").addEventListener("click", async () => {
   const q = document.getElementById("lookup-q").value.trim();
   const out = document.getElementById("lookup-result");
