@@ -13,6 +13,10 @@ Sample пишется на каждый Probe раз в interval_seconds, syslog
   GRIDFORGE_RETENTION_SYSLOG_DAYS    (30)  принятые syslog-сообщения
   GRIDFORGE_RETENTION_CAPTURES_DAYS  (7)   захваты трафика + сами .pcap
   GRIDFORGE_RETENTION_BACKUPS_KEEP   (20)  снимков конфигурации НА УЗЕЛ
+  GRIDFORGE_RETENTION_FLOWS_DAYS     (3)   сырые записи NetFlow (объём
+                                            растёт кратно быстрее syslog —
+                                            поток на каждое TCP/UDP-
+                                            соединение, не на событие)
 
 Бэкапы ограничены по количеству, а не по возрасту, сознательно: у редко
 меняющегося узла снимки могут быть старше любого разумного срока, и
@@ -34,7 +38,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import Backup, Capture, Sample, SyslogMessage, _now
+from app.models import Backup, Capture, FlowRecord, Sample, SyslogMessage, _now
 
 logger = logging.getLogger("gridforge.retention")
 
@@ -99,11 +103,12 @@ def run_retention(db: Session) -> dict[str, int]:
         ),
         "captures": _delete_old_captures(db, _days("GRIDFORGE_RETENTION_CAPTURES_DAYS", 7)),
         "backups": _trim_backups(db, _days("GRIDFORGE_RETENTION_BACKUPS_KEEP", 20)),
+        "flows": _delete_old(db, FlowRecord, FlowRecord.received_at, _days("GRIDFORGE_RETENTION_FLOWS_DAYS", 3)),
     }
     db.commit()
     if any(result.values()):
         logger.info(
-            "очистка: samples=%s syslog=%s captures=%s backups=%s",
-            result["samples"], result["syslog"], result["captures"], result["backups"],
+            "очистка: samples=%s syslog=%s captures=%s backups=%s flows=%s",
+            result["samples"], result["syslog"], result["captures"], result["backups"], result["flows"],
         )
     return result

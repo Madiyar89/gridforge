@@ -95,6 +95,7 @@ const NAV_GROUPS = [
       { href: "vuln.html", label: "Уязвимости", icon: "vuln" },
       { href: "cables.html", label: "Кабели", icon: "cables" },
       { href: "capture.html", label: "Трафик", icon: "capture" },
+      { href: "flows.html", label: "Потоки (NetFlow)", icon: "capture" },
       { href: "ad-audit.html", label: "AD-аудит", icon: "adaudit" },
       { href: "network-audit.html", label: "Аудит сети", icon: "netaudit" },
     ],

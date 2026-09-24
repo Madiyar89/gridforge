@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from datetime import timedelta
 from urllib.parse import quote
 import secrets
 from contextlib import asynccontextmanager
@@ -16,7 +17,7 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -93,6 +94,7 @@ from app.models import (
     DomainScanHost,
     DomainScanMethod,
     EscalationStep,
+    FlowRecord,
     Group,
     Incident,
     Integration,
@@ -118,6 +120,7 @@ from app.models import (
     VulnScanStatus,
     VULN_SCAN_PROFILE_LABELS,
     Watch,
+    _now,
     iso,
 )
 from app.inventory_engine import delete_node, delete_probe, delete_watch
@@ -144,6 +147,7 @@ from app.sweep_engine import run_sweep, sweep_progress
 from app.scenarios_engine import ScenarioParamError, render_command, run_scenario, scenario_run_progress
 from app.scheduler import Scheduler
 from app.syslog_server import DEFAULT_SYSLOG_PORT, start_syslog_server
+from app.netflow_server import DEFAULT_NETFLOW_PORT, start_netflow_server
 from app.schemas import (
     ActionIn,
     AdAuditIn,
@@ -312,8 +316,10 @@ async def lifespan(_app: FastAPI):
         bootstrap_key_path.chmod(0o600)
     task = asyncio.create_task(_scheduler.run_forever())
     syslog_transport = await start_syslog_server()
+    netflow_transport = await start_netflow_server()
     yield
     syslog_transport.close()
+    netflow_transport.close()
     _scheduler.stop()
     await task
 
@@ -2782,6 +2788,70 @@ def geoip_lookup_endpoint(ip: str):
     if geo is None:
         return {"ip": ip, "geo": None}
     return {"ip": ip, "geo": geo}
+
+
+def _flows_since(db: Session, minutes: int):
+    cutoff = _now() - timedelta(minutes=min(max(minutes, 1), 7 * 24 * 60))
+    return db.query(FlowRecord).filter(FlowRecord.received_at >= cutoff)
+
+
+@api_read.get("/api/flows")
+def list_flows(minutes: int = 15, limit: int = 100, db: Session = Depends(_db)):
+    rows = _flows_since(db, minutes).order_by(desc(FlowRecord.received_at)).limit(min(limit, 500)).all()
+    return [
+        {
+            "id": f.id, "exporter_ip": f.exporter_ip, "src_addr": f.src_addr, "dst_addr": f.dst_addr,
+            "src_port": f.src_port, "dst_port": f.dst_port, "protocol": f.protocol,
+            "byte_count": f.byte_count, "packet_count": f.packet_count, "received_at": iso(f.received_at),
+        }
+        for f in rows
+    ]
+
+
+@api_read.get("/api/flows/top-talkers")
+def flows_top_talkers(minutes: int = 60, limit: int = 20, db: Session = Depends(_db)):
+    """«Говорящие» — по сумме трафика в обе стороны (узел и как источник,
+    и как получатель), иначе, например, сервер с массой входящих
+    закачек не попал бы в топ, если считать только src_addr."""
+    cutoff_query = _flows_since(db, minutes).subquery()
+    src_totals = (
+        db.query(cutoff_query.c.src_addr.label("addr"), cutoff_query.c.byte_count.label("bytes"))
+    )
+    dst_totals = (
+        db.query(cutoff_query.c.dst_addr.label("addr"), cutoff_query.c.byte_count.label("bytes"))
+    )
+    combined = src_totals.union_all(dst_totals).subquery()
+    rows = (
+        db.query(combined.c.addr, func.sum(combined.c.bytes).label("total_bytes"))
+        .group_by(combined.c.addr)
+        .order_by(desc("total_bytes"))
+        .limit(min(limit, 100))
+        .all()
+    )
+    return [
+        {"address": addr, "bytes": int(total_bytes), "geo": geoip_lookup(addr)}
+        for addr, total_bytes in rows
+    ]
+
+
+@api_read.get("/api/flows/top-pairs")
+def flows_top_pairs(minutes: int = 60, limit: int = 20, db: Session = Depends(_db)):
+    rows = (
+        _flows_since(db, minutes)
+        .with_entities(
+            FlowRecord.src_addr, FlowRecord.dst_addr,
+            func.sum(FlowRecord.byte_count).label("total_bytes"),
+            func.sum(FlowRecord.packet_count).label("total_packets"),
+        )
+        .group_by(FlowRecord.src_addr, FlowRecord.dst_addr)
+        .order_by(desc("total_bytes"))
+        .limit(min(limit, 100))
+        .all()
+    )
+    return [
+        {"src_addr": src, "dst_addr": dst, "bytes": int(total_bytes), "packets": int(total_packets)}
+        for src, dst, total_bytes, total_packets in rows
+    ]
 
 
 @api_read.get("/api/ip-lookup")

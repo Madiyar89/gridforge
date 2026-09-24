@@ -944,6 +944,29 @@ class SyslogMessage(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class FlowRecord(Base):
+    """Один поток из принятого NetFlow v9 (docs/landscape-report.md,
+    п.4.5) — см. app/netflow_server.py. Узкий приёмник, не полный
+    ntopng: только IPv4-поля, которые реально нужны для «топ говорящих»
+    (src/dst, порты, протокол, байты/пакеты), остальные поля шаблона
+    молча пропускаются. `exporter_ip` — кто прислал экспорт (сам
+    коммутатор/маршрутизатор), не путать с src_addr/dst_addr самого
+    потока трафика."""
+
+    __tablename__ = "flow_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exporter_ip: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    src_addr: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    dst_addr: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    src_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dst_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protocol: Mapped[int | None] = mapped_column(Integer, nullable=True)  # номер протокола IANA (6=TCP, 17=UDP...)
+    byte_count: Mapped[int] = mapped_column(Integer, default=0)
+    packet_count: Mapped[int] = mapped_column(Integer, default=0)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
 class AdAuditRun(Base):
     """Один прогон AD-аудита (PingCastle-style, но свои проверки с нуля —
     см. app/ad_audit_engine.py: привилегированные аккаунты, аномалии

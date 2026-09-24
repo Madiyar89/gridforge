@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Трафик по потокам</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  .talker-row{padding:8px 16px;border-bottom:1px solid var(--border);font-size:12.5px;}
+  .talker-row:last-child{border-bottom:none;}
+  .talker-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:4px;}
+  .talker-addr{font-family:var(--mono);}
+  .talker-geo{color:var(--text-dim);font-size:11px;margin-left:6px;}
+  .talker-bytes{color:var(--text-dim);white-space:nowrap;flex-shrink:0;}
+  .talker-bar{height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden;}
+  .talker-bar-fill{height:100%;background:var(--accent);}
+  .pair-row{padding:8px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;display:flex;justify-content:space-between;gap:10px;}
+  .pair-row:last-child{border-bottom:none;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Трафик по потокам</h1>
+  <p>Приём NetFlow v9 по UDP на порту <b id="netflow-port">2055</b>. Настрой экспорт NetFlow на коммутаторе/маршрутизаторе именно сюда (<code>ip flow-export destination &lt;адрес GridForge&gt; 2055</code> на Cisco). sFlow/IPFIX пока не поддержаны.</p>
+</div>
+
+<div class="panel">
+  <div class="form-row" style="border-top:none">
+    <select id="window-select">
+      <option value="15">за 15 минут</option>
+      <option value="60" selected>за час</option>
+      <option value="1440">за сутки</option>
+      <option value="10080">за неделю</option>
+    </select>
+    <button id="refresh-flows">Обновить</button>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Топ говорящих <span class="count" id="talkers-count"></span></h2>
+    <div class="body" id="talkers-body"><div class="empty">Загрузка…</div></div>
+  </div>
+  <div class="panel">
+    <h2>Топ пар источник → получатель <span class="count" id="pairs-count"></span></h2>
+    <div class="body" id="pairs-body"><div class="empty">Загрузка…</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Последние потоки <span class="count" id="flows-count"></span></h2>
+  <div class="body" id="flows-body" style="max-height:400px"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="flows.js"></script>
+</body>
+</html>
