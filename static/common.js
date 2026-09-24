@@ -319,23 +319,38 @@ const PIN_ARROW_SVG =
   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 5l5 5-5 5"/></svg>';
 
+function setPinned(next) {
+  const bar = document.querySelector(".topbar");
+  if (!bar) return;
+  bar.classList.toggle("pinned", next);
+  localStorage.setItem(SIDEBAR_PIN_KEY, next ? "1" : "0");
+}
+
 function setupSidebarPin() {
   const bar = document.querySelector(".topbar");
   if (!bar || document.getElementById("sidebar-pin")) return;
-  const pinned = localStorage.getItem(SIDEBAR_PIN_KEY) === "1";
-  bar.classList.toggle("pinned", pinned);
+  setPinned(localStorage.getItem(SIDEBAR_PIN_KEY) === "1");
 
   const btn = document.createElement("button");
   btn.id = "sidebar-pin";
   btn.className = "sidebar-pin";
   btn.innerHTML = PIN_ARROW_SVG;
   btn.setAttribute("aria-label", "Закрепить панель развёрнутой");
-  btn.addEventListener("click", () => {
-    const next = !bar.classList.contains("pinned");
-    bar.classList.toggle("pinned", next);
-    localStorage.setItem(SIDEBAR_PIN_KEY, next ? "1" : "0");
-  });
+  btn.addEventListener("click", () => setPinned(!bar.classList.contains("pinned")));
   bar.appendChild(btn);
+
+  // По запросу пользователя (2026-09-24): не нужно отдельно нажимать
+  // кнопку-стрелку, чтобы свернуть закреплённую панель — клик по любому
+  // рабочему пункту (переход на страницу, что в самой рельсе, что во
+  // флайауте зоны) сам её сворачивает. Клик по заголовку зоны
+  // (аккордеон, без перехода) панель НЕ закрывает — там пользователь
+  // ещё выбирает, куда идти. Делегирование на document, а не на nav:
+  // флайаут — отдельный элемент в <body> (см. setupFloatingPopups),
+  // пересоздаётся при каждом наведении, точечно вешать слушатель не на
+  // чем.
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".nav a, .nav-flyout a")) setPinned(false);
+  });
 }
 
 // Какие группы развёрнуты (аккордеон, по запросу пользователя 2026-09-23:

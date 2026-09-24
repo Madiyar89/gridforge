@@ -111,13 +111,14 @@ a{color:var(--accent);}
 .topbar-right{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;}
 
 /* Кнопка-стрелка закрепления панели (§2 источника: "стрелка влево —
-   свернуть, вправо — развернуть", правый верхний угол панели). */
-/* По центру верхнего края панели (п.2 сравнения с референсом,
-   2026-09-24) — раньше висела наполовину за правым краем рельсы.
-   left:50%+translateX сам пересчитывается при смене ширины панели
-   (52px свёрнутая / 196px закреплённая), без отдельных медиа-правил. */
+   свернуть, вправо — развернуть"). По просьбе пользователя (2026-09-24)
+   — перенесена вниз панели: наверху она перекрывала бейдж логотипа
+   .brand-badge (оба были в одной точке top:10px, стрелка поверх G по
+   z-index) — реальный баг, G была не видна вообще. Снизу свободное
+   место есть в обоих режимах. По центру по горизонтали — тот же
+   left:50%+translateX, пересчитывается сам при смене ширины панели. */
 .sidebar-pin{
-  position:absolute;top:10px;left:50%;transform:translateX(-50%);width:22px;height:22px;
+  position:absolute;bottom:10px;left:50%;transform:translateX(-50%);width:22px;height:22px;
   border-radius:50%;border:1px solid var(--border);background:var(--surface);
   color:var(--text-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;
   padding:0;z-index:21;
@@ -189,6 +190,17 @@ a{color:var(--accent);}
 .nav-group-title .nav-chevron{width:12px;height:12px;flex:none;transition:transform .12s ease,opacity .12s ease;opacity:0;}
 .topbar.pinned .nav-group-title .nav-chevron{opacity:1;}
 .nav-group-title.open .nav-chevron{transform:rotate(180deg);}
+/* Реальный баг ("иконки кривые", 2026-09-24): текст/стрелка хоть и
+   opacity:0, но всё ещё занимают место в flex-раскладке (gap между
+   тремя элементами + min-width:0 у span давали разный итог в
+   зависимости от длины скрытого названия) — из-за этого сама иконка
+   зоны в разных строках сдвигалась не всегда одинаково. В свёрнутой
+   рельсе убираем их из потока полностью (width:0, без gap), тогда
+   иконка — единственный реальный элемент строки и стоит на одном и
+   том же месте во всех 4 зонах. */
+.topbar:not(.pinned) .nav-group-title{gap:0;}
+.topbar:not(.pinned) .nav-group-title span,
+.topbar:not(.pinned) .nav-group-title .nav-chevron{width:0;margin:0;overflow:hidden;}
 
 .nav-group-items{display:flex;flex-direction:column;gap:2px;overflow:hidden;}
 .nav-group-items.collapsed{display:none;}
@@ -209,6 +221,10 @@ a{color:var(--accent);}
 .nav-label{opacity:0;transition:opacity .12s ease;}
 .topbar.pinned .nav-label{opacity:1;}
 .nav a:hover{color:var(--text);background:var(--surface-2);}
+/* Та же защита от "кривых" иконок, что у .nav-group-title выше — скрытая
+   подпись не должна влиять на положение иконки в свёрнутой рельсе. */
+.topbar:not(.pinned) .nav a{gap:0;}
+.topbar:not(.pinned) .nav-label{width:0;margin:0;overflow:hidden;}
 
 /* Тултип на одиночной иконке (§3 источника: "белый текст на тёмном
    фоне, справа от иконки, выровнен по горизонтали") — реальный
