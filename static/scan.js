@@ -53,9 +53,10 @@ async function selectScan(scanId) {
       const action = h.already_node
         ? `<span class="count">уже в инвентаре</span>`
         : `<button data-id="${h.id}" data-addr="${escapeHtml(h.address)}" data-hostname="${escapeHtml(h.hostname || "")}" class="make-node">+ в инвентарь</button>`;
+      const newBadge = h.already_node ? "" : `<span class="new-host-badge">новое</span>`;
       return `
         <div class="channel-row">
-          <span>${escapeHtml(h.hostname || h.address)} ${h.hostname ? `<span class="count">(${escapeHtml(h.address)})</span>` : ""} <span class="count">· ${escapeHtml(ports)}</span></span>
+          <span>${newBadge}${escapeHtml(h.hostname || h.address)} ${h.hostname ? `<span class="count">(${escapeHtml(h.address)})</span>` : ""} <span class="count">· ${escapeHtml(ports)}</span></span>
           ${action}
         </div>`;
     })
@@ -103,8 +104,94 @@ document.getElementById("run-scan").addEventListener("click", async () => {
   }
 });
 
+const DS_WEEKDAY_LABELS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+
+async function refreshDiscoverySchedules() {
+  const body = document.getElementById("discovery-schedules-body");
+  let rows;
+  try {
+    rows = await api("/api/discovery-schedules");
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  if (rows.length === 0) {
+    body.innerHTML = `<div class="empty">Расписаний ещё нет — скан только вручную</div>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((s) => {
+      const last = s.last_triggered_on ? `, последний запуск: ${escapeHtml(s.last_triggered_on)}` : "";
+      const portsBit = s.ports ? `, порты: ${escapeHtml(s.ports)}` : "";
+      return `
+        <div class="scan-sched-row${s.enabled ? "" : " disabled"}" data-id="${s.id}">
+          <div>
+            <div>${DS_WEEKDAY_LABELS[s.weekday]}, ${escapeHtml(s.start_time)} — ${escapeHtml(s.cidr)}</div>
+            <div class="meta">скан + оповещение о новых${portsBit}${last}</div>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn-ghost ds-toggle" data-id="${s.id}">${s.enabled ? "выключить" : "включить"}</button>
+            <button type="button" class="btn-ghost ds-delete" data-id="${s.id}">удалить</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+  body.querySelectorAll(".ds-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => toggleDiscoverySchedule(rows.find((r) => String(r.id) === btn.dataset.id)));
+  });
+  body.querySelectorAll(".ds-delete").forEach((btn) => {
+    btn.addEventListener("click", () => deleteDiscoverySchedule(btn.dataset.id));
+  });
+}
+
+async function toggleDiscoverySchedule(sched) {
+  if (!sched) return;
+  try {
+    await api(`/api/discovery-schedules/${sched.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ cidr: sched.cidr, ports: sched.ports, weekday: sched.weekday, start_time: sched.start_time, enabled: !sched.enabled }),
+    });
+    refreshDiscoverySchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteDiscoverySchedule(id) {
+  if (!confirm("Удалить расписание?")) return;
+  try {
+    await api(`/api/discovery-schedules/${id}`, { method: "DELETE" });
+    refreshDiscoverySchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+document.getElementById("ds-add").addEventListener("click", async () => {
+  const cidr = document.getElementById("ds-cidr").value.trim();
+  if (!cidr) return toast("Укажи CIDR/IP", true);
+  const ports = document.getElementById("ds-ports").value.trim() || null;
+  const weekday = Number(document.getElementById("ds-weekday").value);
+  const start_time = document.getElementById("ds-start").value;
+  if (!start_time) return toast("Укажи время", true);
+  try {
+    await api("/api/discovery-schedules", {
+      method: "POST",
+      body: JSON.stringify({ cidr, ports, weekday, start_time, enabled: true }),
+    });
+    toast("Расписание добавлено");
+    document.getElementById("ds-cidr").value = "";
+    document.getElementById("ds-ports").value = "";
+    refreshDiscoverySchedules();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
 function onKeySaved() {
   refreshScans();
+  refreshDiscoverySchedules();
 }
 
 refreshScans();
+refreshDiscoverySchedules();

@@ -282,6 +282,14 @@ class ScanIn(BaseModel):
     ports: str | None = None
 
 
+class DiscoveryScanScheduleIn(BaseModel):
+    cidr: str
+    ports: str | None = None
+    weekday: int  # 0=понедельник .. 6=воскресенье
+    start_time: str  # "HH:MM"
+    enabled: bool = True
+
+
 class VulnScanRunIn(BaseModel):
     profile: str  # ping | quick | full_ports | vuln | os
     responsible: str | None = None  # Ф.И.О. и должность — для отчёта

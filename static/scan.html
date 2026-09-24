@@ -6,6 +6,28 @@
 <title>GridForge — Скан сети</title>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  .scan-sched-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .scan-sched-form .field{display:flex;flex-direction:column;gap:4px;}
+  .scan-sched-form .field label{font-size:11px;color:var(--text-dim);}
+  .scan-sched-form input,.scan-sched-form select{
+    background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+    border-radius:6px;padding:7px 9px;font-size:12.5px;font-family:var(--sans);color-scheme:dark;
+  }
+  .scan-sched-form #ds-add{
+    background:transparent;border:1px solid var(--accent);color:var(--accent);
+    border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-weight:600;
+  }
+  .scan-sched-form #ds-add:hover{background:var(--accent);color:var(--accent-ink);}
+  .scan-sched-row{padding:9px 16px;border-bottom:1px solid var(--border);font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .scan-sched-row .meta{color:var(--text-dim);font-size:11.5px;margin-top:2px;}
+  .scan-sched-row .actions{display:flex;gap:6px;flex-shrink:0;}
+  .scan-sched-row.disabled{opacity:.55;}
+  .new-host-badge{
+    font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:4px;font-weight:700;
+    background:var(--warn-bg,rgba(232,180,81,.15));color:var(--warn);margin-right:6px;
+  }
+</style>
 </head>
 <body>
 
@@ -34,6 +56,39 @@
     <button id="run-scan">Сканировать</button>
   </div>
   <div class="hint">Может занять до пары минут на большом диапазоне — TCP connect scan, без прав root.</div>
+</div>
+
+<div class="panel">
+  <h2>Плановое сканирование</h2>
+  <p class="hint" style="padding:14px 16px 0">Раз в неделю в заданное время сканирует диапазон и оповещает включённые каналы (без привязки к узлу/условию) о хостах, которых ещё нет в инвентаре — как ручной скан, только сам по расписанию.</p>
+  <div class="scan-sched-form">
+    <div class="field">
+      <label>CIDR/IP</label>
+      <input id="ds-cidr" placeholder="192.168.1.0/24">
+    </div>
+    <div class="field">
+      <label>Порты (опц.)</label>
+      <input id="ds-ports" placeholder="топ-20, если пусто">
+    </div>
+    <div class="field">
+      <label>День недели</label>
+      <select id="ds-weekday">
+        <option value="0">понедельник</option>
+        <option value="1">вторник</option>
+        <option value="2">среда</option>
+        <option value="3">четверг</option>
+        <option value="4">пятница</option>
+        <option value="5">суббота</option>
+        <option value="6">воскресенье</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Время</label>
+      <input id="ds-start" type="time" value="02:00">
+    </div>
+    <button id="ds-add">Добавить расписание</button>
+  </div>
+  <div class="body" id="discovery-schedules-body"><div class="empty">Расписаний ещё нет — скан только вручную</div></div>
 </div>
 
 <div class="grid">

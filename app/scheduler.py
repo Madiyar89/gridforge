@@ -28,6 +28,7 @@ from app.models import Probe, ProbeKind, Sample, _now
 from app.probes import run_probe
 from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
+from app.scan_engine import run_due_discovery_schedules
 from app.vuln_scan_engine import run_due_vuln_schedules
 from app.watch_engine import evaluate_probe
 
@@ -98,6 +99,12 @@ class Scheduler:
         except Exception:
             logger.exception("сбой планового автоопроса кабельных соединений")
 
+    async def _run_due_discovery_schedules_safe(self) -> None:
+        try:
+            await run_due_discovery_schedules(get_session, self._http_client)
+        except Exception:
+            logger.exception("сбой планового скана новых устройств")
+
     async def run_forever(
         self,
         reload_interval_seconds: float = 5.0,
@@ -105,6 +112,7 @@ class Scheduler:
         retention_interval_seconds: float = 24 * 3600,
         vuln_schedule_interval_seconds: float = 60.0,
         cable_schedule_interval_seconds: float = 60.0,
+        discovery_schedule_interval_seconds: float = 60.0,
     ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
@@ -112,6 +120,7 @@ class Scheduler:
             last_escalation_check = 0.0
             last_vuln_schedule_check = 0.0
             last_cable_schedule_check = 0.0
+            last_discovery_schedule_check = 0.0
             # Первая очистка — не сразу при старте, а через сутки работы:
             # перезапуск сервиса не должен каждый раз запускать удаление.
             last_retention = time.monotonic()
@@ -146,6 +155,12 @@ class Scheduler:
                     # по SSH не мгновенный, тот же довод, что у vuln-schedule.
                     asyncio.create_task(self._run_due_cable_discovery_schedules_safe())
                     last_cable_schedule_check = now
+                if now - last_discovery_schedule_check >= discovery_schedule_interval_seconds:
+                    # Тоже фоновой задачей — скан диапазона может занять до
+                    # SCAN_TIMEOUT_SECONDS (120с), тот же довод, что у
+                    # vuln/cable-schedule.
+                    asyncio.create_task(self._run_due_discovery_schedules_safe())
+                    last_discovery_schedule_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
                     try:

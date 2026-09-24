@@ -621,6 +621,27 @@ class ScanHost(Base):
     scan: Mapped["Scan"] = relationship(back_populates="hosts")
 
 
+class DiscoveryScanSchedule(Base):
+    """Плановый (по расписанию) CIDR-скан с оповещением о новых
+    устройствах (docs/landscape-report.md, п.4.1 — источник идеи:
+    NetAlertX, непрерывное обнаружение с алертом на новый MAC/IP). Та же
+    идея, что у VulnScanSchedule/CableDiscoverySchedule: раз в неделю, в
+    заданное время. Не привязан к группе — как и сам Scan (CIDR может
+    покрывать сразу несколько групп/сегментов), оповещение уходит на все
+    включённые Channel без node_id/watch_id (см. signal.notify_new_devices)."""
+
+    __tablename__ = "discovery_scan_schedules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cidr: Mapped[str] = mapped_column(String(64), nullable=False)
+    ports: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    weekday: Mapped[int] = mapped_column(nullable=False)  # 0=понедельник .. 6=воскресенье
+    start_time: Mapped[str] = mapped_column(String(5), nullable=False)  # "HH:MM"
+    enabled: Mapped[bool] = mapped_column(default=True)
+    last_triggered_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "YYYY-MM-DD"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class VulnScanProfile(str, enum.Enum):
     """5 профилей — перенесено из NetOpsHub (playbook_catalog.NMAP_PROFILES),
     те же имена и подписи, чтобы отчёт для проверяющего выглядел так же,

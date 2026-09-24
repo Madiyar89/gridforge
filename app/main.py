@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -85,6 +86,7 @@ from app.models import (
     CaptureStatus,
     Channel,
     Credential,
+    DiscoveryScanSchedule,
     DomainScan,
     DomainScanCredentialSet,
     DomainScanHost,
@@ -127,7 +129,7 @@ from app.integrations_engine import INTEGRATION_REGISTRY, IntegrationTestError, 
 from app.ldap_engine import LdapTestError, mask_connection, test_bind
 from app.ldap_engine import encrypt_password as encrypt_ldap_password
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot, live_port_downup, live_port_mac
-from app.scan_engine import ScanValidationError, run_scan
+from app.scan_engine import ScanValidationError, run_scan_and_notify, validate_cidr, validate_ports
 from app.vuln_scan_engine import PROFILE_ARGS as VULN_PROFILE_ARGS, run_vuln_scan
 from app.vuln_register import (
     HEADERS as VULN_REGISTER_HEADERS,
@@ -152,6 +154,7 @@ from app.schemas import (
     CaptureIn,
     ChannelIn,
     CredentialIn,
+    DiscoveryScanScheduleIn,
     DomainScanCredentialSetIn,
     DomainScanRunIn,
     EscalationStepIn,
@@ -1135,7 +1138,8 @@ def get_audit_findings(node_id: int, db: Session = Depends(_db), key: Principal 
 @api_operate.post("/api/scans", status_code=201)
 async def create_scan(payload: ScanIn, db: Session = Depends(_db)):
     try:
-        scan = await run_scan(db, payload.cidr, payload.ports)
+        async with httpx.AsyncClient() as client:
+            scan = await run_scan_and_notify(db, client, payload.cidr, payload.ports)
     except ScanValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"id": scan.id, "status": scan.status.value, "error": scan.error, "host_count": len(scan.hosts)}
@@ -1167,6 +1171,72 @@ def list_scan_hosts(scan_id: int, db: Session = Depends(_db)):
         }
         for h in scan.hosts
     ]
+
+
+@api_operate.post("/api/discovery-schedules", status_code=201)
+def create_discovery_schedule(payload: DiscoveryScanScheduleIn, db: Session = Depends(_db)):
+    try:
+        validate_cidr(payload.cidr)
+        if payload.ports:
+            validate_ports(payload.ports)
+    except ScanValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday должен быть 0..6")
+
+    sched = DiscoveryScanSchedule(
+        cidr=payload.cidr, ports=payload.ports, weekday=payload.weekday,
+        start_time=payload.start_time, enabled=payload.enabled,
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return {"id": sched.id}
+
+
+@api_read.get("/api/discovery-schedules")
+def list_discovery_schedules(db: Session = Depends(_db)):
+    rows = db.query(DiscoveryScanSchedule).order_by(DiscoveryScanSchedule.weekday, DiscoveryScanSchedule.start_time).all()
+    return [
+        {
+            "id": s.id, "cidr": s.cidr, "ports": s.ports, "weekday": s.weekday,
+            "start_time": s.start_time, "enabled": s.enabled, "last_triggered_on": s.last_triggered_on,
+        }
+        for s in rows
+    ]
+
+
+@api_operate.patch("/api/discovery-schedules/{schedule_id}")
+def update_discovery_schedule(schedule_id: int, payload: DiscoveryScanScheduleIn, db: Session = Depends(_db)):
+    sched = db.get(DiscoveryScanSchedule, schedule_id)
+    if sched is None:
+        raise HTTPException(status_code=404, detail="Расписание не найдено")
+    try:
+        validate_cidr(payload.cidr)
+        if payload.ports:
+            validate_ports(payload.ports)
+    except ScanValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday должен быть 0..6")
+
+    sched.cidr = payload.cidr
+    sched.ports = payload.ports
+    sched.weekday = payload.weekday
+    sched.start_time = payload.start_time
+    sched.enabled = payload.enabled
+    db.commit()
+    return {"ok": True}
+
+
+@api_operate.delete("/api/discovery-schedules/{schedule_id}", status_code=204)
+def delete_discovery_schedule(schedule_id: int, db: Session = Depends(_db)):
+    sched = db.get(DiscoveryScanSchedule, schedule_id)
+    if sched is None:
+        return Response(status_code=204)
+    db.delete(sched)
+    db.commit()
+    return Response(status_code=204)
 
 
 @api_read.get("/api/domain-scan/credential-sets")
@@ -1234,9 +1304,7 @@ async def run_domain_scan_endpoint(payload: DomainScanRunIn, db: Session = Depen
     каждый живой хост) и сразу возвращает id — прогресс/результат смотри
     через GET /api/domain-scan/{id}, тот же принцип, что у Sweep."""
     try:
-        from app.scan_engine import _validate_cidr
-
-        _validate_cidr(payload.cidr)
+        validate_cidr(payload.cidr)
     except Exception:
         raise HTTPException(status_code=400, detail=f"некорректный CIDR/IP: {payload.cidr!r}")
 

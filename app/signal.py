@@ -146,3 +146,77 @@ async def dispatch(client: httpx.AsyncClient, db: Session, incidents: list[Incid
             if not channel_matches_incident(channel, incident):
                 continue
             await send_to_channel(client, channel, incident, message)
+
+
+# Оповещение о новых устройствах, найденных сканом сети (docs/
+# landscape-report.md, п.4.1) — не заводится как Incident: Incident
+# привязан к Watch на Probe на уже существующем Node (см. докстрин
+# наверху файла), а новое устройство по определению ещё не Node. Свои
+# лёгкие отправители на тот же Channel/ChannelKind, без формирования
+# Incident — переиспользуют только расшифровку конфига канала.
+
+_NEW_DEVICE_REGISTRY: dict[ChannelKind, Callable[[httpx.AsyncClient, Channel, str], Awaitable[None]]] = {}
+
+
+def _register_new_device(kind: ChannelKind):
+    def decorator(fn):
+        _NEW_DEVICE_REGISTRY[kind] = fn
+        return fn
+
+    return decorator
+
+
+@_register_new_device(ChannelKind.webhook)
+async def _send_webhook_new_devices(client: httpx.AsyncClient, channel: Channel, message: str) -> None:
+    url = _decrypted(channel.config, "url")
+    if not url:
+        logger.warning("channel_id=%s (webhook): config.url не задан", channel.id)
+        return
+    await client.post(url, json={"message": message}, timeout=5.0)
+
+
+@_register_new_device(ChannelKind.telegram)
+async def _send_telegram_new_devices(client: httpx.AsyncClient, channel: Channel, message: str) -> None:
+    bot_token = _decrypted(channel.config, "bot_token")
+    chat_id = channel.config.get("chat_id")
+    if not bot_token or not chat_id:
+        logger.warning("channel_id=%s (telegram): config.bot_token/chat_id не заданы", channel.id)
+        return
+    await client.post(
+        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        json={"chat_id": chat_id, "text": message},
+        timeout=5.0,
+    )
+
+
+def format_new_devices_message(hosts: list[dict]) -> str:
+    lines = "\n".join(
+        f"- {h['address']}" + (f" ({h['hostname']})" if h.get("hostname") else "") for h in hosts
+    )
+    return f"[СЕТЬ] Обнаружены новые устройства ({len(hosts)}):\n{lines}"
+
+
+async def notify_new_devices(client: httpx.AsyncClient, db: Session, hosts: list[dict]) -> None:
+    """hosts — [{"address": ..., "hostname": ...}, ...], уже отфильтрованные
+    вызывающей стороной (scan_engine.py) на "нет такого Node". Оповещение
+    уходит на все включённые каналы БЕЗ сужения по node_id/watch_id —
+    сужение по конкретному узлу здесь бессмысленно (устройство ещё не
+    узел), поэтому используются только по-настоящему общие каналы."""
+    if not hosts:
+        return
+    channels = (
+        db.query(Channel)
+        .filter(Channel.enabled.is_(True), Channel.node_id.is_(None), Channel.watch_id.is_(None))
+        .all()
+    )
+    if not channels:
+        return
+    message = format_new_devices_message(hosts)
+    for channel in channels:
+        sender = _NEW_DEVICE_REGISTRY.get(channel.kind)
+        if sender is None:
+            continue
+        try:
+            await sender(client, channel, message)
+        except httpx.HTTPError as exc:
+            logger.warning("channel_id=%s: доставка (новые устройства) не удалась: %s", channel.id, exc)
