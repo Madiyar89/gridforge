@@ -64,7 +64,7 @@ document.getElementById("add-channel").addEventListener("click", async () => {
   const node_id = nodeValue ? Number(nodeValue) : null;
   if (!target) return toast("Заполни поле канала", true);
   let config;
-  if (kind === "webhook") {
+  if (kind === "webhook" || kind === "apprise") {
     config = { url: target };
   } else {
     const [bot_token, chat_id] = target.split(",").map((s) => s.trim());

@@ -536,6 +536,7 @@ class ScenarioResult(Base):
 class ChannelKind(str, enum.Enum):
     webhook = "webhook"
     telegram = "telegram"
+    apprise = "apprise"
 
 
 class Channel(Base):
@@ -552,7 +553,8 @@ class Channel(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     kind: Mapped[ChannelKind] = mapped_column(Enum(ChannelKind), nullable=False)
-    # webhook: {"url": "..."} ; telegram: {"bot_token": "...", "chat_id": "..."}
+    # webhook: {"url": "..."} ; telegram: {"bot_token": "...", "chat_id": "..."} ;
+    # apprise: {"url": "<apprise-формат, напр. slack://.../..., ntfy://topic, mailto://...>"}
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True)
     min_severity: Mapped[WatchSeverity] = mapped_column(Enum(WatchSeverity), default=WatchSeverity.info)

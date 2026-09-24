@@ -139,8 +139,12 @@ curl -X POST localhost:8100/api/probes -H 'content-type: application/json' -d '{
 ## Signal (уведомления по Incident)
 
 Реестр по `ChannelKind`, тот же паттерн, что у Probe — `webhook` (POST
-JSON) и `telegram` (Bot API), оба на общем `httpx.AsyncClient` планировщика
-(см. `app/scheduler.py`). Срабатывает только на ВНОВЬ открытые Incident
+JSON), `telegram` (Bot API) и `apprise` (библиотека Apprise, единый
+URL-формат на 80+ сервисов — Slack/Discord/Matrix/ntfy/email и т.д. без
+своего клиента под каждый; синхронный вызов уходит через
+`asyncio.to_thread`, не блокирует цикл опроса). Первые два — на общем
+`httpx.AsyncClient` планировщика (см. `app/scheduler.py`). Срабатывает
+только на ВНОВЬ открытые Incident
 (не на "ещё открыт" при повторном опросе) — `evaluate_probe()` в
 `watch_engine.py` возвращает список свежеоткрытых, `dispatch()` их
 рассылает по всем `enabled` каналам, чей `min_severity` не выше severity
@@ -161,8 +165,16 @@ curl -X POST localhost:8100/api/channels -H 'content-type: application/json' -d 
 }'
 ```
 
+```bash
+curl -X POST localhost:8100/api/channels -H 'content-type: application/json' -d '{
+  "kind": "apprise",
+  "config": {"url": "ntfy://ntfy.sh/gridforge-test-topic"}
+}'
+```
+
 Проверено вживую: закрытый TCP-порт → `Watch(probe_failed)` → `Incident` →
 реальная POST-доставка на тестовый HTTP-приёмник, содержимое совпало.
+Канал `apprise` проверен отдельно тем же путём на реальном `ntfy`-топике.
 
 **Известный пробел**: канал глобальный на весь GridForge — привязки
 канала к конкретному Node/Watch (аналог action-условий в Zabbix) ещё нет,

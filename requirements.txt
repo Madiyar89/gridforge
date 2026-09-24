@@ -39,3 +39,9 @@ pymysql>=1.1
 openpyxl>=3.1
 # тестовый набор (2026-09-20)
 pytest>=8.3
+# каналы уведомлений через один общий URL-формат (docs/landscape-report.md,
+# п.4.2) — 80+ сервисов (Slack/Discord/Matrix/ntfy/email/...) без
+# написания клиента под каждый; webhook/telegram остаются отдельными
+# ChannelKind (уже есть, работают, не ломать), apprise — third вариант
+# для всего остального.
+apprise>=1.13

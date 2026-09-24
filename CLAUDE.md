@@ -171,7 +171,11 @@ docker rmi gridforge-test   # убрать за собой
 - ✅ **4.1** Плановый скан + оповещение о новых устройствах —
   `app/scan_engine.py` (`run_scan_and_notify`, `run_due_discovery_schedules`),
   `signal.notify_new_devices`.
-- ⬜ 4.2 Apprise вместо ручной интеграции каналов
+- ✅ **4.2** Apprise вместо ручной интеграции каналов — новый
+  `ChannelKind.apprise` в `app/signal.py` (`_send_apprise`/
+  `_send_apprise_new_devices`, синхронный вызов через `asyncio.to_thread`,
+  не блокирует цикл опроса), webhook/telegram не тронуты. Проверено
+  вживую: реальная доставка на `ntfy.sh`-топик.
 - ⬜ 4.4 GeoIP/ASN рядом с внешними адресами (нужен MaxMind-ключ — внешняя
   зависимость, не только код)
 - ⬜ 4.5 Приёмник NetFlow/sFlow + дашборд топ-трафика (самая тяжёлая из

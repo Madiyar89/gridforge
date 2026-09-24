@@ -7,10 +7,12 @@ main.py:lifespan), не создают соединение заново на к
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
+import apprise
 import httpx
 from sqlalchemy.orm import Session
 
@@ -109,6 +111,26 @@ async def _send_telegram(client: httpx.AsyncClient, channel: Channel, incident: 
     )
 
 
+def _apprise_notify_sync(url: str, message: str) -> bool:
+    """apprise.Apprise().notify() блокирующий (requests, не httpx) — зовётся
+    только через asyncio.to_thread, никогда напрямую из корутины."""
+    client = apprise.Apprise()
+    if not client.add(url):
+        return False
+    return client.notify(body=message)
+
+
+@register(ChannelKind.apprise)
+async def _send_apprise(client: httpx.AsyncClient, channel: Channel, incident: Incident, message: str) -> None:
+    url = _decrypted(channel.config, "url")
+    if not url:
+        logger.warning("channel_id=%s (apprise): config.url не задан", channel.id)
+        return
+    ok = await asyncio.to_thread(_apprise_notify_sync, url, message)
+    if not ok:
+        logger.warning("channel_id=%s (apprise): доставка не удалась", channel.id)
+
+
 def channel_matches_incident(channel: Channel, incident: Incident) -> bool:
     """Общая проверка охвата канала — используется и обычной рассылкой
     при открытии Incident (dispatch), и эскалацией (escalation_engine),
@@ -187,6 +209,17 @@ async def _send_telegram_new_devices(client: httpx.AsyncClient, channel: Channel
         json={"chat_id": chat_id, "text": message},
         timeout=5.0,
     )
+
+
+@_register_new_device(ChannelKind.apprise)
+async def _send_apprise_new_devices(client: httpx.AsyncClient, channel: Channel, message: str) -> None:
+    url = _decrypted(channel.config, "url")
+    if not url:
+        logger.warning("channel_id=%s (apprise): config.url не задан", channel.id)
+        return
+    ok = await asyncio.to_thread(_apprise_notify_sync, url, message)
+    if not ok:
+        logger.warning("channel_id=%s (apprise): доставка (новые устройства) не удалась", channel.id)
 
 
 def format_new_devices_message(hosts: list[dict]) -> str:

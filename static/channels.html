@@ -33,8 +33,10 @@
     <select id="new-channel-kind">
       <option value="webhook">webhook</option>
       <option value="telegram">telegram</option>
+      <option value="apprise">apprise (80+ сервисов)</option>
     </select>
-    <input id="new-channel-target" placeholder="webhook: URL / telegram: bot_token,chat_id">
+    <input id="new-channel-target" placeholder="webhook: URL / telegram: bot_token,chat_id / apprise: slack://... , ntfy://... , mailto://...">
+    <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener" class="hint" style="align-self:center">формат apprise-URL ↗</a>
     <select id="new-channel-severity">
       <option value="info" selected>от info (все)</option>
       <option value="warning">от warning</option>
