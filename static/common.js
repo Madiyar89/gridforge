@@ -38,11 +38,15 @@ const NAV_ICONS = {
   ldap: '<rect x="3" y="4" width="14" height="4" rx="1"/><rect x="3" y="9" width="14" height="4" rx="1"/><rect x="3" y="14" width="14" height="2.5" rx="1"/><circle cx="6" cy="6" r=".6"/><circle cx="6" cy="11" r=".6"/>',
   vuln: '<path d="M10 2.5 16.5 5v5c0 4-3 6.5-6.5 7.5C6.5 16.5 3.5 14 3.5 10V5z"/><path d="M10 6.5v4.5"/><circle cx="10" cy="13.2" r=".7" fill="currentColor" stroke="none"/>',
   chevron: '<path d="M6 7.5 10 12l4-4.5"/>',
+  // Значок зоны (группы) в свёрнутой рельсе — свой только для "Настроек",
+  // у остальных групп переиспользован иконка первого/самого узнаваемого
+  // пункта группы (см. NAV_GROUPS: icon), не плодим похожие значки.
+  settingsgear: '<circle cx="10" cy="10" r="2.6"/><path d="M10 3.5v2.2M10 14.3v2.2M3.5 10h2.2M14.3 10h2.2M5.4 5.4l1.5 1.5M13.1 13.1l1.5 1.5M14.6 5.4l-1.5 1.5M6.9 13.1l-1.5 1.5"/>',
 };
 
-function navIcon(name) {
+function navIcon(name, extraClass) {
   return (
-    `<svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" ` +
+    `<svg class="nav-icon${extraClass ? " " + extraClass : ""}" viewBox="0 0 20 20" fill="none" stroke="currentColor" ` +
     `stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     `${NAV_ICONS[name] || ""}</svg>`
   );
@@ -57,6 +61,7 @@ const NAV_GROUPS = [
   },
   {
     title: "Сеть",
+    icon: "inventory",
     items: [
       { href: "inventory.html", label: "Инвентарь", icon: "inventory" },
       { href: "templates.html", label: "Шаблоны", icon: "templates" },
@@ -70,6 +75,7 @@ const NAV_GROUPS = [
   },
   {
     title: "Состояние",
+    icon: "audit",
     items: [
       { href: "backups.html", label: "Бэкапы", icon: "backups" },
       { href: "audit.html", label: "Аудит", icon: "audit" },
@@ -82,6 +88,7 @@ const NAV_GROUPS = [
   },
   {
     title: "Разведка",
+    icon: "scan",
     items: [
       { href: "scan.html", label: "Скан", icon: "scan" },
       { href: "vuln.html", label: "Уязвимости", icon: "vuln" },
@@ -92,6 +99,7 @@ const NAV_GROUPS = [
   },
   {
     title: "Настройки",
+    icon: "settingsgear",
     items: [
       { href: "channels.html", label: "Каналы", icon: "channels" },
       { href: "users.html", label: "Пользователи", icon: "users" },
@@ -496,9 +504,14 @@ function initTopbar() {
             `${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`
         )
         .join("");
+      // Значок зоны (по запросу пользователя, 2026-09-24: "4 рабочие
+      // зоны и внутри рабочие инструменты" — в свёрнутой рельсе группа
+      // сжимается до одной кликабельной иконки-зоны вместо плоского
+      // списка всех её пунктов, инструменты — через флайаут).
       const titleHtml = group.title
         ? `<button type="button" class="nav-group-title${isOpen ? " open" : ""}" data-group="${escapeHtml(group.title)}">` +
-          `<span>${group.title}</span>${navIcon("chevron")}</button>`
+          navIcon(group.icon) +
+          `<span>${group.title}</span>${navIcon("chevron", "nav-chevron")}</button>`
         : "";
       // Флайаут группы (по референсу пользователя, 2026-09-23: наведение
       // на группу в свёрнутой рельсе — всплывающая карточка со списком её

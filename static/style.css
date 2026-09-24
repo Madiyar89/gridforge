@@ -164,40 +164,38 @@ a{color:var(--accent);}
 .nav-flyout a:hover{color:var(--text);background:var(--surface-2);}
 .nav-flyout a.active{color:var(--accent-ink);background:var(--accent);}
 .nav-flyout .nav-icon{width:18px;height:18px;flex:none;}
-/* Заголовок группы в свёрнутом виде превращается в разделительную
-   черту: текст всё равно не прочитать, а границу групп видеть полезно.
-   В развёрнутом (pinned) виде — кликабельная кнопка-аккордеон (2026-09-23,
-   по запросу пользователя и примеру Zabbix: "не удобно на всё разом
-   смотреть") со стрелкой, которая разворачивает/сворачивает группу. */
+/* Заголовок группы = "рабочая зона" (по запросу пользователя,
+   2026-09-24: "4 рабочие зоны и внутри рабочие инструменты" — в
+   свёрнутой рельсе группа сжимается до ОДНОЙ кликабельной иконки-зоны
+   (см. NAV_GROUPS[].icon в common.js), а не плоского списка всех
+   пунктов сразу; инструменты внутри зоны — через флайаут по наведению
+   (уже реализован, см. .nav-flyout). В развёрнутой закреплённой панели
+   — прежний аккордеон: текстовая строка со стрелкой,
+   разворачивает/сворачивает список пунктов инлайн. */
 .nav-group-title{
-  display:flex;align-items:center;justify-content:space-between;width:100%;
+  display:flex;align-items:center;gap:10px;width:100%;
   font:inherit;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--text-dim);padding:4px 10px;white-space:nowrap;
-  height:0;overflow:hidden;
-  border-top:1px solid var(--border);margin:6px 4px 2px;
+  color:var(--text-dim);padding:7px 10px;white-space:nowrap;
+  border-top:1px solid var(--border);margin:6px 4px 2px;border-radius:10px;
   background:none;border-left:none;border-right:none;border-bottom:none;
-  text-align:left;cursor:default;transition:color .1s ease;
+  text-align:left;cursor:pointer;transition:color .1s ease,background .1s ease;
 }
-/* Реальный баг (2026-09-23, self-review): opacity:0 стоял на самой
-   кнопке — гасил не только текст, но и border-top, из-за чего
-   разделительная черта между группами в свёрнутой рельсе вообще не
-   рисовалась, хотя комментарий обещал обратное. Текст/стрелку прячем
-   отдельно (span/svg), сама кнопка с рамкой остаётся видимой всегда. */
-.nav-group-title span{opacity:0;transition:opacity .12s ease;}
-.topbar.pinned .nav-group-title{
-  height:auto;border-top:none;margin:0;padding:6px 10px 3px;cursor:pointer;
-}
+.nav-group-title:hover{color:var(--text);background:var(--surface-2);}
+/* Текст названия зоны и стрелка-аккордеон — только в закреплённой
+   развёрнутой панели, в рельсе видна одна иконка зоны. */
+.nav-group-title span{opacity:0;flex:1;min-width:0;transition:opacity .12s ease;}
+.topbar.pinned .nav-group-title{padding:6px 10px 3px;border-top:none;margin:0;}
 .topbar.pinned .nav-group-title span{opacity:1;}
-.topbar.pinned .nav-group-title:hover{color:var(--text);}
-.nav-group-title svg{width:12px;height:12px;flex:none;transition:transform .12s ease,opacity .12s ease;opacity:0;}
-.topbar.pinned .nav-group-title svg{opacity:1;}
-.nav-group-title.open svg{transform:rotate(180deg);}
+.nav-group-title .nav-chevron{width:12px;height:12px;flex:none;transition:transform .12s ease,opacity .12s ease;opacity:0;}
+.topbar.pinned .nav-group-title .nav-chevron{opacity:1;}
+.nav-group-title.open .nav-chevron{transform:rotate(180deg);}
 
 .nav-group-items{display:flex;flex-direction:column;gap:2px;overflow:hidden;}
 .nav-group-items.collapsed{display:none;}
-/* В узкой иконочной рельсе (не pinned) подписи группы всё равно не
-   видно — сворачивать там нечего, все иконки показываются как есть. */
-.topbar:not(.pinned) .nav-group-items.collapsed{display:flex;}
+/* В узкой иконочной рельсе пункты группы не показываются вовсе —
+   зона сжата до одной иконки (.nav-group-title выше), её инструменты
+   открываются флайаутом по наведению, а не плоским списком в рельсе. */
+.topbar:not(.pinned) .nav-group-items{display:none;}
 
 .nav a{
   position:relative;
@@ -259,6 +257,13 @@ a{color:var(--accent);}
   .topbar .brand b::after{opacity:1;}
   .topbar .keybox{pointer-events:auto;}
   .topbar .nav-group-title{opacity:1;height:auto;border-top:none;margin:0;padding:6px 10px 3px;}
+  .topbar .nav-group-title span,.topbar .nav-group-title .nav-chevron{opacity:1;}
+  /* На телефоне панель всегда полностью развёрнута (см. .topbar.open
+     выше) — "зона-иконка вместо списка", введённая для узкой рельсы
+     на десктопе, здесь неприменима: пункты группы показываем как
+     обычно, аккордеон (.collapsed) по-прежнему работает. */
+  .topbar:not(.pinned) .nav-group-items{display:flex;}
+  .topbar:not(.pinned) .nav-group-items.collapsed{display:none;}
   /* Пальцем в пункт высотой 32px попадать неудобно: рекомендуемый
      минимум для касания — 44px. Для мыши это было бы лишним, поэтому
      увеличиваем только там, где нет наведения. */
