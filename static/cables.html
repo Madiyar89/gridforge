@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Кабели</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  .cable-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .cable-form .field{display:flex;flex-direction:column;gap:4px;}
+  .cable-form .field label{font-size:11px;color:var(--text-dim);}
+  .cable-form input,.cable-form select{
+    background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+    border-radius:6px;padding:7px 9px;font-size:12.5px;font-family:var(--sans);color-scheme:dark;
+  }
+  .cable-form input[placeholder]{min-width:140px;}
+  .cable-form #cl-comment{min-width:160px;}
+  .cable-form #cl-add{
+    background:transparent;border:1px solid var(--accent);color:var(--accent);
+    border-radius:6px;padding:7px 12px;font-size:12.5px;cursor:pointer;font-weight:600;
+  }
+  .cable-form #cl-add:hover{background:var(--accent);color:var(--accent-ink);}
+  .cable-table{width:100%;border-collapse:collapse;font-size:12px;}
+  .cable-table th,.cable-table td{border:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:top;}
+  .cable-table th{background:var(--surface-2);font-weight:600;}
+  .cable-table-wrap{overflow-x:auto;padding:0 0 4px;}
+  .status-badge{
+    font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:4px;font-weight:700;
+    display:inline-block;white-space:nowrap;
+  }
+  .status-badge.active{background:var(--ok-bg,rgba(80,200,120,.15));color:var(--ok);}
+  .status-badge.spare{background:var(--info-bg);color:var(--info);}
+  .status-badge.damaged{background:var(--crit-bg);color:var(--crit);}
+  .cable-table .row-actions{display:flex;gap:6px;white-space:nowrap;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Кабели</h1>
+  <p>Журнал учёта кабельных соединений — куда физически идёт кабель от порта узла. Один конец всегда реальный порт узла GridForge (сверяется с последним снимком портов), второй — свободное описание (патч-панель, розетка, ПК, принтер).</p>
+</div>
+
+<div class="panel">
+  <h2>Группа</h2>
+  <div class="form-row" style="border-top:none">
+    <select id="cl-group-select"><option value="">выбери группу…</option></select>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Новая запись</h2>
+  <div class="cable-form">
+    <div class="field">
+      <label>Узел</label>
+      <select id="cl-node"><option value="">выбери группу…</option></select>
+    </div>
+    <div class="field">
+      <label>Порт узла</label>
+      <select id="cl-port"><option value="">сначала выбери узел…</option></select>
+    </div>
+    <div class="field">
+      <label>Второй конец</label>
+      <input id="cl-other" placeholder="каб. 305, розетка 2">
+    </div>
+    <div class="field">
+      <label>Тип кабеля</label>
+      <input id="cl-type" placeholder="UTP cat6, оптика…">
+    </div>
+    <div class="field">
+      <label>Длина, м</label>
+      <input id="cl-length" type="number" min="0" step="0.5" style="min-width:70px">
+    </div>
+    <div class="field">
+      <label>Статус</label>
+      <select id="cl-status">
+        <option value="active">в работе</option>
+        <option value="spare">резерв</option>
+        <option value="damaged">повреждён</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Дата прокладки</label>
+      <input id="cl-laid" type="date">
+    </div>
+    <div class="field">
+      <label>Ответственный</label>
+      <input id="cl-responsible" placeholder="Ф.И.О.">
+    </div>
+    <div class="field">
+      <label>Комментарий</label>
+      <input id="cl-comment" placeholder="необязательно">
+    </div>
+    <button id="cl-add">Добавить</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>
+    <span>Журнал <span class="count" id="cl-count"></span></span>
+    <button id="cl-download" class="btn-ghost">Скачать .xlsx</button>
+  </h2>
+  <div class="cable-table-wrap">
+    <table class="cable-table" id="cl-table"><tbody><tr><td class="empty">Выбери группу выше</td></tr></tbody></table>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="cables.js"></script>
+</body>
+</html>

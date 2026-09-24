@@ -75,6 +75,9 @@ from app.models import (
     AuditFinding,
     AuditRule,
     Backup,
+    CableLink,
+    CableLinkStatus,
+    CABLE_LINK_STATUS_LABELS,
     Capture,
     CaptureStatus,
     Channel,
@@ -141,6 +144,7 @@ from app.schemas import (
     ApiKeyIn,
     AuditRuleIn,
     BackupTriggerIn,
+    CableLinkIn,
     CaptureIn,
     ChannelIn,
     CredentialIn,
@@ -1506,6 +1510,183 @@ def delete_vuln_schedule(schedule_id: int, db: Session = Depends(_db), key: Prin
     db.delete(sched)
     db.commit()
     return Response(status_code=204)
+
+
+# === Журнал учёта кабельных соединений (Разведка) — гибридная схема:
+# один конец связи всегда реальный Node+порт GridForge (порт сверяется
+# с последним снимком портов узла), другой — свободный текст (розетка/
+# патч-панель/ПК/принтер редко сами являются опрашиваемым узлом).
+
+
+def _validate_cable_link_port(db: Session, node_id: int, port_name: str) -> None:
+    snapshot = latest_snapshot(db, node_id)
+    if snapshot is None or not snapshot.ports:
+        return  # ещё не было ни одного бэкапа/снимка — сверять не с чем, не блокируем
+    known = {p.get("name", "") for p in snapshot.ports}
+    if port_name not in known:
+        raise HTTPException(status_code=400, detail=f"Порт {port_name!r} не найден в последнем снимке узла")
+
+
+@api_operate.post("/api/groups/{group_id}/cable-links", status_code=201)
+def create_cable_link(
+    group_id: int,
+    payload: CableLinkIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    if db.get(Group, group_id) is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    node = db.get(Node, payload.node_id)
+    if node is None or node.group_id != group_id:
+        raise HTTPException(status_code=400, detail="Узел не найден в этой группе")
+    if payload.status not in CABLE_LINK_STATUS_LABELS:
+        raise HTTPException(status_code=400, detail=f"Неизвестный статус: {payload.status!r}")
+    if not payload.port_name.strip() or not payload.other_label.strip():
+        raise HTTPException(status_code=400, detail="Порт и второй конец обязательны")
+    _validate_cable_link_port(db, node.id, payload.port_name)
+
+    link = CableLink(
+        group_id=group_id,
+        node_id=node.id,
+        port_name=payload.port_name.strip(),
+        other_label=payload.other_label.strip(),
+        cable_type=payload.cable_type,
+        length_m=payload.length_m,
+        status=payload.status,
+        responsible=payload.responsible,
+        laid_on=payload.laid_on,
+        comment=payload.comment,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return {"id": link.id}
+
+
+def _cable_link_json(link: CableLink) -> dict:
+    return {
+        "id": link.id,
+        "node_id": link.node_id,
+        "node_name": link.node.name if link.node else "",
+        "port_name": link.port_name,
+        "other_label": link.other_label,
+        "cable_type": link.cable_type,
+        "length_m": link.length_m,
+        "status": link.status.value,
+        "status_label": CABLE_LINK_STATUS_LABELS.get(link.status.value, link.status.value),
+        "responsible": link.responsible,
+        "laid_on": link.laid_on,
+        "comment": link.comment,
+        "created_at": iso(link.created_at),
+    }
+
+
+@api_read.get("/api/groups/{group_id}/cable-links")
+def list_cable_links(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    links = (
+        db.query(CableLink)
+        .filter(CableLink.group_id == group_id)
+        .order_by(desc(CableLink.created_at))
+        .all()
+    )
+    return [_cable_link_json(link) for link in links]
+
+
+@api_operate.patch("/api/cable-links/{link_id}")
+def update_cable_link(
+    link_id: int,
+    payload: CableLinkIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    link = db.get(CableLink, link_id)
+    if link is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    if not key_sees_group(key, link.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    node = db.get(Node, payload.node_id)
+    if node is None or node.group_id != link.group_id:
+        raise HTTPException(status_code=400, detail="Узел не найден в этой группе")
+    if payload.status not in CABLE_LINK_STATUS_LABELS:
+        raise HTTPException(status_code=400, detail=f"Неизвестный статус: {payload.status!r}")
+    _validate_cable_link_port(db, node.id, payload.port_name)
+
+    link.node_id = node.id
+    link.port_name = payload.port_name.strip()
+    link.other_label = payload.other_label.strip()
+    link.cable_type = payload.cable_type
+    link.length_m = payload.length_m
+    link.status = payload.status
+    link.responsible = payload.responsible
+    link.laid_on = payload.laid_on
+    link.comment = payload.comment
+    db.commit()
+    return {"ok": True}
+
+
+@api_operate.delete("/api/cable-links/{link_id}", status_code=204)
+def delete_cable_link(link_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    link = db.get(CableLink, link_id)
+    if link is None:
+        return Response(status_code=204)
+    if not key_sees_group(key, link.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    db.delete(link)
+    db.commit()
+    return Response(status_code=204)
+
+
+@api_read.get("/api/groups/{group_id}/cable-links.xlsx")
+def download_cable_links(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    group = db.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    from openpyxl import Workbook
+
+    links = (
+        db.query(CableLink)
+        .filter(CableLink.group_id == group_id)
+        .order_by(desc(CableLink.created_at))
+        .all()
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Кабельные соединения"
+    headers = [
+        "Узел", "Порт", "Второй конец", "Тип кабеля", "Длина, м",
+        "Статус", "Ответственный", "Дата прокладки", "Комментарий", "Добавлено",
+    ]
+    ws.append(headers)
+    for link in links:
+        ws.append([
+            link.node.name if link.node else "",
+            link.port_name,
+            link.other_label,
+            link.cable_type or "",
+            link.length_m if link.length_m is not None else "",
+            CABLE_LINK_STATUS_LABELS.get(link.status.value, link.status.value),
+            link.responsible or "",
+            link.laid_on or "",
+            link.comment or "",
+            iso(link.created_at) or "",
+        ])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    encoded_name = quote(f"kabelnye-soedineniya-{group.name}.xlsx")
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"kabelnye-soedineniya.xlsx\"; filename*=UTF-8''{encoded_name}"
+        },
+    )
 
 
 @api_operate.post("/api/ad-audit", status_code=201)

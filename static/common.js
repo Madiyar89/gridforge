@@ -37,6 +37,7 @@ const NAV_ICONS = {
   integrations: '<circle cx="5.5" cy="5.5" r="2.3"/><circle cx="14.5" cy="5.5" r="2.3"/><circle cx="5.5" cy="14.5" r="2.3"/><circle cx="14.5" cy="14.5" r="2.3"/><path d="M7.6 5.5h4.6"/><path d="M5.5 7.6v4.6"/><path d="M14.5 7.6v4.6"/>',
   ldap: '<rect x="3" y="4" width="14" height="4" rx="1"/><rect x="3" y="9" width="14" height="4" rx="1"/><rect x="3" y="14" width="14" height="2.5" rx="1"/><circle cx="6" cy="6" r=".6"/><circle cx="6" cy="11" r=".6"/>',
   vuln: '<path d="M10 2.5 16.5 5v5c0 4-3 6.5-6.5 7.5C6.5 16.5 3.5 14 3.5 10V5z"/><path d="M10 6.5v4.5"/><circle cx="10" cy="13.2" r=".7" fill="currentColor" stroke="none"/>',
+  cables: '<path d="M3 15q3 0 3-4t4-4q4 0 4 4t3 4"/><circle cx="3" cy="15" r="1.3"/><circle cx="17" cy="15" r="1.3"/>',
   chevron: '<path d="M6 7.5 10 12l4-4.5"/>',
   // Значок зоны (группы) в свёрнутой рельсе — свой только для "Настроек",
   // у остальных групп переиспользован иконка первого/самого узнаваемого
@@ -92,6 +93,7 @@ const NAV_GROUPS = [
     items: [
       { href: "scan.html", label: "Скан", icon: "scan" },
       { href: "vuln.html", label: "Уязвимости", icon: "vuln" },
+      { href: "cables.html", label: "Кабели", icon: "cables" },
       { href: "capture.html", label: "Трафик", icon: "capture" },
       { href: "ad-audit.html", label: "AD-аудит", icon: "adaudit" },
       { href: "network-audit.html", label: "Аудит сети", icon: "netaudit" },

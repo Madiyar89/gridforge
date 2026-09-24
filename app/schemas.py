@@ -287,6 +287,18 @@ class VulnScanRunIn(BaseModel):
     responsible: str | None = None  # Ф.И.О. и должность — для отчёта
 
 
+class CableLinkIn(BaseModel):
+    node_id: int
+    port_name: str
+    other_label: str
+    cable_type: str | None = None
+    length_m: float | None = None
+    status: str = "active"  # active | spare | damaged
+    responsible: str | None = None
+    laid_on: str | None = None  # "YYYY-MM-DD"
+    comment: str | None = None
+
+
 class VulnScanScheduleIn(BaseModel):
     profiles: list[str]  # ping | quick | full_ports | vuln | os
     weekday: int  # 0=понедельник .. 6=воскресенье

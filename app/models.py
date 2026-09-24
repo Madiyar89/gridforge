@@ -724,6 +724,49 @@ class VulnScanSchedule(Base):
     group: Mapped["Group"] = relationship()
 
 
+class CableLinkStatus(str, enum.Enum):
+    active = "active"
+    spare = "spare"
+    damaged = "damaged"
+
+
+CABLE_LINK_STATUS_LABELS: dict[str, str] = {
+    "active": "в работе",
+    "spare": "резерв",
+    "damaged": "повреждён",
+}
+
+
+class CableLink(Base):
+    """Журнал учёта кабельных соединений — перенос функции NetOpsHub
+    (бумажный/Excel-журнал "куда физически идёт кабель"). Гибридная
+    схема, не обе стороны — реальные узлы GridForge: один конец всегда
+    привязан к реальному Node+порту (порт валидируется по последнему
+    снимку портов узла, см. /api/nodes/{id}/ports — тот же справочник,
+    что уже использует страница Порты), другой конец — свободный текст
+    (патч-панель/розетка/ПК/принтер редко сами являются опрашиваемым
+    узлом, требовать для них Node было бы искусственно и половину
+    реальных записей просто нельзя было бы завести)."""
+
+    __tablename__ = "cable_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), nullable=False)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), nullable=False)
+    port_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    other_label: Mapped[str] = mapped_column(String(255), nullable=False)  # "каб. 305, розетка 2"
+    cable_type: Mapped[str | None] = mapped_column(String(64), nullable=True)  # UTP cat5e/cat6, оптика...
+    length_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[CableLinkStatus] = mapped_column(Enum(CableLinkStatus), default=CableLinkStatus.active)
+    responsible: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    laid_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "YYYY-MM-DD"
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    group: Mapped["Group"] = relationship()
+    node: Mapped["Node"] = relationship()
+
+
 class DomainScanMethod(str, enum.Enum):
     winrm = "winrm"
     smb_domain = "smb_domain"
