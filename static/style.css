@@ -500,7 +500,12 @@ select{
 .group-heading{
   padding:9px 16px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);
   background:var(--surface-2);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
 }
+.group-heading .node-chevron{transition:transform .15s ease;}
+.group-block.collapsed .group-heading .node-chevron{transform:rotate(0deg);}
+.group-block:not(.collapsed) .group-heading .node-chevron{transform:rotate(90deg);}
+.group-block.collapsed .group-rows{display:none;}
 .vendor-badge{
   font-family:var(--mono);font-size:10.5px;color:var(--text-dim);border:1px solid var(--border);
   border-radius:4px;padding:1px 5px;margin-left:6px;

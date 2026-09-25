@@ -6,6 +6,13 @@
 // (по умолчанию свёрнуты, запрос пользователя 2026-09-25: список из
 // нескольких десятков узлов иначе не окинуть взглядом).
 const expandedNodes = new Set();
+// То же самое, но для заголовков групп ("Группа-Б · Интернет"/"Группа-А ·
+// Интернет") — запрос пользователя, 2026-09-25: свернуть/развернуть
+// нужно не только отдельный узел, но и сразу весь список под
+// заголовком группы. По умолчанию группы развёрнуты (в отличие от
+// узлов внутри них) — сворачивание узлов уже решает задачу компактности,
+// группа целиком нужна реже.
+const collapsedGroups = new Set();
 
 async function refreshGroups() {
   const body = document.getElementById("groups-body");
@@ -80,6 +87,11 @@ function scrollToLinkedNode() {
   scrolledToLinkedNode = true;
   expandedNodes.add(Number(nodeId));
   el.classList.add("highlight", "expanded");
+  const groupBlock = el.closest(".group-block");
+  if (groupBlock) {
+    collapsedGroups.delete(groupBlock.dataset.group);
+    groupBlock.classList.remove("collapsed");
+  }
   el.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -146,12 +158,30 @@ async function refreshNodes() {
   body.innerHTML = groupNames
     .map((groupName) => {
       const rows = byGroup.get(groupName).map(renderNodeItem).join("");
-      return showHeadings ? `<div class="group-heading">${escapeHtml(groupName)}</div>${rows}` : rows;
+      if (!showHeadings) return rows;
+      const isCollapsed = collapsedGroups.has(groupName);
+      return `
+        <div class="group-block${isCollapsed ? " collapsed" : ""}" data-group="${escapeHtml(groupName)}">
+          <div class="group-heading group-toggle">
+            <svg class="node-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 5l5 5-5 5"/></svg>
+            ${escapeHtml(groupName)}
+          </div>
+          <div class="group-rows">${rows}</div>
+        </div>`;
     })
     .join("");
 
   scrollToLinkedNode();
 
+  body.querySelectorAll(".group-toggle").forEach((el) => {
+    el.addEventListener("click", () => {
+      const block = el.closest(".group-block");
+      const groupName = block.dataset.group;
+      if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
+      else collapsedGroups.add(groupName);
+      block.classList.toggle("collapsed");
+    });
+  });
   body.querySelectorAll(".node-toggle").forEach((el) => {
     el.addEventListener("click", () => {
       const item = el.closest(".node-item");
