@@ -17,6 +17,9 @@ Sample пишется на каждый Probe раз в interval_seconds, syslog
                                             растёт кратно быстрее syslog —
                                             поток на каждое TCP/UDP-
                                             соединение, не на событие)
+  GRIDFORGE_RETENTION_SYNC_REPORTS_DAYS (30) снимки удалённых площадок
+                                            (Sync Node, docs/landscape-
+                                            report.md §4.10)
 
 Бэкапы ограничены по количеству, а не по возрасту, сознательно: у редко
 меняющегося узла снимки могут быть старше любого разумного срока, и
@@ -38,7 +41,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import Backup, Capture, FlowRecord, Sample, SyslogMessage, _now
+from app.models import Backup, Capture, FlowRecord, RemoteSiteReport, Sample, SyslogMessage, _now
 
 logger = logging.getLogger("gridforge.retention")
 
@@ -104,11 +107,15 @@ def run_retention(db: Session) -> dict[str, int]:
         "captures": _delete_old_captures(db, _days("GRIDFORGE_RETENTION_CAPTURES_DAYS", 7)),
         "backups": _trim_backups(db, _days("GRIDFORGE_RETENTION_BACKUPS_KEEP", 20)),
         "flows": _delete_old(db, FlowRecord, FlowRecord.received_at, _days("GRIDFORGE_RETENTION_FLOWS_DAYS", 3)),
+        "sync_reports": _delete_old(
+            db, RemoteSiteReport, RemoteSiteReport.received_at, _days("GRIDFORGE_RETENTION_SYNC_REPORTS_DAYS", 30)
+        ),
     }
     db.commit()
     if any(result.values()):
         logger.info(
-            "очистка: samples=%s syslog=%s captures=%s backups=%s flows=%s",
+            "очистка: samples=%s syslog=%s captures=%s backups=%s flows=%s sync_reports=%s",
             result["samples"], result["syslog"], result["captures"], result["backups"], result["flows"],
+            result["sync_reports"],
         )
     return result

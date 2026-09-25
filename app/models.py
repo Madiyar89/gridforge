@@ -1126,3 +1126,46 @@ class EscalationStep(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
 
     channel: Mapped["Channel"] = relationship()
+
+
+class RemoteSite(Base):
+    """Удалённая площадка — другой, независимый инстанс GridForge,
+    который присылает сюда сводку о себе (docs/landscape-report.md,
+    §4.10, шаг 2 — 2026-09-25, по прямому запросу владельца: реальный
+    сценарий "переносной инстанс на флешке + постоянный в корпоративной
+    сети", не гипотетический MSP).
+
+    Сознательно НЕ переиспользует ApiKey/ApiKeyRole — токен видит только
+    один узкий эндпоинт приёма отчёта (`POST /api/sync/report`), не весь
+    остальной API хаба. Компрометация токена площадки не даёт доступа ни
+    к чему, кроме права прислать ещё один отчёт от её имени."""
+
+    __tablename__ = "remote_sites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class RemoteSiteReport(Base):
+    """Один принятый снимок состояния удалённой площадки — счётчики и
+    список открытых инцидентов на момент отправки (не история их
+    изменения, площадка просто шлёт текущий срез). Хаб хранит несколько
+    последних снимков на площадку (см. retention_engine.py), не архив
+    навсегда."""
+
+    __tablename__ = "remote_site_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("remote_sites.id"), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    node_count: Mapped[int] = mapped_column(Integer, default=0)
+    incidents_critical: Mapped[int] = mapped_column(Integer, default=0)
+    incidents_warning: Mapped[int] = mapped_column(Integer, default=0)
+    incidents_info: Mapped[int] = mapped_column(Integer, default=0)
+    # [{"node": "...", "watch_label": "...", "severity": "...", "opened_at": "..."}, ...],
+    # обрезано отправляющей стороной до разумного количества (см. sync_engine.py)
+    incidents: Mapped[list] = mapped_column(JSON, default=list)
+
+    site: Mapped["RemoteSite"] = relationship()

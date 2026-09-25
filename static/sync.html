@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridForge — Площадки</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  .site-card{padding:14px 16px;border-bottom:1px solid var(--border);}
+  .site-card:last-child{border-bottom:none;}
+  .site-head{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .site-head b{font-size:14px;}
+  .site-meta{color:var(--text-dim);font-size:12px;margin-top:4px;}
+  .site-counts{display:flex;gap:14px;margin-top:8px;font-size:12.5px;}
+  .site-counts span.crit{color:var(--crit,#e05555)}
+  .site-counts span.warn{color:var(--warn,#e8b451)}
+  .site-incident-row{padding:5px 0;font-size:12px;color:var(--text-dim);border-top:1px solid var(--border);}
+  .token-box{padding:10px;margin-top:8px;background:var(--surface-2);border-radius:6px;font-family:var(--mono);font-size:12px;word-break:break-all;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>GridForge</b><span>сеть · опрос · триггеры</span></div>
+  <div class="topbar-right">
+    <nav class="nav" id="nav"></nav>
+    <span id="role-pill" class="role-pill">не авторизован</span>
+    <div class="keybox">
+      <input id="api-key-input" type="password" placeholder="X-API-Key">
+      <button id="save-key">Войти</button>
+    </div>
+  </div>
+</div>
+
+<div class="page-head">
+  <h1>Площадки (Sync Node)</h1>
+  <p>Другие независимые инстансы GridForge сами присылают сюда сводку о себе, когда у них есть сеть (docs/landscape-report.md, §4.10, шаг 2). Заведи площадку ниже — токен покажется один раз, его нужно указать на удалённом инстансе как <code>GRIDFORGE_SYNC_TOKEN</code> (плюс <code>GRIDFORGE_SYNC_HUB_URL=&lt;адрес этого сервера&gt;</code>).</p>
+</div>
+
+<div class="panel">
+  <h2>Новая площадка</h2>
+  <div class="form-row" style="border-top:none">
+    <input id="new-site-label" placeholder="имя площадки, например «Выезд — флешка»">
+    <button id="add-site">+ площадка</button>
+  </div>
+  <div id="new-site-token" style="display:none" class="token-box"></div>
+</div>
+
+<div class="panel">
+  <h2>Площадки <span class="count" id="sites-count"></span></h2>
+  <div class="body" id="sites-body"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="common.js"></script>
+<script src="sync.js"></script>
+</body>
+</html>

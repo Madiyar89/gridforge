@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket
+from fastapi import APIRouter, Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, func
@@ -57,6 +57,7 @@ from app.domain_scan_engine import DomainScanValidationError, run_domain_scan
 from app.firmware_store import ALLOWED_VENDORS, FirmwareError, delete_firmware, firmware_path, list_firmware, save_firmware
 from app.geoip_engine import lookup as geoip_lookup
 from app.lifecycle_engine import suggest_offline_archival, suggest_vendor_grouping
+from app.sync_engine import create_site, latest_reports, record_report, resolve_site
 from app.ask_engine import AskError, ask_network
 from app.dashboard_engine import build_dashboard
 from app.metrics_engine import render_prometheus_metrics
@@ -113,6 +114,7 @@ from app.models import (
     LdapConnection,
     Node,
     Probe,
+    RemoteSite,
     Sample,
     Scan,
     ScanHost,
@@ -166,6 +168,8 @@ from app.schemas import (
     ApiKeyIn,
     AskIn,
     AuditRuleIn,
+    RemoteSiteIn,
+    SyncReportIn,
     BackupTriggerIn,
     CableDiscoveryScheduleIn,
     CableLinkIn,
@@ -761,6 +765,44 @@ def lifecycle_suggestions(db: Session = Depends(_db), key: Principal = Depends(r
     vendor_grouping = suggest_vendor_grouping(db) if key_sees_group(key, None) else []
     offline_archival = [s for s in suggest_offline_archival(db) if key_sees_group(key, db.get(Node, s["node_id"]).group_id)]
     return {"vendor_grouping": vendor_grouping, "offline_archival": offline_archival}
+
+
+@api_write.post("/api/sync/sites", status_code=201)
+def create_remote_site(payload: RemoteSiteIn, db: Session = Depends(_db)):
+    """Регистрирует площадку на хабе — токен отдаётся ровно один раз,
+    как API-ключ (docs/landscape-report.md §4.10 шаг 2)."""
+    site, raw_token = create_site(db, payload.label)
+    return {"id": site.id, "label": site.label, "token": raw_token}
+
+
+@api_read.get("/api/sync/sites")
+def list_remote_sites(db: Session = Depends(_db)):
+    return latest_reports(db)
+
+
+@api_write.delete("/api/sync/sites/{site_id}", status_code=204)
+def delete_remote_site(site_id: int, db: Session = Depends(_db)):
+    site = db.get(RemoteSite, site_id)
+    if site is not None:
+        db.delete(site)
+        db.commit()
+
+
+@app.post("/api/sync/report")
+def receive_sync_report(
+    payload: SyncReportIn,
+    db: Session = Depends(_db),
+    x_sync_token: str | None = Header(default=None),
+):
+    """Приём отчёта от площадки — намеренно НЕ на api_read/api_write:
+    площадка аутентифицируется собственным токеном (X-Sync-Token), не
+    X-API-Key хаба — токен площадки не даёт доступа ни к чему, кроме
+    права прислать ещё один отчёт от её имени (см. app/sync_engine.py)."""
+    site = resolve_site(db, x_sync_token)
+    if site is None:
+        raise HTTPException(status_code=401, detail="Неизвестный или неверный токен площадки")
+    record_report(db, site, payload.model_dump())
+    return {"status": "ok"}
 
 
 @api_write.post("/api/ask")

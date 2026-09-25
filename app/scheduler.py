@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import heapq
 import logging
+import os
 import time
 
 import httpx
@@ -27,6 +28,7 @@ from app.escalation_engine import run_escalations
 from app.geoip_engine import GeoipDownloadError, download_databases, needs_refresh
 from app.integrations_engine import decrypt_token
 from app.models import Integration, Probe, ProbeKind, Sample, _now
+from app.sync_engine import push_snapshot, sync_enabled
 from app.probes import run_probe
 from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
@@ -107,6 +109,23 @@ class Scheduler:
         except Exception:
             logger.exception("сбой планового скана новых устройств")
 
+    async def _run_sync_push_safe(self) -> None:
+        """Отправка отчёта на хаб (docs/landscape-report.md §4.10 шаг 2) —
+        отсутствие сети/хаба не ошибка (переносной инстанс может быть
+        офлайн большую часть времени), push_snapshot сама это тихо
+        логирует и не бросает исключение наружу, но всё равно в try —
+        защита от неожиданного сбоя сборки снимка (например, битые
+        данные в БД)."""
+        if not sync_enabled():
+            return
+        db = get_session()
+        try:
+            await push_snapshot(db)
+        except Exception:
+            logger.exception("сбой отправки отчёта на хаб")
+        finally:
+            db.close()
+
     async def _run_geoip_refresh_safe(self) -> None:
         """Проверка дешёвая (stat() двух файлов) — сама сеть только если
         база реально устарела (needs_refresh(), раз в ~7 дней) или её ещё
@@ -137,6 +156,7 @@ class Scheduler:
         cable_schedule_interval_seconds: float = 60.0,
         discovery_schedule_interval_seconds: float = 60.0,
         geoip_refresh_interval_seconds: float = 3600.0,
+        sync_push_interval_seconds: float = float(os.environ.get("GRIDFORGE_SYNC_INTERVAL_MIN", 15)) * 60,
     ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
@@ -146,6 +166,7 @@ class Scheduler:
             last_cable_schedule_check = 0.0
             last_discovery_schedule_check = 0.0
             last_geoip_check = 0.0
+            last_sync_push_check = 0.0
             # Первая очистка — не сразу при старте, а через сутки работы:
             # перезапуск сервиса не должен каждый раз запускать удаление.
             last_retention = time.monotonic()
@@ -192,6 +213,12 @@ class Scheduler:
                     # ~7 дней, см. _run_geoip_refresh_safe.
                     asyncio.create_task(self._run_geoip_refresh_safe())
                     last_geoip_check = now
+                if now - last_sync_push_check >= sync_push_interval_seconds:
+                    # Фоновой задачей — сетевой вызов на чужой хаб не должен
+                    # задерживать опрос Probe, тот же довод, что у остальных
+                    # плановых проверок выше.
+                    asyncio.create_task(self._run_sync_push_safe())
+                    last_sync_push_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
                     try:

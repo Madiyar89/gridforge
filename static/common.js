@@ -109,6 +109,7 @@ const NAV_GROUPS = [
       { href: "users.html", label: "Пользователи", icon: "users" },
       { href: "credentials.html", label: "Учётки", icon: "credentials" },
       { href: "integrations.html", label: "Интеграции", icon: "integrations" },
+      { href: "sync.html", label: "Площадки", icon: "integrations" },
       { href: "ldap.html", label: "LDAP", icon: "ldap" },
     ],
   },

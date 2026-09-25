@@ -44,6 +44,25 @@ class IntegrationIn(BaseModel):
     api_token: str
 
 
+class RemoteSiteIn(BaseModel):
+    """Регистрация удалённой площадки на хабе (app/sync_engine.py,
+    docs/landscape-report.md §4.10 шаг 2)."""
+
+    label: str
+
+
+class SyncReportIn(BaseModel):
+    """Снимок состояния, который присылает площадка (см.
+    app/sync_engine.py:build_snapshot — та же форма на обеих сторонах)."""
+
+    label: str | None = None
+    node_count: int = 0
+    incidents_critical: int = 0
+    incidents_warning: int = 0
+    incidents_info: int = 0
+    incidents: list[dict] = []
+
+
 class AskIn(BaseModel):
     """Вопрос для «Спроси про сеть» (app/ask_engine.py)."""
 
