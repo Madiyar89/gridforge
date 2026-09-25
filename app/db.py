@@ -101,6 +101,9 @@ def _migrate_missing_columns() -> None:
         "cable_links": [
             ("source", "VARCHAR(16) DEFAULT 'manual'"),
         ],
+        "scans": [
+            ("vlan_id", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

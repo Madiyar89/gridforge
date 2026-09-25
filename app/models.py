@@ -86,6 +86,41 @@ class Group(Base):
     nodes: Mapped[list["Node"]] = relationship(back_populates="group")
 
 
+class Vlan(Base):
+    """VLAN/подсеть как отдельная сущность в Инвентаре (запрос
+    пользователя, 2026-09-25): коммутаторы уже опрашиваются как Node, но
+    сам сегмент сети — VLAN ID, диапазон адресов, шлюз — раньше было
+    негде зафиксировать, и не с чем свериться "кто ещё живёт в этой
+    подсети, кроме опрашиваемых узлов". Две проверки: доступность шлюза
+    (icmp_ping — тот же исполнитель, что у Probe, см. app/probes.py) и
+    скан подсети (переиспользует Scan/ScanHost из scan_engine — тот же
+    nmap ping-скан, что у "Обнаружение сети"/Sweep, не свой отдельный
+    сканер). Утилизация адресов считается от последнего скана:
+    host_count / usable_addresses(cidr) — см. app/vlan_engine.py.
+
+    gateway_ok/gateway_checked_at/gateway_detail — только последний
+    результат, не история: как и latest_sample у Probe (app/main.py,
+    list_node_probes), для дашборда сети важно текущее состояние, а не
+    журнал каждой проверки шлюза."""
+
+    __tablename__ = "vlans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    vlan_id: Mapped[int | None] = mapped_column(nullable=True)
+    cidr: Mapped[str] = mapped_column(String(64), nullable=False)
+    gateway: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    gateway_ok: Mapped[bool | None] = mapped_column(nullable=True)
+    gateway_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    gateway_detail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    group: Mapped["Group | None"] = relationship()
+
+
 class Credential(Base):
     """Централизованная учётка для подключения к узлам — своя версия
     Ansible Vault group_vars из NetOpsHub (там пароль/ключ задан один раз
@@ -607,6 +642,10 @@ class Scan(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Заполняется, только когда скан запущен как проверка конкретного VLAN
+    # (POST /api/vlans/{id}/check) — обычный ручной скан (/api/scans) его
+    # не трогает, останется NULL.
+    vlan_id: Mapped[int | None] = mapped_column(ForeignKey("vlans.id"), nullable=True)
 
     hosts: Mapped[list["ScanHost"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
 

@@ -4,6 +4,7 @@ async function refreshGroups() {
   const body = document.getElementById("groups-body");
   const select = document.getElementById("new-node-group");
   const filterSelect = document.getElementById("nodes-group-filter");
+  const vlanSelect = document.getElementById("new-vlan-group");
   let groups;
   try {
     groups = await api("/api/groups");
@@ -25,6 +26,12 @@ async function refreshGroups() {
     groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("") +
     `<option value="__none__">без группы</option>`;
   filterSelect.value = prevFilter;
+
+  const prevVlanGroup = vlanSelect.value;
+  vlanSelect.innerHTML =
+    `<option value="">без группы</option>` +
+    groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
+  vlanSelect.value = prevVlanGroup;
 
   if (groups.length === 0) {
     body.innerHTML = `<div class="empty">Групп нет — все узлы в общем списке</div>`;
@@ -589,8 +596,123 @@ async function refreshLifecycle() {
   });
 }
 
+// VLAN / сети (запрос пользователя, 2026-09-25): рядом с узлами-
+// коммутаторами — сам сегмент сети как отдельная сущность. Проверка
+// (кнопка "проверить") гоняет и пинг шлюза, и скан живых адресов разом
+// (POST /api/vlans/{id}/check), синхронно — на подсеть/24 это секунды,
+// отдельный polling-статус, как у долгих сканов, не нужен.
+
+function vlanGatewayBadge(v) {
+  if (!v.gateway) return `<span class="ok-dot unknown"></span>нет шлюза`;
+  if (v.gateway_ok === null) return `<span class="ok-dot unknown"></span>${escapeHtml(v.gateway)} — не проверялся`;
+  const cls = v.gateway_ok ? "up" : "down";
+  const label = v.gateway_ok ? "отвечает" : v.gateway_detail || "не отвечает";
+  return `<span class="ok-dot ${cls}"></span>${escapeHtml(v.gateway)} — ${escapeHtml(label)}`;
+}
+
+function vlanUtilizationText(v) {
+  if (v.host_count === null) return "ещё не сканировался";
+  return `${v.host_count} из ${v.usable_addresses} адресов (${v.utilization_pct}%)`;
+}
+
+async function refreshVlans() {
+  const body = document.getElementById("vlans-body");
+  let vlans;
+  try {
+    vlans = await api("/api/vlans");
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  document.getElementById("vlans-count").textContent = vlans.length;
+
+  if (vlans.length === 0) {
+    body.innerHTML = `<div class="empty">VLAN/сетей пока нет — добавь ниже</div>`;
+    return;
+  }
+  body.innerHTML = vlans
+    .map(
+      (v) => `
+      <div class="node-item">
+        <div class="node-head">
+          <span class="name">${escapeHtml(v.name)}${v.vlan_id ? `<span class="vendor-badge">VLAN ${v.vlan_id}</span>` : ""}</span>
+          <span class="actions">
+            <span class="addr">${escapeHtml(v.cidr)}${v.group_name ? ` · ${escapeHtml(v.group_name)}` : ""}</span>
+            <button type="button" class="icon-btn check-vlan" data-id="${v.id}">проверить</button>
+            <button type="button" class="icon-btn del-vlan" data-id="${v.id}" data-name="${escapeHtml(v.name)}">удалить</button>
+          </span>
+        </div>
+        <div class="probe-list">
+          <div class="probe-chip"><span>${vlanGatewayBadge(v)}</span></div>
+          <div class="probe-chip"><span>${escapeHtml(vlanUtilizationText(v))}</span></div>
+        </div>
+      </div>`
+    )
+    .join("");
+
+  body.querySelectorAll(".check-vlan").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "проверяю…";
+      try {
+        await api(`/api/vlans/${btn.dataset.id}/check`, { method: "POST" });
+        toast("Проверка выполнена");
+        refreshVlans();
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+        btn.textContent = "проверить";
+      }
+    });
+  });
+  body.querySelectorAll(".del-vlan").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(`Удалить VLAN «${btn.dataset.name}»?`)) return;
+      try {
+        await api(`/api/vlans/${btn.dataset.id}`, { method: "DELETE" });
+        toast("VLAN удалён");
+        refreshVlans();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+  });
+}
+
+document.getElementById("add-vlan").addEventListener("click", async () => {
+  const name = document.getElementById("new-vlan-name").value.trim();
+  const vlanIdRaw = document.getElementById("new-vlan-id").value.trim();
+  const cidr = document.getElementById("new-vlan-cidr").value.trim();
+  const gateway = document.getElementById("new-vlan-gateway").value.trim();
+  const groupId = document.getElementById("new-vlan-group").value;
+  const description = document.getElementById("new-vlan-desc").value.trim();
+  if (!name || !cidr) return toast("Укажи имя и подсеть", true);
+  try {
+    await api("/api/vlans", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        vlan_id: vlanIdRaw ? Number(vlanIdRaw) : null,
+        cidr,
+        gateway: gateway || null,
+        group_id: groupId ? Number(groupId) : null,
+        description: description || null,
+      }),
+    });
+    document.getElementById("new-vlan-name").value = "";
+    document.getElementById("new-vlan-id").value = "";
+    document.getElementById("new-vlan-cidr").value = "";
+    document.getElementById("new-vlan-gateway").value = "";
+    document.getElementById("new-vlan-desc").value = "";
+    toast("VLAN добавлен");
+    refreshVlans();
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
 async function refreshAll() {
-  await Promise.all([refreshGroups(), refreshNodes(), updateRolePill(), refreshLifecycle()]);
+  await Promise.all([refreshGroups(), refreshNodes(), updateRolePill(), refreshLifecycle(), refreshVlans()]);
 }
 
 function onKeySaved() {

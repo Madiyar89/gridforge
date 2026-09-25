@@ -18,6 +18,15 @@ class GroupIn(BaseModel):
     name: str
 
 
+class VlanIn(BaseModel):
+    name: str
+    vlan_id: int | None = None
+    cidr: str
+    gateway: str | None = None
+    group_id: int | None = None
+    description: str | None = None
+
+
 class CredentialIn(BaseModel):
     """Ровно одно из node_id/group_id/vendor (или ни одного — учётка по
     умолчанию). Приоритет при разрешении: node_id > group_id > vendor >

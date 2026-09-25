@@ -71,6 +71,30 @@
   </div>
 </div>
 
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>Добавить VLAN / сеть</h2>
+      <div class="form-row" style="flex-direction:column;border-top:none;">
+        <input id="new-vlan-name" placeholder="имя (например: Серверная-3 этаж)">
+        <input id="new-vlan-id" type="number" min="1" max="4094" placeholder="VLAN ID (необязательно)">
+        <input id="new-vlan-cidr" placeholder="подсеть, например 198.51.100.0/24">
+        <input id="new-vlan-gateway" placeholder="шлюз, например 198.51.100.1 (необязательно)">
+        <select id="new-vlan-group"><option value="">без группы</option></select>
+        <input id="new-vlan-desc" placeholder="описание (необязательно)">
+        <button id="add-vlan">+ VLAN</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>VLAN / сети <span class="count" id="vlans-count"></span></h2>
+      <div class="body" id="vlans-body"><div class="empty">Загрузка…</div></div>
+    </div>
+  </div>
+</div>
+
 <dialog id="probe-modal">
   <form method="dialog" id="probe-form">
     <h3>Новая проверка — <span id="probe-modal-node"></span></h3>

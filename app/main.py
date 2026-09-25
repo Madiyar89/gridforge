@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import ipaddress
 import os
 from datetime import timedelta
 from urllib.parse import quote
@@ -131,6 +132,7 @@ from app.models import (
     Template,
     User,
     Vendor,
+    Vlan,
     VulnScan,
     VulnScanSchedule,
     VulnScanStatus,
@@ -150,6 +152,7 @@ from app.ldap_engine import LdapTestError, mask_connection, test_bind
 from app.ldap_engine import encrypt_password as encrypt_ldap_password
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot, live_port_downup, live_port_mac
 from app.scan_engine import ScanValidationError, run_scan_and_notify, validate_cidr, validate_ports
+from app.vlan_engine import check_vlan_gateway, usable_address_count
 from app.vuln_scan_engine import VALID_PROFILES as VULN_PROFILE_ARGS, run_vuln_scan
 from app.vuln_register import (
     HEADERS as VULN_REGISTER_HEADERS,
@@ -203,6 +206,7 @@ from app.schemas import (
     TemplateApplyIn,
     TemplateIn,
     UserIn,
+    VlanIn,
     VulnScanRunIn,
     VulnScanScheduleIn,
     WatchIn,
@@ -391,6 +395,125 @@ def delete_group(group_id: int, db: Session = Depends(_db)):
         raise HTTPException(status_code=409, detail=f"В группе ещё {len(group.nodes)} узел(ов) — сначала перенеси/удали их")
     db.delete(group)
     db.commit()
+
+
+def _vlan_summary(db: Session, vlan: Vlan) -> dict:
+    last_scan = (
+        db.query(Scan)
+        .filter(Scan.vlan_id == vlan.id)
+        .order_by(desc(Scan.started_at))
+        .first()
+    )
+    host_count = len(last_scan.hosts) if last_scan else None
+    usable = usable_address_count(vlan.cidr)
+    utilization_pct = round(100 * host_count / usable, 1) if last_scan and usable else None
+    return {
+        "id": vlan.id,
+        "name": vlan.name,
+        "vlan_id": vlan.vlan_id,
+        "cidr": vlan.cidr,
+        "gateway": vlan.gateway,
+        "group_id": vlan.group_id,
+        "group_name": vlan.group.name if vlan.group else None,
+        "description": vlan.description,
+        "gateway_ok": vlan.gateway_ok,
+        "gateway_checked_at": iso(vlan.gateway_checked_at) if vlan.gateway_checked_at else None,
+        "gateway_detail": vlan.gateway_detail,
+        "usable_addresses": usable,
+        "host_count": host_count,
+        "utilization_pct": utilization_pct,
+        "last_scan_id": last_scan.id if last_scan else None,
+        "last_scan_at": iso(last_scan.started_at) if last_scan else None,
+    }
+
+
+@api_operate.post("/api/vlans", status_code=201)
+def create_vlan(payload: VlanIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    try:
+        validate_cidr(payload.cidr)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"некорректная подсеть: {payload.cidr!r}")
+    if payload.gateway:
+        try:
+            ipaddress.ip_address(payload.gateway)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"некорректный IP шлюза: {payload.gateway!r}")
+    if payload.group_id is not None and db.get(Group, payload.group_id) is None:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    if not key_sees_group(key, payload.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    vlan = Vlan(
+        name=payload.name,
+        vlan_id=payload.vlan_id,
+        cidr=payload.cidr,
+        gateway=payload.gateway,
+        group_id=payload.group_id,
+        description=payload.description,
+    )
+    db.add(vlan)
+    db.commit()
+    db.refresh(vlan)
+    return {"id": vlan.id}
+
+
+@api_read.get("/api/vlans")
+def list_vlans(db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    query = db.query(Vlan)
+    if key.group_id is not None:
+        query = query.filter(Vlan.group_id == key.group_id)
+    return [_vlan_summary(db, v) for v in query.order_by(Vlan.name).all()]
+
+
+@api_write.delete("/api/vlans/{vlan_id}", status_code=204)
+def delete_vlan(vlan_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    vlan = db.get(Vlan, vlan_id)
+    if vlan is None:
+        raise HTTPException(status_code=404, detail="VLAN не найден")
+    if not key_sees_group(key, vlan.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    db.delete(vlan)
+    db.commit()
+
+
+@api_operate.post("/api/vlans/{vlan_id}/check", status_code=201)
+async def check_vlan(vlan_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Проверка VLAN целиком: доступность шлюза (если задан) + скан живых
+    адресов в подсети — синхронно, как и обычный ручной скан (POST
+    /api/scans), без фоновой задачи: ping-скан подсети занимает секунды,
+    не минуты, отдельного polling-статуса не нужно."""
+    vlan = db.get(Vlan, vlan_id)
+    if vlan is None:
+        raise HTTPException(status_code=404, detail="VLAN не найден")
+    if not key_sees_group(key, vlan.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    await check_vlan_gateway(db, vlan)
+    try:
+        async with httpx.AsyncClient() as client:
+            scan = await run_scan_and_notify(db, client, vlan.cidr)
+    except ScanValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    scan.vlan_id = vlan.id
+    db.commit()
+    db.refresh(vlan)
+    return _vlan_summary(db, vlan)
+
+
+@api_read.get("/api/vlans/{vlan_id}/scan-hosts")
+def list_vlan_scan_hosts(vlan_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    vlan = db.get(Vlan, vlan_id)
+    if vlan is None:
+        raise HTTPException(status_code=404, detail="VLAN не найден")
+    if not key_sees_group(key, vlan.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    last_scan = (
+        db.query(Scan)
+        .filter(Scan.vlan_id == vlan.id)
+        .order_by(desc(Scan.started_at))
+        .first()
+    )
+    if last_scan is None:
+        return []
+    return [{"address": h.address, "hostname": h.hostname, "open_ports": h.open_ports} for h in last_scan.hosts]
 
 
 @api_write.post("/api/credentials", status_code=201)
