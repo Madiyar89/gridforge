@@ -489,6 +489,13 @@ a{color:var(--accent);}
 .wall-tile.wall-warning{background:var(--warn);}
 .wall-tile.wall-silent{background:var(--text-dim);}
 
+/* Лента событий (по образцу Netdata Live events, запрос пользователя
+   2026-09-25) — прокручивается, не растягивает страницу под весь
+   список: у ленты, в отличие от списка "Открытые инциденты", нет
+   естественного предела длины (события копятся, не закрываются). */
+.event-feed{max-height:320px;overflow-y:auto;}
+.event-resolved .label{color:var(--text-dim);}
+
 .form-row{padding:14px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;}
 .form-row input,.form-row select,.form-row textarea{
   background:var(--surface-2);border:1px solid var(--border);color:var(--text);

@@ -122,6 +122,67 @@ async function refreshIncidents() {
   renderIncidentsGrouped(incidents);
 }
 
+// Лента событий (вариант E плана по образцу Netdata Live events, запрос
+// пользователя 2026-09-25, последний пункт списка) — хронологический
+// поток вперемешку из открытий/закрытий инцидентов и syslog-сообщений
+// уровня error и хуже, а не сгруппированный по узлу список, как у
+// "Открытых инцидентов" выше. Оба источника уже существовали
+// (/api/incidents с include_resolved, /api/syslog) — сливаем и сортируем
+// на клиенте, отдельного эндпоинта не заводили ради этого одного
+// виджета.
+const EVENT_FEED_LIMIT = 30;
+
+async function refreshEventFeed() {
+  const body = document.getElementById("event-feed");
+  let incidents, syslog;
+  try {
+    [incidents, syslog] = await Promise.all([
+      api("/api/incidents?include_resolved=true"),
+      api("/api/syslog?limit=30"),
+    ]);
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+
+  const events = [];
+  for (const i of incidents) {
+    events.push({ at: i.opened_at, kind: "incident", severity: i.severity, node: i.node_name, text: i.label });
+    if (i.resolved_at) {
+      events.push({ at: i.resolved_at, kind: "resolved", severity: "info", node: i.node_name, text: `${i.label} — устранено` });
+    }
+  }
+  for (const m of syslog) {
+    if (m.severity > 3) continue; // error и хуже — тот же порог, что у "Состояние за сутки"
+    events.push({
+      at: m.received_at,
+      kind: "syslog",
+      severity: "warning",
+      node: m.source_ip,
+      text: m.message,
+    });
+  }
+  events.sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  const top = events.slice(0, EVENT_FEED_LIMIT);
+  if (top.length === 0) {
+    body.innerHTML = `<div class="empty">Событий пока нет</div>`;
+    return;
+  }
+  body.innerHTML = top
+    .map(
+      (e) => `
+      <div class="incident-row event-${e.kind}">
+        <span class="sev-dot ${e.severity}"></span>
+        <div class="main">
+          <div class="label">${escapeHtml(e.node)}${e.text ? " — " + escapeHtml(e.text) : ""}</div>
+        </div>
+        <div class="time">${timeAgo(e.at)}</div>
+      </div>`
+    )
+    .join("");
+}
+
 // Стена узлов (вариант D плана по образцу Netdata Overview, запрос
 // пользователя 2026-09-25) — плотная сетка ВСЕХ видимых узлов цветными
 // плитками, в отличие от "Открытых инцидентов" ниже (только те, где
@@ -180,7 +241,7 @@ async function refreshTrend() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshSummary(), refreshIncidents(), refreshNodeWall(), updateRolePill()]);
+  await Promise.all([refreshSummary(), refreshIncidents(), refreshNodeWall(), refreshEventFeed(), updateRolePill()]);
 }
 
 function onKeySaved() {
