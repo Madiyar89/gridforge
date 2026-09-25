@@ -148,7 +148,7 @@ from app.ldap_engine import LdapTestError, mask_connection, test_bind
 from app.ldap_engine import encrypt_password as encrypt_ldap_password
 from app.ports_engine import Port, collect_ports, group_ports, latest_snapshot, live_port_downup, live_port_mac
 from app.scan_engine import ScanValidationError, run_scan_and_notify, validate_cidr, validate_ports
-from app.vuln_scan_engine import PROFILE_ARGS as VULN_PROFILE_ARGS, run_vuln_scan
+from app.vuln_scan_engine import VALID_PROFILES as VULN_PROFILE_ARGS, run_vuln_scan
 from app.vuln_register import (
     HEADERS as VULN_REGISTER_HEADERS,
     build_excel_with_missing,

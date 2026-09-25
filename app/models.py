@@ -657,6 +657,11 @@ class VulnScanProfile(str, enum.Enum):
     full_ports = "full_ports"
     vuln = "vuln"
     os = "os"
+    # Не nmap-профиль — отдельный движок поверх Nuclei (docs/landscape-
+    # report.md, доразбор security-инструментов 2026-09-25): шаблонная
+    # база CVE/misconfig обновляется куда чаще, чем NSE-скрипты категории
+    # vuln у самого nmap. См. run_nuclei_scan() в vuln_scan_engine.py.
+    nuclei = "nuclei"
 
 
 VULN_SCAN_PROFILE_LABELS: dict[str, str] = {
@@ -665,6 +670,7 @@ VULN_SCAN_PROFILE_LABELS: dict[str, str] = {
     "full_ports": "Полное сканирование портов (все 65535)",
     "vuln": "Проверка на известные уязвимости (NSE vuln)",
     "os": "Определение ОС",
+    "nuclei": "Nuclei — шаблонная проверка CVE/misconfig",
 }
 
 
