@@ -117,6 +117,47 @@ def parse_port_protection(config: str) -> dict[str, PortProtection]:
     return result
 
 
+# Port Security для Juniper — реальный формат `show configuration
+# ethernet-switching-options`, проверено на живом EX (LAB-28,
+# 2026-09-25, по запросу пользователя: раньше для Juniper эта панель
+# ВСЕГДА показывала "нет снимка конфигурации" — не из-за отсутствия
+# бэкапа (обычный бэкап Juniper уже снимает полный `show
+# configuration`, включая эту секцию), а потому что parse_port_protection
+# выше понимает только синтаксис Cisco IOS (interface-блоки строками),
+# для фигурных скобок Junos не находил вообще ничего):
+#     secure-access-port {
+#         interface ge-0/0/1.0 {
+#             mac-limit 1 action drop;
+#         }
+#     }
+# Логический юнит (.0) отбрасывается — на схеме порты физические, тем
+# же именем, что и в show interfaces terse/ports_engine.py.
+_JUNOS_IFACE_BLOCK_RE = re.compile(r"interface\s+(\S+?)(?:\.\d+)?\s*\{([^{}]*)\}")
+_JUNOS_MAC_LIMIT_RE = re.compile(r"mac-limit\s+(\d+)\s+action\s+(\S+?);")
+
+
+def parse_junos_port_protection(config: str) -> dict[str, PortProtection]:
+    """Port Security по каждому интерфейсу из `show configuration` (или
+    scoped `show configuration ethernet-switching-options`) Juniper.
+    STP-защита Junos (edge-port/bpdu-block) — не тот же формат, что у
+    Cisco, здесь сознательно не парсится (за рамками конкретной жалобы
+    пользователя — "Защита: нет снимка конфигурации" была именно про
+    Port Security)."""
+    result: dict[str, PortProtection] = {}
+    for m in _JUNOS_IFACE_BLOCK_RE.finditer(config):
+        limit_match = _JUNOS_MAC_LIMIT_RE.search(m.group(2))
+        if not limit_match:
+            continue  # interface {...} без mac-limit — не про Port Security
+        name = m.group(1)
+        result[name] = PortProtection(
+            name=name,
+            port_security=True,
+            max_mac=int(limit_match.group(1)),
+            violation=limit_match.group(2),
+        )
+    return result
+
+
 def parse_stp_global(config: str) -> dict:
     """Глобальные настройки STP — то, что задаётся не на интерфейсе."""
     priorities = {vlans: int(priority) for vlans, priority in _GLOBAL_PRIORITY.findall(config)}

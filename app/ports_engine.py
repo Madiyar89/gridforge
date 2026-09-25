@@ -181,6 +181,84 @@ def parse_junos_terse(output: str) -> list[Port]:
     return ports
 
 
+_JUNOS_IFACE_RE = re.compile(r"^[a-z]+-\d+/\d+/\d+$")
+_JUNOS_LOGICAL_RE = re.compile(r"^([a-z]+-\d+/\d+/\d+)\.\d+$")
+
+# Реальная находка (LAB-28, 2026-09-25, живой запуск пользователем):
+# `show interfaces terse` физически не содержит description/VLAN/скорость
+# — это отдельные команды. Раньше parse_junos_terse отдавал Port без
+# этих полей вовсе, и на схеме они всегда показывались как "—" даже там,
+# где реально заданы (см. скриншот пользователя: "Описание: —" на порту,
+# где на самом деле висит "LINK_to_Группа-Б-31-LAB-Gi1/0/48").
+DESCRIPTIONS_COMMAND_JUNOS = "show interfaces descriptions"
+VLAN_COMMAND_JUNOS = "show ethernet-switching interfaces"
+
+
+def parse_junos_descriptions(output: str) -> dict[str, str]:
+    """Разбирает `show interfaces descriptions` — проверено на живом EX
+    (LAB-28, 2026-09-25). Порт без описания в этой таблице просто не
+    строкой — не пустой колонкой, отсутствует целиком."""
+    result: dict[str, str] = {}
+    for line in output.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4 or not _JUNOS_IFACE_RE.match(parts[0]):
+            continue
+        result[parts[0]] = parts[3].strip()
+    return result
+
+
+def parse_junos_vlan_info(output: str) -> dict[str, dict]:
+    """Разбирает `show ethernet-switching interfaces` — проверено на
+    живом EX (LAB-28, 2026-09-25). Trunk-порт печатается НЕСКОЛЬКИМИ
+    строками подряд — первая с именем интерфейса (логический юнит,
+    ge-0/0/1.0), следующие только с VLAN/Tag/Tagging без повтора имени
+    (потому и не по фиксированным колонкам, а по тому, совпадает ли
+    первый токен строки с именем интерфейса)."""
+    result: dict[str, dict] = {}
+    current: str | None = None
+    for line in output.splitlines():
+        tokens = line.split()
+        if not tokens:
+            continue
+        match = _JUNOS_LOGICAL_RE.match(tokens[0])
+        if match:
+            current = match.group(1)
+            rest = tokens[1:]  # state, vlan_name, tag, tagging, ...
+            if len(rest) < 4:
+                continue
+            tag, tagging = rest[2], rest[3].lower()
+        elif current is not None:
+            rest = tokens  # vlan_name, tag, tagging, ... (продолжение trunk-порта)
+            if len(rest) < 3:
+                continue
+            tag, tagging = rest[1], rest[2].lower()
+        else:
+            continue  # заголовок таблицы или агрегированный интерфейс (ae0) — не физический порт
+        entry = result.setdefault(current, {"tags": [], "trunk": False})
+        entry["tags"].append(tag)
+        if tagging == "tagged":
+            entry["trunk"] = True
+    return result
+
+
+def parse_junos_combined(terse_output: str, descriptions_output: str = "", vlan_output: str = "") -> list[Port]:
+    """Собирает полную картину порта Juniper из трёх команд разом (см.
+    комментарий у DESCRIPTIONS_COMMAND_JUNOS/VLAN_COMMAND_JUNOS выше).
+    Отсутствие description/vlan снимка не роняет остальное — просто
+    оставляет эти поля пустыми, так же, как при полном отсутствии
+    снимка сейчас (best-effort, не всё-или-ничего)."""
+    ports = parse_junos_terse(terse_output)
+    descriptions = parse_junos_descriptions(descriptions_output) if descriptions_output else {}
+    vlan_info = parse_junos_vlan_info(vlan_output) if vlan_output else {}
+    for p in ports:
+        p.description = descriptions.get(p.name, "")
+        info = vlan_info.get(p.name)
+        if info:
+            p.is_trunk = info["trunk"]
+            p.vlan = ",".join(info["tags"]) if info["trunk"] else (info["tags"][0] if info["tags"] else "")
+    return ports
+
+
 def parse_ports(vendor: Vendor | None, output: str) -> list[Port]:
     if vendor is Vendor.junos:
         return parse_junos_terse(output)
@@ -250,7 +328,31 @@ async def collect_ports(
 
     snapshot = PortSnapshot(node_id=node.id, command=command, ok=result.ok)
     if result.ok:
-        parsed = parse_ports(node.vendor, result.stdout)
+        if node.vendor is Vendor.junos:
+            # `show interfaces terse` не содержит description/VLAN (см.
+            # комментарий у DESCRIPTIONS_COMMAND_JUNOS выше) — два
+            # дополнительных похода на устройство, best-effort: если
+            # который-то из них не прошёл, остальные данные всё равно
+            # сохраняются, просто без description/VLAN.
+            desc_result = await run_device_command(
+                vendor=node.vendor, host=node.address, command=DESCRIPTIONS_COMMAND_JUNOS,
+                username=username, password=password, key_path=key_path,
+                port=port if port not in (0, 22) else default_port(node.vendor),
+                timeout_seconds=timeout_seconds,
+            )
+            vlan_result = await run_device_command(
+                vendor=node.vendor, host=node.address, command=VLAN_COMMAND_JUNOS,
+                username=username, password=password, key_path=key_path,
+                port=port if port not in (0, 22) else default_port(node.vendor),
+                timeout_seconds=timeout_seconds,
+            )
+            parsed = parse_junos_combined(
+                result.stdout,
+                desc_result.stdout if desc_result.ok else "",
+                vlan_result.stdout if vlan_result.ok else "",
+            )
+        else:
+            parsed = parse_ports(node.vendor, result.stdout)
         snapshot.ports = [
             {
                 "name": p.name,
@@ -416,9 +518,10 @@ _JUNOS_AGO_RE = re.compile(r"\(([^)]*ago)\)")
 
 
 def parse_junos_link_time(output: str) -> dict | None:
-    """Разбирает `show interfaces <port> extensive` — не проверено на
-    живом Juniper (тот же статус, что и остальные Junos-парсеры в этом
-    файле)."""
+    """Разбирает `show interfaces <port> extensive` — проверено на живом
+    EX (LAB-28, 2026-09-25): "Physical link is Up/Down" и "Last
+    flapped   : <дата> (<Nd HH:MM> ago)" совпали с разбором по
+    документации 1:1, правки не понадобились."""
     link_match = _JUNOS_PHYS_RE.search(output)
     if link_match is None:
         return None

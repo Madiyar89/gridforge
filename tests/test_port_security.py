@@ -8,6 +8,7 @@
 """
 
 from app.port_security import (
+    parse_junos_port_protection,
     parse_port_protection,
     parse_stp_global,
     protection_summary,
@@ -137,3 +138,60 @@ interface GigabitEthernet1/0/9
 def test_empty_config_is_handled():
     assert parse_port_protection("") == {}
     assert parse_stp_global("")["vlan_priorities"] == {}
+
+
+# Реальная находка (LAB-28, 2026-09-25, живой Juniper EX, по запросу
+# пользователя): панель "Защита" ВСЕГДА показывала "нет снимка
+# конфигурации" для Juniper, хотя обычный бэкап (полный `show
+# configuration`) уже снимался регулярно — parse_port_protection выше
+# понимает только синтаксис Cisco IOS (строки "interface X" + отступ),
+# для фигурных скобок Junos не находил ни одного порта. Структура ниже
+# дословная (проверено на живом устройстве), содержимое (лимиты MAC)
+# вымышленное, тот же принцип, что у CONFIG выше.
+JUNOS_CONFIG = """\
+ethernet-switching-options {
+    secure-access-port {
+        interface ge-0/0/1.0 {
+            mac-limit 2 action drop;
+        }
+        interface ge-0/0/2.0 {
+            mac-limit 1 action drop;
+        }
+    }
+    storm-control {
+        interface all;
+    }
+}
+"""
+
+
+def test_junos_port_security_is_detected():
+    ports = parse_junos_port_protection(JUNOS_CONFIG)
+    port = ports["ge-0/0/1"]
+    assert port.port_security is True
+    assert port.max_mac == 2
+    assert port.violation == "drop"
+
+
+def test_junos_port_security_strips_logical_unit():
+    """Конфигурация — по логическому юниту (ge-0/0/2.0), а на схеме
+    порты физические (ge-0/0/2), теми же именами, что у show interfaces
+    terse/ports_engine.py — иначе findProtection на фронтенде никогда бы
+    не нашёл совпадение."""
+    ports = parse_junos_port_protection(JUNOS_CONFIG)
+    assert "ge-0/0/2" in ports
+    assert "ge-0/0/2.0" not in ports
+
+
+def test_junos_storm_control_block_is_not_mistaken_for_port_security():
+    """`interface all { ... }` внутри storm-control — тоже блок
+    interface {...}, но без mac-limit внутри — не должен попасть в
+    результат как порт с Port Security."""
+    ports = parse_junos_port_protection(JUNOS_CONFIG)
+    assert "all" not in ports
+    assert len(ports) == 2
+
+
+def test_junos_empty_config_is_handled():
+    assert parse_junos_port_protection("") == {}
+    assert parse_junos_port_protection("system { host-name test; }") == {}

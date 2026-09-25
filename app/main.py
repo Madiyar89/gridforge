@@ -143,7 +143,7 @@ from app.models import (
 )
 from app.inventory_engine import delete_node, delete_probe, delete_watch
 from app.retention_engine import run_retention
-from app.port_security import parse_port_protection, parse_stp_global, protection_summary
+from app.port_security import parse_junos_port_protection, parse_port_protection, parse_stp_global, protection_summary
 from app.port_commands import PortCommandError, apply_port, bounce_port
 from app.stp_protection import StpProtectionError, apply_stp_protection
 from app.credentials_engine import encrypt_password, mask_credential, resolve_credential
@@ -2554,18 +2554,28 @@ def get_ports(node_id: int, db: Session = Depends(_db), key: Principal = Depends
 # Здесь — постоянное решение: сразу после успешного изменения защиты
 # снимаем свежий бэкап теми же учётками, что уже использовались для
 # apply. Тихо (best-effort) — сбой бэкапа не должен рушить успешный
-# apply, а parse_port_protection всё равно понимает только Cisco IOS.
-_PROTECTION_BACKUP_COMMAND = "show running-config"
-_PROTECTION_BACKUP_VENDORS = (Vendor.cisco_ios, Vendor.cisco_ios_telnet)
+# apply.
+# Juniper добавлен 2026-09-25 (реальная находка пользователя на живом
+# LAB-28: "Защита: нет снимка конфигурации") — обычный бэкап Juniper
+# и так снимает полный `show configuration` (включая
+# ethernet-switching-options), парсер для него дописан в port_security.py
+# (parse_junos_port_protection), команда здесь та же самая, что и у
+# обычного планового бэкапа, чтобы не плодить второй, чуть другой снимок.
+_PROTECTION_BACKUP_COMMAND = {
+    Vendor.cisco_ios: "show running-config",
+    Vendor.cisco_ios_telnet: "show running-config",
+    Vendor.junos: "show configuration",
+}
 
 
 async def _refresh_protection_backup(db, node, *, username, password, key_path, conn_port):
-    if node.vendor not in _PROTECTION_BACKUP_VENDORS:
+    command = _PROTECTION_BACKUP_COMMAND.get(node.vendor)
+    if command is None:
         return
     try:
         await run_backup(
             db, node,
-            username=username, command=_PROTECTION_BACKUP_COMMAND,
+            username=username, command=command,
             key_path=key_path, password=password, port=conn_port,
         )
     except Exception:
@@ -2683,7 +2693,7 @@ def get_protection(node_id: int, db: Session = Depends(_db), key: Principal = De
     Читается сохранённый бэкап, а не живое устройство: конфигурации и так
     снимаются регулярно, а лишний поход на старый коммутатор ради того же
     текста — лишняя нагрузка."""
-    require_node_access(db, key, node_id)
+    node = require_node_access(db, key, node_id)
     backup = (
         db.query(Backup)
         .filter(Backup.node_id == node_id, Backup.error.is_(None))
@@ -2694,7 +2704,7 @@ def get_protection(node_id: int, db: Session = Depends(_db), key: Principal = De
         return {"taken_at": None, "ports": {}, "summary": None,
                 "detail": "нет снимка конфигурации — сначала сними бэкап"}
 
-    ports = parse_port_protection(backup.content)
+    ports = parse_junos_port_protection(backup.content) if node.vendor is Vendor.junos else parse_port_protection(backup.content)
     stp = parse_stp_global(backup.content)
     return {
         "taken_at": iso(backup.taken_at),

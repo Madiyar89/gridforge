@@ -17,7 +17,10 @@ from app.ports_engine import (
     PortState,
     group_ports,
     parse_cisco_status,
+    parse_junos_combined,
+    parse_junos_descriptions,
     parse_junos_terse,
+    parse_junos_vlan_info,
     parse_ports,
 )
 
@@ -134,6 +137,70 @@ def test_junos_states():
 def test_vendor_dispatch():
     assert parse_ports(Vendor.junos, JUNOS_TERSE)[0].name == "ge-0/0/0"
     assert parse_ports(Vendor.cisco_ios, CISCO_NARROW)[0].name == "Gi1/0/1"
+
+
+# Реальный вывод с живого EX (LAB-28, 2026-09-25) — структура и
+# выравнивание дословные, содержимое (имена линков, VLAN) вымышленное,
+# тот же принцип, что у образцов Cisco выше. `show interfaces terse`
+# физически не содержит description/VLAN — это отдельные команды,
+# отсюда три разных фикстуры ниже вместо одной.
+JUNOS_DESCRIPTIONS = """\
+Interface       Admin Link Description
+ge-0/0/0        down  down ADMIN SHUTDOWN
+ge-0/0/1        up    up   LINK_to_SW2-Gi1/0/48
+"""
+
+# Trunk-порт (ge-0/0/1) печатается НЕСКОЛЬКИМИ строками — первая с именем
+# интерфейса, дальше только VLAN/Tag/Tagging без повтора имени.
+JUNOS_ETH_SWITCHING = """\
+Interface    State  VLAN members        Tag   Tagging  Blocking
+ae0.0        down   VLAN_A              100   tagged   blocked by STP
+ge-0/0/0.0   down   VLAN_B              999   untagged blocked by STP
+ge-0/0/1.0   up     VLAN_A              100   tagged   unblocked
+                    VLAN_C              200   tagged   unblocked
+ge-0/0/2.0   up     VLAN_B              999   untagged unblocked
+"""
+
+
+def test_junos_descriptions_only_lists_ports_that_have_one():
+    result = parse_junos_descriptions(JUNOS_DESCRIPTIONS)
+    assert result == {"ge-0/0/0": "ADMIN SHUTDOWN", "ge-0/0/1": "LINK_to_SW2-Gi1/0/48"}
+    assert "ge-0/0/2" not in result  # без описания — просто нет строки в выводе
+
+
+def test_junos_vlan_info_access_port():
+    result = parse_junos_vlan_info(JUNOS_ETH_SWITCHING)
+    assert result["ge-0/0/2"] == {"tags": ["999"], "trunk": False}
+
+
+def test_junos_vlan_info_trunk_port_spans_multiple_lines():
+    """Реальная находка на живом устройстве: trunk-порт не в одной
+    строке — вторая VLAN идёт отдельной строкой без имени интерфейса,
+    наивный разбор по фиксированным колонкам потерял бы её."""
+    result = parse_junos_vlan_info(JUNOS_ETH_SWITCHING)
+    assert result["ge-0/0/1"] == {"tags": ["100", "200"], "trunk": True}
+
+
+def test_junos_vlan_info_skips_aggregated_interfaces():
+    result = parse_junos_vlan_info(JUNOS_ETH_SWITCHING)
+    assert "ae0" not in result
+
+
+def test_junos_combined_merges_all_three_commands():
+    ports = parse_junos_combined(JUNOS_TERSE, JUNOS_DESCRIPTIONS, JUNOS_ETH_SWITCHING)
+    by_name = {p.name: p for p in ports}
+    assert by_name["ge-0/0/0"].description == "ADMIN SHUTDOWN"
+    assert by_name["ge-0/0/2"].vlan == "999"
+    assert by_name["ge-0/0/2"].is_trunk is False
+
+
+def test_junos_combined_missing_description_snapshot_does_not_crash():
+    """Best-effort: если description/VLAN не удалось снять (устройство
+    не ответило на одну из трёх команд), остальные данные всё равно
+    сохраняются — не всё-или-ничего."""
+    ports = parse_junos_combined(JUNOS_TERSE, "", "")
+    assert [p.name for p in ports] == ["ge-0/0/0", "ge-0/0/1", "ge-0/0/2"]
+    assert ports[0].description == ""
 
 
 def test_node_without_vendor_is_parsed_as_cisco():
