@@ -662,6 +662,13 @@ class VulnScanProfile(str, enum.Enum):
     # база CVE/misconfig обновляется куда чаще, чем NSE-скрипты категории
     # vuln у самого nmap. См. run_nuclei_scan() в vuln_scan_engine.py.
     nuclei = "nuclei"
+    # Тоже не nmap — поверх Feroxbuster (docs/landscape-report.md,
+    # доразбор security-инструментов, второй по счёту после Nuclei):
+    # поиск скрытых путей/файлов перебором по словарю на узлах, где
+    # найден открытый HTTP(S). Severity всегда "info" — находка для
+    # человека (что-то отозвалось), не автоматический вердикт "дыра".
+    # См. run_web_discovery_scan() в vuln_scan_engine.py.
+    web_discovery = "web_discovery"
 
 
 VULN_SCAN_PROFILE_LABELS: dict[str, str] = {
@@ -671,6 +678,7 @@ VULN_SCAN_PROFILE_LABELS: dict[str, str] = {
     "vuln": "Проверка на известные уязвимости (NSE vuln)",
     "os": "Определение ОС",
     "nuclei": "Nuclei — шаблонная проверка CVE/misconfig",
+    "web_discovery": "Feroxbuster — поиск скрытых путей/файлов",
 }
 
 

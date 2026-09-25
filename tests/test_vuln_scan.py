@@ -464,3 +464,172 @@ def test_run_nuclei_scan_via_api(monkeypatch, client, operator_key, group_with_n
     # findings_count исключает severity="info" (см. main.py) - из двух
     # синтетических находок в NUCLEI_JSONL считается только vulnerable.
     assert scan["findings_count"] == 1
+
+
+# --- Профиль Feroxbuster (docs/landscape-report.md, доразбор security-
+# инструментов, второй после Nuclei) — реальный вывод захвачен на живом
+# прогоне против собственного тестового HTTP-сервера (2026-09-25):
+# .env/.git/admin.php/robots.txt действительно нашлись и разобрались
+# верно. Строки ниже — точная копия того реального вывода, не выдумка
+# по документации.
+
+FEROX_JSONL = (
+    '{"type":"response","url":"http://127.0.0.1:8765/.git","original_url":"http://127.0.0.1:8765/",'
+    '"path":"/.git","wildcard":false,"status":301,"method":"GET","content_length":0,"line_count":0,'
+    '"word_count":0,"headers":{},"extension":"","truncated":false,"timestamp":1}\n'
+    '{"type":"response","url":"http://127.0.0.1:8765/admin.php","original_url":"http://127.0.0.1:8765/",'
+    '"path":"/admin.php","wildcard":false,"status":200,"method":"GET","content_length":11,"line_count":1,'
+    '"word_count":1,"headers":{},"extension":"","truncated":false,"timestamp":1}\n'
+    '{"type":"response","url":"http://127.0.0.1:8765/.env","original_url":"http://127.0.0.1:8765/",'
+    '"path":"/.env","wildcard":false,"status":200,"method":"GET","content_length":15,"line_count":1,'
+    '"word_count":1,"headers":{},"extension":"","truncated":false,"timestamp":1}\n'
+)
+
+
+def test_parse_feroxbuster_jsonl_extracts_real_findings():
+    from app.vuln_scan_engine import parse_feroxbuster_jsonl
+
+    findings = parse_feroxbuster_jsonl(FEROX_JSONL)
+    assert len(findings) == 3
+    by_path = {f["port"]: f for f in findings}
+    assert by_path["/.env"]["severity"] == "info"
+    assert by_path["/.env"]["script_id"] == "http-200"
+    assert "15" in by_path["/.env"]["summary"]
+    assert by_path["/.git"]["script_id"] == "http-301"
+
+
+def test_parse_feroxbuster_jsonl_skips_non_response_types():
+    """Реальный вывод может содержать другие типы JSON-строк (статистика
+    и т.п.) — не должны попадать в находки."""
+    from app.vuln_scan_engine import parse_feroxbuster_jsonl
+
+    raw = '{"type":"statistics","requests":100}\n' + FEROX_JSONL + "\nnot json at all"
+    findings = parse_feroxbuster_jsonl(raw)
+    assert len(findings) == 3
+
+
+class _FakeConnectionWriter:
+    def close(self):
+        pass
+
+    async def wait_closed(self):
+        pass
+
+
+def test_probe_http_urls_only_open_ports(monkeypatch):
+    from app.vuln_scan_engine import _probe_http_urls
+
+    async def fake_open_connection(host, port):
+        if port != 443:
+            raise OSError("connection refused")
+        return None, _FakeConnectionWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+    urls = asyncio.run(_probe_http_urls("10.0.0.5"))
+    assert urls == ["https://10.0.0.5"]
+
+
+def test_probe_http_urls_no_open_ports_returns_empty(monkeypatch):
+    from app.vuln_scan_engine import _probe_http_urls
+
+    async def fake_open_connection(host, port):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+    urls = asyncio.run(_probe_http_urls("10.0.0.5"))
+    assert urls == []
+
+
+def test_run_web_discovery_scan_end_to_end(monkeypatch, db, group_with_node):
+    from app.vuln_scan_engine import run_web_discovery_scan
+    from app.db import SessionLocal
+    from app.models import VulnScan
+
+    async def fake_open_connection(host, port):
+        if port != 80:
+            raise OSError("connection refused")
+        return None, _FakeConnectionWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+
+    async def fake_exec(*args, **kwargs):
+        return _FakeNucleiProc(FEROX_JSONL.encode())
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    scan = VulnScan(group_id=group_with_node.id, profile="web_discovery")
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    asyncio.run(run_web_discovery_scan(scan.id, ["10.0.0.5"], SessionLocal))
+
+    db.refresh(scan)
+    assert scan.status.value == "done"
+    assert len(scan.hosts) == 1
+    assert len(scan.hosts[0].findings) == 3
+
+
+def test_run_web_discovery_scan_no_web_port_gives_empty_findings(monkeypatch, db, group_with_node):
+    """Узел без открытого веб-порта не должен вызывать feroxbuster вовсе
+    (дорогая операция) - просто пустой список находок, не ошибка."""
+    from app.vuln_scan_engine import run_web_discovery_scan
+    from app.db import SessionLocal
+    from app.models import VulnScan
+
+    async def fake_open_connection(host, port):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+
+    called = {"n": 0}
+
+    async def fake_exec(*args, **kwargs):
+        called["n"] += 1
+        return _FakeNucleiProc(b"")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    scan = VulnScan(group_id=group_with_node.id, profile="web_discovery")
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    asyncio.run(run_web_discovery_scan(scan.id, ["10.0.0.5"], SessionLocal))
+
+    assert called["n"] == 0  # feroxbuster не запускался - незачем
+    db.refresh(scan)
+    assert scan.status.value == "done"
+    assert scan.hosts[0].findings == []
+
+
+def test_run_web_discovery_scan_via_api(monkeypatch, client, operator_key, group_with_node):
+    async def fake_open_connection(host, port):
+        if port != 80:
+            raise OSError("connection refused")
+        return None, _FakeConnectionWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+
+    async def fake_exec(*args, **kwargs):
+        return _FakeNucleiProc(FEROX_JSONL.encode())
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/vuln-scans",
+        json={"profile": "web_discovery", "responsible": "тест"},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 201
+
+    scan = _wait_done(client, operator_key, group_with_node.id)
+    assert scan["status"] == "done"
+    # findings_count исключает severity="info" - все находки Feroxbuster
+    # ровно этой severity, поэтому 0, хотя host_count/список находок
+    # (через /api/vuln-scans/{id}/hosts) — все 3.
+    assert scan["findings_count"] == 0
+    assert scan["host_count"] == 1
+
+    hosts = client.get(f"/api/vuln-scans/{scan['id']}/hosts", headers=_h(operator_key)).json()
+    assert len(hosts[0]["findings"]) == 3

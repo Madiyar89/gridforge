@@ -44,6 +44,18 @@ RUN curl -fsSL -o /tmp/nuclei.zip \
     && unzip -o /tmp/nuclei.zip -d /usr/local/bin nuclei \
     && chmod +x /usr/local/bin/nuclei \
     && rm /tmp/nuclei.zip
+# feroxbuster (epi052, MIT, docs/landscape-report.md — второй инструмент
+# после Nuclei, см. app/vuln_scan_engine.py:run_web_discovery_scan) — тот
+# же путь, что у nuclei выше: релизный .zip с GitHub, не apt (kali-only
+# пакет), версия зафиксирована явно. Release-ассет (не codeload-архив,
+# как у шаблонов Nuclei) — тот же класс закачки, что уже надёжно
+# работает для самого бинарника nuclei (~6-7МБ), прокси не режет.
+ARG FEROXBUSTER_VERSION=2.13.1
+RUN curl -fsSL -o /tmp/ferox.zip \
+        "https://github.com/epi052/feroxbuster/releases/download/v${FEROXBUSTER_VERSION}/x86_64-linux-feroxbuster.zip" \
+    && unzip -o /tmp/ferox.zip -d /usr/local/bin feroxbuster \
+    && chmod +x /usr/local/bin/feroxbuster \
+    && rm /tmp/ferox.zip
 COPY app/ ./app/
 COPY static/ ./static/
 RUN mkdir -p /app/data

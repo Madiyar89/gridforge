@@ -35,7 +35,16 @@ provided for scan" тоже exit 0) — оба бага нашлись и исп
 Живой прогон подтверждён дважды: точечный (-tags tech) поймал и
 корректно разобрал реальную находку (apache-detect, severity info),
 полный (все ~14000 шаблонов) прошёл через run_nuclei_scan() целиком
-end-to-end (VulnScan.status=done, VulnScanHost записан) без ошибок."""
+end-to-end (VulnScan.status=done, VulnScanHost записан) без ошибок.
+
+Профиль "web_discovery" (2026-09-25, тот же доразбор, второй инструмент
+после Nuclei) — поверх бинарника Feroxbuster (epi052, MIT): перебор
+путей/файлов по словарю (app/wordlists/web_discovery.txt, свой,
+офлайн — не тянет SecLists) на узлах, где найден открытый HTTP(S).
+Severity всегда "info" — находка для человека, не вердикт. ПРОВЕРЕНО
+ВЖИВУЮ (2026-09-25): полный прогон run_web_discovery_scan() против
+собственного тестового HTTP-сервера нашёл и верно разобрал реальные
+.env/.git/admin.php — ровно то, ради чего этот инструмент нужен."""
 
 from __future__ import annotations
 
@@ -44,6 +53,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.models import VulnScan, VulnScanHost, VulnScanStatus
 
@@ -72,7 +82,17 @@ PROFILE_ARGS: dict[str, list[str]] = {
 # Все допустимые профили — используется валидацией в main.py вместо
 # "голого" PROFILE_ARGS, потому что "nuclei" туда намеренно не входит
 # (это не nmap-флаги, см. run_nuclei_scan).
-VALID_PROFILES: set[str] = set(PROFILE_ARGS) | {"nuclei"}
+VALID_PROFILES: set[str] = set(PROFILE_ARGS) | {"nuclei", "web_discovery"}
+
+# Feroxbuster (docs/landscape-report.md, доразбор security-инструментов,
+# второй после Nuclei) — перебор путей/файлов по словарю на узлах с
+# открытым HTTP(S). Порты для проверки — самые частые веб-порты, не
+# полный диапазон: это дешёвая проверка "стоит ли гонять feroxbuster
+# вообще", а не замена самому сканированию портов.
+FEROX_CANDIDATE_PORTS: list[tuple[int, str]] = [(80, "http"), (443, "https"), (8080, "http"), (8443, "https")]
+FEROX_PORT_PROBE_TIMEOUT_SECONDS = 3.0
+FEROX_PER_URL_TIMEOUT_SECONDS = 180
+FEROX_WORDLIST_PATH = Path(__file__).resolve().parent / "wordlists" / "web_discovery.txt"
 
 # full_ports/vuln проверяют куда больше портов/скриптов на цель — им
 # нужно заметно больше времени, чем ping/quick/os.
@@ -276,6 +296,127 @@ async def run_nuclei_scan(scan_id: int, targets: list[str], get_session) -> None
         db.close()
 
 
+def parse_feroxbuster_jsonl(raw_output: str) -> list[dict]:
+    """Разбор `--json --silent`-вывода Feroxbuster — с --silent в поток
+    попадают только реальные находки (type="response"), строки со
+    статистикой/ошибками сканирования туда не идут (проверено живым
+    запуском: без --silent видна только "banner"-шапка в stderr, не в
+    stdout, а сам JSON — уже чистые response-объекты). Severity всегда
+    "info" — находка для человека (что-то отозвалось на угаданный путь),
+    не автоматический вердикт."""
+    findings = []
+    for line in raw_output.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("type") != "response":
+            continue
+        status = rec.get("status", "?")
+        length = rec.get("content_length", "?")
+        findings.append(
+            {
+                "port": rec.get("path", rec.get("url", "")),
+                "script_id": f"http-{status}",
+                "severity": "info",
+                "cves": [],
+                "summary": f"{status} · {length} байт · {rec.get('url', '')}"[:200],
+            }
+        )
+    return findings
+
+
+async def _probe_http_urls(host: str) -> list[str]:
+    """Быстрая проверка нескольких частых веб-портов TCP-коннектом (не
+    HTTP-запросом — быстрее и не зависит от того, что сервер ответит на
+    голый TCP до TLS/HTTP-рукопожатия) — гонять Feroxbuster вслепую по
+    каждому адресу группы незачем, только по тем, где реально что-то
+    слушает."""
+    urls = []
+    for port, scheme in FEROX_CANDIDATE_PORTS:
+        try:
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=FEROX_PORT_PROBE_TIMEOUT_SECONDS
+            )
+        except (OSError, asyncio.TimeoutError):
+            continue
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
+        suffix = "" if port in (80, 443) else f":{port}"
+        urls.append(f"{scheme}://{host}{suffix}")
+    return urls
+
+
+async def _run_feroxbuster_one(url: str) -> list[dict]:
+    proc = await asyncio.create_subprocess_exec(
+        "feroxbuster",
+        "-u", url,
+        "-w", str(FEROX_WORDLIST_PATH),
+        "--json", "--silent",
+        "-t", "20", "--timeout", "6", "-d", "1",  # без рекурсии в подпапки — верхний уровень, тот же принцип "для человека, не исчерпывающе"
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=FEROX_PER_URL_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return []
+    if proc.returncode != 0:
+        return []
+    return parse_feroxbuster_jsonl(stdout.decode(errors="replace"))
+
+
+async def run_web_discovery_scan(scan_id: int, targets: list[str], get_session) -> None:
+    """Отдельный от run_vuln_scan/run_nuclei_scan путь — Feroxbuster
+    работает по URL, не по голому адресу: для каждого узла сначала
+    пробуются частые веб-порты (_probe_http_urls), затем по каждому
+    найденному URL отдельный прогон feroxbuster. Пишет в ту же
+    VulnScan/VulnScanHost и тот же .xlsx-реестр, что и nmap/nuclei-
+    профили."""
+    from app.vuln_register import ingest_scan
+
+    db = get_session()
+    try:
+        scan = db.get(VulnScan, scan_id)
+        if scan is None:
+            return
+
+        hosts_out = []
+        for target in targets:
+            urls = await _probe_http_urls(target)
+            findings: list[dict] = []
+            for url in urls:
+                findings.extend(await _run_feroxbuster_one(url))
+            hosts_out.append({"address": target, "hostname": None, "state": "up", "findings": findings})
+
+        for h in hosts_out:
+            db.add(
+                VulnScanHost(
+                    scan_id=scan.id, address=h["address"], hostname=h["hostname"],
+                    state=h["state"], findings=h["findings"],
+                )
+            )
+        scan.status = VulnScanStatus.done
+        scan.finished_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(scan)
+
+        try:
+            ingest_scan(db, scan)
+        except Exception as exc:  # noqa: BLE001 — реестр не должен ронять сам скан
+            scan.error = f"скан выполнен, но не удалось дописать реестр: {exc}"
+            db.commit()
+    finally:
+        db.close()
+
+
 async def run_vuln_scan(scan_id: int, targets: list[str], profile: str, get_session) -> None:
     """Фон: создаёт VulnScanHost на каждый ответивший хост, обновляет
     статус VulnScan, затем дописывает результат в накопительный .xlsx
@@ -283,6 +424,9 @@ async def run_vuln_scan(scan_id: int, targets: list[str], profile: str, get_sess
     уходит в фон", что у Sweep/DomainScan/ScenarioRun (main.py)."""
     if profile == "nuclei":
         await run_nuclei_scan(scan_id, targets, get_session)
+        return
+    if profile == "web_discovery":
+        await run_web_discovery_scan(scan_id, targets, get_session)
         return
 
     from app.vuln_register import ingest_scan

@@ -44,7 +44,7 @@ responsibleInput.addEventListener("change", () => {
   localStorage.setItem(VULN_RESPONSIBLE_KEY, responsibleInput.value.trim());
 });
 
-const PROFILE_ORDER = ["ping", "quick", "full_ports", "vuln", "os", "nuclei"];
+const PROFILE_ORDER = ["ping", "quick", "full_ports", "vuln", "os", "nuclei", "web_discovery"];
 const PROFILE_LABELS = {
   ping: "Обнаружение узлов",
   quick: "Быстрое сканирование портов",
@@ -52,6 +52,7 @@ const PROFILE_LABELS = {
   vuln: "Проверка на известные уязвимости",
   os: "Определение ОС",
   nuclei: "Nuclei — шаблонная проверка CVE/misconfig",
+  web_discovery: "Feroxbuster — поиск скрытых путей/файлов",
 };
 const WEEKDAY_LABELS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
 
