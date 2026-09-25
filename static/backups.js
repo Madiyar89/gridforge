@@ -3,11 +3,13 @@
 // логика "группа -> цикл по узлам", что уже в ports.js/vuln.js.
 
 let selectedNodeId = null;
+let _nodesById = {};
 
 async function loadNodePicker() {
   const select = document.getElementById("backup-node-select");
   try {
     const nodes = sortNodesNatural(await api("/api/nodes"));
+    _nodesById = Object.fromEntries(nodes.map((n) => [n.id, n]));
     select.innerHTML = `<option value="">выбери узел…</option>` + nodes.map((n) => `<option value="${n.id}">${escapeHtml(n.name)} (${escapeHtml(n.address)})</option>`).join("");
   } catch (e) {
     select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
@@ -25,6 +27,30 @@ async function loadGroupPicker() {
     select.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
   }
 }
+
+document.getElementById("backup-group-select").addEventListener("change", async (ev) => {
+  const picker = document.getElementById("bg-cmd-picker");
+  const groupId = ev.target.value;
+  if (!groupId) {
+    picker.innerHTML = `<option value="">сначала выбери группу…</option>`;
+    picker.disabled = true;
+    return;
+  }
+  picker.innerHTML = `<option value="">загрузка…</option>`;
+  let nodes;
+  try {
+    nodes = await api(`/api/nodes?group_id=${groupId}`);
+  } catch (e) {
+    picker.innerHTML = `<option value="">${emptyOrError(e)}</option>`;
+    return;
+  }
+  const vendors = [...new Set(nodes.map((n) => n.vendor).filter(Boolean))];
+  populateCommandPicker(picker, vendors);
+});
+
+document.getElementById("bg-cmd-picker").addEventListener("change", (ev) => {
+  if (ev.target.value) document.getElementById("bg-cmd").value = ev.target.value;
+});
 
 document.getElementById("run-group-backup").addEventListener("click", async () => {
   const groupId = document.getElementById("backup-group-select").value;
@@ -72,7 +98,14 @@ document.getElementById("run-group-backup").addEventListener("click", async () =
 document.getElementById("backup-node-select").addEventListener("change", (ev) => {
   selectedNodeId = ev.target.value || null;
   document.getElementById("backup-panels").hidden = !selectedNodeId;
+  const picker = document.getElementById("b-cmd-picker");
+  const node = selectedNodeId ? _nodesById[selectedNodeId] : null;
+  populateCommandPicker(picker, node && node.vendor ? [node.vendor] : []);
   if (selectedNodeId) refreshBackups();
+});
+
+document.getElementById("b-cmd-picker").addEventListener("change", (ev) => {
+  if (ev.target.value) document.getElementById("b-cmd").value = ev.target.value;
 });
 
 async function refreshBackups() {

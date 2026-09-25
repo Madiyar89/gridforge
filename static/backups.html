@@ -31,6 +31,7 @@
   <p class="hint" style="padding:12px 16px 0;margin:0;">Одна команда снимается по очереди со всех узлов выбранной группы — удобно для однотипного парка (одинаковый вендор/команда). Узел с другой командой сними отдельно, через форму ниже.</p>
   <div class="form-row">
     <select id="backup-group-select"><option value="">выбери группу…</option></select>
+    <select id="bg-cmd-picker" disabled><option value="">сначала выбери группу…</option></select>
     <input id="bg-cmd" placeholder="команда (например: show running-config)">
     <button id="run-group-backup">Снять бэкап по группе</button>
   </div>
@@ -51,6 +52,7 @@
       <input id="b-user" placeholder="логин (пусто — центральная учётка)">
       <input id="b-port" type="number" value="22" style="max-width:80px">
       <input id="b-key" placeholder="путь к приватному ключу">
+      <select id="b-cmd-picker" disabled><option value="">из справочника…</option></select>
       <input id="b-cmd" placeholder="команда (например: show running-config)">
       <button id="run-backup">Снять бэкап</button>
     </div>
@@ -73,6 +75,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="common.js"></script>
+<script src="vendor_commands.js"></script>
 <script src="backups.js"></script>
 </body>
 </html>
