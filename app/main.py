@@ -61,7 +61,7 @@ from app.geoip_engine import lookup as geoip_lookup
 from app.lifecycle_engine import suggest_offline_archival, suggest_vendor_grouping
 from app.sync_engine import create_site, latest_reports, record_report, resolve_site
 from app.ask_engine import AskError, ask_network
-from app.dashboard_engine import build_dashboard, build_incident_trend
+from app.dashboard_engine import build_dashboard, build_incident_trend, build_node_wall
 from app.metrics_engine import render_prometheus_metrics
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
@@ -878,6 +878,15 @@ def dashboard(db: Session = Depends(_db), key: Principal = Depends(require_api_k
     """Всё для главной страницы одним запросом — она обновляется каждые
     5 секунд, и десяток отдельных вызовов на виджет тут заметен."""
     return build_dashboard(db, key)
+
+
+@api_read.get("/api/dashboard/node-wall")
+def dashboard_node_wall(db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Плотная сетка ВСЕХ видимых узлов (вариант D плана по образцу
+    Netdata Overview) — отдельно от /api/dashboard: то легковесная
+    сводка на каждые 5 секунд, а полный список узлов при парке в
+    сотни штук так часто дёргать незачем."""
+    return build_node_wall(db, key)
 
 
 @api_read.get("/api/dashboard/incident-trend")

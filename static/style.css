@@ -475,6 +475,20 @@ a{color:var(--accent);}
 .chart-threshold.sev-info{stroke:var(--info);}
 .probe-chart-range{display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:2px;}
 
+/* Стена узлов (по образцу Netdata Overview, запрос пользователя
+   2026-09-25) — плотная сетка плиток, парк в сотни узлов виден весь
+   разом без прокрутки. Плитка — просто цвет + подсказка при наведении
+   (title), не карточка с текстом: на такой плотности подписи внутри
+   плитки нечитаемы, а имя узла и так есть в title и в адресной строке
+   после клика. */
+.node-wall-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(16px,1fr));gap:3px;padding:14px 16px;}
+.wall-tile{aspect-ratio:1;border-radius:3px;display:block;transition:transform .08s ease;}
+.wall-tile:hover{transform:scale(1.25);}
+.wall-tile.wall-ok{background:var(--ok);}
+.wall-tile.wall-critical{background:var(--crit);}
+.wall-tile.wall-warning{background:var(--warn);}
+.wall-tile.wall-silent{background:var(--text-dim);}
+
 .form-row{padding:14px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;}
 .form-row input,.form-row select,.form-row textarea{
   background:var(--surface-2);border:1px solid var(--border);color:var(--text);

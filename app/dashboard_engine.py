@@ -147,6 +147,71 @@ _SEVERITY_ORDER = {
 }
 
 
+def build_node_wall(db: Session, key: Principal) -> list[dict]:
+    """Плотная сетка всех узлов (вариант D плана по образцу Netdata
+    Overview, запрос пользователя 2026-09-25: "стена узлов вместо
+    списка") — в отличие от problem_nodes в build_dashboard (только
+    топ-10 узлов С инцидентами), здесь КАЖДЫЙ видимый ключу узел, со
+    своим статусом: critical/warning (по худшему открытому инциденту),
+    silent (проверки есть, измерений за сутки нет — тот же признак, что
+    в build_dashboard) или ok. Список инцидентов и "молчунов" считается
+    так же, как в build_dashboard, но раздельным запросом: здесь не
+    нужны ни суммарные счётчики, ни бэкапы/аудит/syslog, тянуть их сюда
+    было бы лишней нагрузкой на каждый вызов этой более лёгкой сводки."""
+    node_ids = _visible_node_ids(db, key)
+    if not node_ids:
+        return []
+    since = _now() - RECENT_WINDOW
+    nodes = db.query(Node).filter(Node.id.in_(node_ids)).order_by(Node.name).all()
+
+    open_incidents = (
+        db.query(Incident)
+        .join(Incident.watch)
+        .join(Watch.probe)
+        .filter(Incident.resolved_at.is_(None), Probe.node_id.in_(node_ids))
+        .all()
+    )
+    worst_by_node: dict[int, str] = {}
+    count_by_node: dict[int, int] = {}
+    for incident in open_incidents:
+        severity = incident.watch.severity.value
+        node_id = incident.watch.probe.node_id
+        count_by_node[node_id] = count_by_node.get(node_id, 0) + 1
+        if node_id not in worst_by_node or _SEVERITY_ORDER[severity] > _SEVERITY_ORDER[worst_by_node[node_id]]:
+            worst_by_node[node_id] = severity
+
+    probed_node_ids = {
+        row[0] for row in db.query(Probe.node_id).filter(Probe.node_id.in_(node_ids), Probe.enabled.is_(True)).distinct()
+    }
+    recently_sampled = {
+        row[0]
+        for row in db.query(Probe.node_id)
+        .join(Sample, Sample.probe_id == Probe.id)
+        .filter(Probe.node_id.in_(node_ids), Sample.taken_at >= since)
+        .distinct()
+    }
+    silent_ids = probed_node_ids - recently_sampled
+
+    result = []
+    for node in nodes:
+        if node.id in worst_by_node:
+            status = worst_by_node[node.id]
+        elif node.id in silent_ids:
+            status = "silent"
+        else:
+            status = "ok"
+        result.append(
+            {
+                "id": node.id,
+                "name": node.name,
+                "address": node.address,
+                "status": status,
+                "incident_count": count_by_node.get(node.id, 0),
+            }
+        )
+    return result
+
+
 def build_incident_trend(db: Session, key: Principal, hours: int = 24) -> dict:
     """Спарклайн для CRITICAL/WARNING карточек Дашборда (запрос
     пользователя, 2026-09-25, по образцу Netdata — живой мини-график в

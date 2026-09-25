@@ -251,3 +251,85 @@ def test_incident_trend_endpoint(client, admin_key, db):
     body = resp.json()
     assert len(body["critical"]) == 24
     assert sum(body["warning"]) == 1
+
+
+# --- build_node_wall: стена всех узлов (вариант D, запрос пользователя
+# 2026-09-25, "делай всё по порядку") ---
+
+
+def test_node_wall_empty_installation_gives_empty_list(db):
+    from app.dashboard_engine import build_node_wall
+
+    assert build_node_wall(db, _unscoped()) == []
+
+
+def test_node_wall_includes_ok_nodes_not_just_problem_ones(db):
+    """В отличие от problem_nodes (только узлы С инцидентами), стена
+    должна показывать и совершенно здоровые узлы — иначе "видно всё
+    разом" не работает."""
+    from app.dashboard_engine import build_node_wall
+
+    node = Node(name="здоровый", address="10.0.0.20")
+    db.add(node)
+    db.commit()
+
+    wall = build_node_wall(db, _unscoped())
+    assert len(wall) == 1
+    assert wall[0]["status"] == "ok"
+    assert wall[0]["incident_count"] == 0
+
+
+def test_node_wall_status_matches_worst_open_incident(db):
+    from app.dashboard_engine import build_node_wall
+
+    _node_with_incident(db, "тяжёлый", WatchSeverity.critical)
+    node = db.query(Node).filter(Node.name == "тяжёлый").first()
+    # Второй, менее серьёзный инцидент на том же узле — статус остаётся
+    # по худшему, не по последнему добавленному.
+    probe = db.query(Probe).filter(Probe.node_id == node.id).first()
+    watch2 = Watch(probe_id=probe.id, operator=WatchOperator.eq, severity=WatchSeverity.warning, label="ещё что-то")
+    db.add(watch2)
+    db.commit()
+    db.add(Incident(watch_id=watch2.id, detail="тоже не отвечает"))
+    db.commit()
+
+    wall = build_node_wall(db, _unscoped())
+    assert wall[0]["status"] == "critical"
+    assert wall[0]["incident_count"] == 2
+
+
+def test_node_wall_marks_silent_nodes(db):
+    from app.dashboard_engine import build_node_wall
+
+    node = Node(name="молчун-2", address="10.0.0.21")
+    db.add(node)
+    db.commit()
+    probe = Probe(node_id=node.id, kind=ProbeKind.icmp_ping, enabled=True)
+    db.add(probe)
+    db.commit()
+
+    wall = build_node_wall(db, _unscoped())
+    assert wall[0]["status"] == "silent"
+
+
+def test_node_wall_respects_group_scope(db):
+    from app.dashboard_engine import build_node_wall
+
+    own = Group(name="своя-3")
+    other = Group(name="чужая-3")
+    db.add_all([own, other])
+    db.commit()
+    db.add_all([Node(name="свой-узел", address="10.0.0.22", group_id=own.id), Node(name="чужой-узел", address="10.0.0.23", group_id=other.id)])
+    db.commit()
+
+    scoped = Principal(label="ограниченный", role=ApiKeyRole.admin, group_id=own.id, kind="api_key")
+    wall = build_node_wall(db, scoped)
+    assert [n["name"] for n in wall] == ["свой-узел"]
+
+
+def test_node_wall_endpoint(client, admin_key, db):
+    db.add(Node(name="узел-для-стены", address="10.0.0.24"))
+    db.commit()
+    resp = client.get("/api/dashboard/node-wall", headers={"X-API-Key": admin_key})
+    assert resp.status_code == 200
+    assert resp.json()[0]["status"] == "ok"

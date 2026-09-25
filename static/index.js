@@ -122,6 +122,35 @@ async function refreshIncidents() {
   renderIncidentsGrouped(incidents);
 }
 
+// Стена узлов (вариант D плана по образцу Netdata Overview, запрос
+// пользователя 2026-09-25) — плотная сетка ВСЕХ видимых узлов цветными
+// плитками, в отличие от "Открытых инцидентов" ниже (только те, где
+// что-то не так) тут видно и то, что молчит, и то, что просто ок —
+// одним взглядом на весь парк, без прокрутки длинного списка.
+const WALL_STATUS_LABEL = { ok: "ок", critical: "critical", warning: "warning", silent: "молчит" };
+
+async function refreshNodeWall() {
+  const body = document.getElementById("node-wall");
+  let nodes;
+  try {
+    nodes = await api("/api/dashboard/node-wall");
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  document.getElementById("wall-count").textContent = nodes.length;
+  if (nodes.length === 0) {
+    body.innerHTML = `<div class="empty">Узлов пока нет</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="node-wall-grid">${nodes
+    .map(
+      (n) => `
+      <a class="wall-tile wall-${n.status}" href="inventory.html?node=${n.id}" title="${escapeHtml(n.name)} · ${escapeHtml(n.address)} · ${escapeHtml(WALL_STATUS_LABEL[n.status] || n.status)}${n.incident_count ? ` · ${n.incident_count} шт.` : ""}"></a>`
+    )
+    .join("")}</div>`;
+}
+
 // Спарклайн в карточках CRITICAL/WARNING (по образцу Netdata — живой
 // мини-график прямо в самой метрике, запрос пользователя 2026-09-25).
 // Свой интервал обновления, реже основного REFRESH_MS: часовой график
@@ -151,7 +180,7 @@ async function refreshTrend() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshSummary(), refreshIncidents(), updateRolePill()]);
+  await Promise.all([refreshSummary(), refreshIncidents(), refreshNodeWall(), updateRolePill()]);
 }
 
 function onKeySaved() {
