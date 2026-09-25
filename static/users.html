@@ -56,6 +56,25 @@
   </div>
 </div>
 
+<div class="panel">
+  <h2>API-ключи <span class="count" id="apikeys-count"></span></h2>
+  <p class="hint" style="padding:0 16px 10px;margin:0;">Для программ/интеграций — не для входа человеком (для этого выше учётные записи). Сырое значение ключа показывается один раз сразу после создания и больше нигде не хранится.</p>
+  <div class="body" id="apikeys-body"><div class="empty">Загрузка…</div></div>
+  <div class="form-row">
+    <input id="new-key-label" placeholder="метка (например: имя человека или скрипта)">
+    <select id="new-key-role">
+      <option value="viewer">viewer — только смотреть</option>
+      <option value="operator">operator — запускать проверки</option>
+      <option value="admin">admin — полный доступ</option>
+    </select>
+    <select id="new-key-group">
+      <option value="">все группы</option>
+    </select>
+    <button id="add-key">+ ключ</button>
+  </div>
+  <div id="new-key-result" style="display:none;padding:12px 16px;border-top:1px solid var(--border);"></div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="common.js"></script>

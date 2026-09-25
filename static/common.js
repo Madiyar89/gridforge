@@ -249,6 +249,7 @@ async function updateRolePill() {
   setAvatarState((label || "?").slice(0, 1).toUpperCase(), true);
   if (me.kind === "user") showLogoutButton();
   if (me.default_password) showDefaultPasswordWarning();
+  if (me.must_change_password) showMustChangePasswordWarning();
 }
 
 // Вход по паролю и по API-ключу существуют параллельно: ключ нужен
@@ -293,6 +294,43 @@ function showDefaultPasswordWarning() {
     "Стоит пароль по умолчанию (<b>Admin</b>/<b>gridforge</b>) — он общеизвестен. " +
     "Смени его: <b>Пользователи → сменить пароль</b>.";
   document.body.insertBefore(banner, document.body.firstChild);
+}
+
+// Учётке при создании назначили временный пароль (запрос пользователя,
+// 2026-09-25) — в отличие от showDefaultPasswordWarning (только про
+// встроенный Admin), это может быть viewer/operator без доступа к
+// странице «Пользователи» (там require_admin_key), поэтому смена пароля
+// прямо здесь, в баннере, через self-service /api/me/password — иначе
+// человеку было бы некуда пойти самому.
+function showMustChangePasswordWarning() {
+  if (document.getElementById("must-change-password-warning")) return;
+  const banner = document.createElement("div");
+  banner.id = "must-change-password-warning";
+  banner.style.cssText =
+    "background:#7a5d2d;color:#fff;padding:10px 16px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;";
+  banner.innerHTML =
+    `<span>Учётке назначили временный пароль — смени его на свой.</span>` +
+    `<input id="mcp-new-password" type="password" placeholder="новый пароль (от 10 символов)" style="max-width:220px;">` +
+    `<button id="mcp-submit">Сменить</button>` +
+    `<span id="mcp-result"></span>`;
+  document.body.insertBefore(banner, document.body.firstChild);
+  document.getElementById("mcp-submit").addEventListener("click", async () => {
+    const password = document.getElementById("mcp-new-password").value;
+    const resultEl = document.getElementById("mcp-result");
+    if (!password) {
+      resultEl.textContent = "введи пароль";
+      return;
+    }
+    try {
+      await api("/api/me/password", { method: "POST", body: JSON.stringify({ password }) });
+      // Смена пароля закрывает ВСЕ сессии этой учётки, включая текущую —
+      // дальше здесь делать нечего, только заново войти новым паролем.
+      window.location.href = "login.html";
+    } catch (e) {
+      resultEl.textContent = e.message;
+      resultEl.style.color = "#ffb3a7";
+    }
+  });
 }
 
 // На узком экране панель уезжает за край и открывается кнопкой —

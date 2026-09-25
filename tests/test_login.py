@@ -233,3 +233,107 @@ def test_user_list_never_exposes_password_hashes(client, db, user):
     assert listed
     assert "password_hash" not in str(listed)
     assert "scrypt$" not in str(listed)
+
+
+# --- must_change_password: новым учёткам сразу нужна смена пароля
+# (запрос пользователя, 2026-09-25) ---
+
+
+def test_new_user_must_change_password_by_default(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    client.post("/api/users", json={"username": "новичок2", "password": "временный-пароль-1"})
+    listed = client.get("/api/users").json()
+    new_user = next(u for u in listed if u["username"] == "новичок2")
+    assert new_user["must_change_password"] is True
+
+
+def test_whoami_reports_must_change_password_for_new_user(client, db):
+    admin = User(username="начальник2", password_hash=hash_password("длинный-пароль-5"), role=ApiKeyRole.admin)
+    db.add(admin)
+    db.commit()
+    client.post("/api/login", json={"username": "начальник2", "password": "длинный-пароль-5"})
+    client.post("/api/users", json={"username": "новичок3", "password": "временный-пароль-2"})
+    client.post("/api/logout")
+
+    client.post("/api/login", json={"username": "новичок3", "password": "временный-пароль-2"})
+    assert client.get("/api/whoami").json()["must_change_password"] is True
+
+
+def test_admin_changing_users_password_clears_the_flag(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    created = client.post("/api/users", json={"username": "новичок4", "password": "временный-пароль-3"}).json()
+    client.post(f"/api/users/{created['id']}/password", json={"password": "новый-длинный-пароль"})
+    listed = client.get("/api/users").json()
+    assert next(u for u in listed if u["id"] == created["id"])["must_change_password"] is False
+
+
+def test_self_service_password_change_available_to_viewer(client, db):
+    """/api/me/password должен работать любой роли — viewer/operator не
+    видят страницу «Пользователи» (require_admin_key), баннер «смени
+    пароль» должен быть чем-то, что они реально могут сделать сами."""
+    admin = User(username="начальник3", password_hash=hash_password("длинный-пароль-6"), role=ApiKeyRole.admin)
+    db.add(admin)
+    db.commit()
+    client.post("/api/login", json={"username": "начальник3", "password": "длинный-пароль-6"})
+    client.post("/api/users", json={"username": "смотритель2", "password": "временный-пароль-4", "role": "viewer"})
+    client.post("/api/logout")
+
+    client.post("/api/login", json={"username": "смотритель2", "password": "временный-пароль-4"})
+    resp = client.post("/api/me/password", json={"password": "свой-новый-пароль-длинный"})
+    assert resp.status_code == 200
+    # Смена пароля закрывает и текущую сессию — дальше без повторного входа доступа быть не должно.
+    assert client.get("/api/whoami").status_code == 401
+
+    login_resp = client.post("/api/login", json={"username": "смотритель2", "password": "свой-новый-пароль-длинный"})
+    assert login_resp.status_code == 200
+    assert client.get("/api/whoami").json()["must_change_password"] is False
+
+
+def test_self_service_rejects_api_key_principal(client, db):
+    from app.auth import generate_key
+
+    key = generate_key(db, label="скрипт", role=ApiKeyRole.admin)
+    resp = client.post("/api/me/password", json={"password": "неважно-длинный-пароль"}, headers={"X-API-Key": key})
+    assert resp.status_code == 400
+
+
+# --- защита учётки Admin (запрос пользователя, 2026-09-25: "чтобы Admin
+# учётку никто не видел и не мог её трогать") ---
+
+
+def test_admin_account_hidden_from_other_admins(client, db):
+    bootstrap_first_user(db)  # создаёт Admin
+    other_admin = User(username="другой-админ", password_hash=hash_password("длинный-пароль-7"), role=ApiKeyRole.admin)
+    db.add(other_admin)
+    db.commit()
+
+    client.post("/api/login", json={"username": "другой-админ", "password": "длинный-пароль-7"})
+    listed = client.get("/api/users").json()
+    assert DEFAULT_ADMIN_USERNAME not in [u["username"] for u in listed]
+
+
+def test_admin_account_visible_to_itself(client, db):
+    bootstrap_first_user(db)
+    client.post("/api/login", json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
+    listed = client.get("/api/users").json()
+    assert DEFAULT_ADMIN_USERNAME in [u["username"] for u in listed]
+
+
+def test_admin_account_cannot_be_deleted(client, db):
+    bootstrap_first_user(db)
+    admin_row = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
+    client.post("/api/login", json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
+    resp = client.delete(f"/api/users/{admin_row.id}")
+    assert resp.status_code == 403
+
+
+def test_other_admin_cannot_change_admin_password(client, db):
+    bootstrap_first_user(db)
+    admin_row = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
+    other_admin = User(username="третий-админ", password_hash=hash_password("длинный-пароль-8"), role=ApiKeyRole.admin)
+    db.add(other_admin)
+    db.commit()
+
+    client.post("/api/login", json={"username": "третий-админ", "password": "длинный-пароль-8"})
+    resp = client.post(f"/api/users/{admin_row.id}/password", json={"password": "чужой-длинный-пароль"})
+    assert resp.status_code == 403

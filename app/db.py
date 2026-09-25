@@ -88,6 +88,7 @@ def _migrate_missing_columns() -> None:
         ],
         "users": [
             ("source", "VARCHAR(16) DEFAULT 'local'"),
+            ("must_change_password", "BOOLEAN DEFAULT 0"),
         ],
         "credentials": [
             ("node_id", "INTEGER"),

@@ -394,6 +394,14 @@ class User(Base):
     active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # По умолчанию True для НОВЫХ учёток (запрос пользователя,
+    # 2026-09-25: "для новых пользователей которых я добавляю надо
+    # включить сразу замена пароля") — админ придумывает пароль при
+    # создании учётки, человек должен сменить его на свой при первом
+    # входе. Существующие на момент миграции учётки в это не попадают
+    # (см. db.py: ADD COLUMN ... DEFAULT 0) — не заставляем задним числом
+    # менять то, что уже работает.
+    must_change_password: Mapped[bool] = mapped_column(default=True)
 
 
 class Session(Base):

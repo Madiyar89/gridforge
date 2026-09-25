@@ -2376,7 +2376,15 @@ def create_user(payload: UserIn, db: Session = Depends(_db), key: Principal = De
 
 @api_read.get("/api/users")
 def list_users(db: Session = Depends(_db), admin: Principal = Depends(require_admin_key)):
-    """Без хешей паролей — наружу они не нужны никогда."""
+    """Без хешей паролей — наружу они не нужны никогда.
+
+    Учётка DEFAULT_ADMIN_USERNAME (запрос пользователя, 2026-09-25:
+    "чтобы Admin учётку никто не видел и не мог её трогать") — это
+    последняя гарантированная точка входа, если остальные admin-учётки
+    потеряны/заблокированы. Другим admin'ам она в списке не видна вообще
+    (значит, и удалить/сменить пароль через UI некому, кроме неё самой —
+    в выпадающих списках взять её id просто неоткуда); видит себя только
+    сессия, вошедшая именно под Admin."""
     return [
         {
             "id": u.id,
@@ -2386,16 +2394,25 @@ def list_users(db: Session = Depends(_db), admin: Principal = Depends(require_ad
             "group_id": u.group_id,
             "active": u.active,
             "last_login_at": iso(u.last_login_at) if u.last_login_at else None,
+            "must_change_password": u.must_change_password,
         }
         for u in db.query(User).order_by(User.username).all()
+        if u.username != DEFAULT_ADMIN_USERNAME or admin.label == DEFAULT_ADMIN_USERNAME
     ]
 
 
 @api_write.post("/api/users/{user_id}/password")
-def change_user_password(user_id: int, payload: PasswordChangeIn, db: Session = Depends(_db)):
+def change_user_password(
+    user_id: int, payload: PasswordChangeIn, db: Session = Depends(_db), admin: Principal = Depends(require_admin_key)
+):
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+    # Скрытие из списка (см. list_users) уже не даёт выбрать Admin в
+    # выпадающем списке — здесь тот же запрет на уровне самого API, на
+    # случай прямого вызова с подсмотренным id.
+    if user.username == DEFAULT_ADMIN_USERNAME and admin.label != DEFAULT_ADMIN_USERNAME:
+        raise HTTPException(status_code=403, detail="Пароль учётки Admin может сменить только сама эта учётка")
     if user.source == "ad":
         # Иначе мы завели бы локальный пароль в обход домена: у учётки
         # появилось бы два разных пароля, и отзыв доступа в AD перестал
@@ -2405,9 +2422,34 @@ def change_user_password(user_id: int, payload: PasswordChangeIn, db: Session = 
     if problem:
         raise HTTPException(status_code=422, detail=f"Пароль не принят: {problem}")
     user.password_hash = hash_password(payload.password)
+    user.must_change_password = False
     db.commit()
     # Смена пароля обязана выгнать уже открытые сессии — иначе тот, из-за
     # кого пароль меняют, остался бы внутри.
+    closed = revoke_all_for_user(db, user.id)
+    return {"status": "updated", "sessions_closed": closed}
+
+
+@api_read.post("/api/me/password")
+def change_my_password(payload: PasswordChangeIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Самообслуживание — сменить СВОЙ пароль, доступно любой роли (viewer/
+    operator тоже, не только admin): страница «Пользователи» им не видна
+    (список требует require_admin_key), а баннер «смени пароль» после
+    создания учётки (must_change_password) должен быть чем-то, что они
+    реально могут сделать сами, не прося админа о втором действии."""
+    if key.kind != "user":
+        raise HTTPException(status_code=400, detail="Доступно только при входе по логину/паролю")
+    user = db.query(User).filter(User.username == key.label).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.source == "ad":
+        raise HTTPException(status_code=409, detail="Пароль доменной учётки меняется в Active Directory")
+    problem = password_problem(payload.password)
+    if problem:
+        raise HTTPException(status_code=422, detail=f"Пароль не принят: {problem}")
+    user.password_hash = hash_password(payload.password)
+    user.must_change_password = False
+    db.commit()
     closed = revoke_all_for_user(db, user.id)
     return {"status": "updated", "sessions_closed": closed}
 
@@ -2417,6 +2459,10 @@ def delete_user(user_id: int, db: Session = Depends(_db)):
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.username == DEFAULT_ADMIN_USERNAME:
+        # Ни при каких правах — это последняя гарантированная точка входа,
+        # даже сама учётка себя не удаляет (см. list_users выше).
+        raise HTTPException(status_code=403, detail="Учётку Admin удалить нельзя")
     revoke_all_for_user(db, user.id)
     db.delete(user)
     db.commit()
@@ -3059,13 +3105,21 @@ def whoami(key: Principal = Depends(require_api_key), db: Session = Depends(_db)
     # сменён: видеть его должен любой вошедший, а не только тот, кто
     # читал логи при установке.
     default_password = False
+    # Флаг на самой учётке (запрос пользователя, 2026-09-25: "для новых
+    # пользователей... надо включить сразу замена пароля") — не путать с
+    # default_password выше (то — конкретно про встроенный Admin/gridforge).
+    # Показываем врозь: если уже светится default_password, второй баннер
+    # с тем же смыслом только путал бы.
+    must_change_password = False
     if key.kind == "user":
         user = db.query(User).filter(User.username == key.label).first()
         default_password = bool(user and is_default_password(user.password_hash))
+        must_change_password = bool(user and user.must_change_password and not default_password)
     return {
         "label": key.label,
         "role": key.role.value,
         "group_id": key.group_id,
+        "must_change_password": must_change_password,
         "kind": key.kind,
         "default_password": default_password,
     }
