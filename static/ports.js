@@ -319,6 +319,68 @@ async function bulkApplyPortState(state) {
 document.getElementById("bulk-port-up").addEventListener("click", () => bulkApplyPortState("up"));
 document.getElementById("bulk-port-down").addEventListener("click", () => bulkApplyPortState("down"));
 
+// Массовое включение/выключение Port Security (перенос NetOpsHub,
+// /port-security-map: "предложенное значение — сколько MAC видно
+// сейчас, а если порт пуст — 2", запрос пользователя 2026-09-25). У
+// одиночного порта максимум вводится вручную одним числом на все
+// выбранные порты разом это не сработало бы честно — каждый порт
+// получает свой максимум из своего же последнего скана MAC
+// (_portDataCache, тот же кэш, что у "Показать MAC"/"Проверить MAC на
+// портах" — если её не было для порта, отдельного похода на устройство
+// здесь не делаем, просто 2 как безопасный дефолт по умолчанию).
+const DEFAULT_BULK_PORT_SECURITY_MAXIMUM = 2;
+
+async function bulkApplyPortSecurity(action) {
+  if (_pickedPorts.size === 0) return toast("Сначала выбери порты на схеме", true);
+  const names = [..._pickedPorts];
+  const maxFor = (name) => {
+    if (action === "off") return null;
+    const cached = _portDataCache.get(name);
+    const count = cached && !cached.macError ? (cached.macs || []).length : 0;
+    return count > 0 ? count : DEFAULT_BULK_PORT_SECURITY_MAXIMUM;
+  };
+  const label = action === "on" ? "включить" : "выключить";
+  const preview =
+    action === "on"
+      ? names.map((n) => `${n} (максимум ${maxFor(n)})`).join(", ")
+      : names.join(", ");
+  if (!confirm(`${action === "on" ? "Включить" : "Выключить"} Port Security на ${names.length} порт(ов): ${preview}?`)) return;
+
+  const nodeId = _selectedNodeId;
+  const status = document.getElementById("bulk-port-status");
+  const onBtn = document.getElementById("bulk-port-security-on");
+  const offBtn = document.getElementById("bulk-port-security-off");
+  onBtn.disabled = true;
+  offBtn.disabled = true;
+  let ok = 0;
+  let failed = 0;
+  for (let i = 0; i < names.length; i++) {
+    const maximum = maxFor(names[i]);
+    status.textContent = `Port Security ${i + 1}/${names.length} — ${names[i]}…`;
+    try {
+      const result = await apiWithCredentials(`/api/nodes/${nodeId}/ports/${encodeURIComponent(names[i])}/apply`, {
+        method: "POST",
+        body: JSON.stringify({ port_security: action, port_security_maximum: maximum ? String(maximum) : null }),
+      });
+      if (result.ok) {
+        ok++;
+        patchProtectionAfterApply(names[i], action, maximum ? String(maximum) : null);
+      } else failed++;
+    } catch (e) {
+      failed++;
+    }
+  }
+  onBtn.disabled = false;
+  offBtn.disabled = false;
+  status.textContent = `готово: успешно ${ok}, ошибок ${failed}`;
+  toast(`Port Security ${label}: успешно ${ok}, ошибок ${failed}`, failed > 0 && ok === 0);
+  _pickedPorts.clear();
+  refreshPortsLive(nodeId, { silent: true, resetUI: false });
+}
+
+document.getElementById("bulk-port-security-on").addEventListener("click", () => bulkApplyPortSecurity("on"));
+document.getElementById("bulk-port-security-off").addEventListener("click", () => bulkApplyPortSecurity("off"));
+
 // Отчёт по MAC-адресам на выбранных портах — перенос функции NetOpsHub
 // (раздел Port Security: при массовом выборе портов показывал скан
 // MAC — сколько устройств реально сидит на каком порту, до включения
