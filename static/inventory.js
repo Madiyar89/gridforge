@@ -14,6 +14,15 @@ const expandedNodes = new Set();
 // группа целиком нужна реже.
 const collapsedGroups = new Set();
 
+// Вариант B/C плана дашборда по образцу Netdata (запрос пользователя,
+// 2026-09-25: "делай всё по порядку") — график значений проверки с
+// линией порога условия. Список watches по probe.id нужен только на
+// клик "график" (fetch по /api/probes/{id}/samples делается тогда же,
+// не заранее) — держим отдельно от DOM, не в data-атрибуте: значения
+// условий — произвольный текст, экранирование внутри HTML-атрибута
+// лишний риск ради данных, которые и так уже есть в JS-объекте.
+let _probeWatchesById = {};
+
 async function refreshGroups() {
   const body = document.getElementById("groups-body");
   const select = document.getElementById("new-node-group");
@@ -191,6 +200,9 @@ async function refreshNodes() {
       item.classList.toggle("expanded");
     });
   });
+  body.querySelectorAll(".show-chart").forEach((btn) => {
+    btn.addEventListener("click", () => toggleProbeChart(btn.dataset.probeId, btn));
+  });
   body.querySelectorAll(".add-probe").forEach((btn) => {
     btn.addEventListener("click", () => openProbeModal(btn.dataset.nodeId, btn.dataset.nodeName));
   });
@@ -246,10 +258,78 @@ async function deleteWatch(watchId, label) {
   }
 }
 
+// Вариант B/C плана дашборда по образцу Netdata (запрос пользователя,
+// 2026-09-25) — график истории значений проверки прямо под её строкой
+// в Инвентаре, с линией порога условия (gt/lt), если оно задано: видно
+// не только "сработало/нет", а И ПОЧЕМУ — как значение шло к порогу.
+async function toggleProbeChart(probeId, btn) {
+  const box = document.getElementById(`chart-${probeId}`);
+  const wasHidden = box.hidden;
+  box.hidden = !wasHidden;
+  btn.textContent = wasHidden ? "скрыть график" : "график";
+  if (!wasHidden) return; // сворачиваем — запрос не нужен
+  box.innerHTML = `<div class="empty" style="padding:8px 0;">Загрузка…</div>`;
+  let samples;
+  try {
+    samples = await api(`/api/probes/${probeId}/samples?limit=50`);
+  } catch (e) {
+    box.innerHTML = `<div class="empty" style="padding:8px 0;">${emptyOrError(e)}</div>`;
+    return;
+  }
+  renderProbeChart(box, samples, _probeWatchesById[probeId] || []);
+}
+
+function renderProbeChart(container, samples, watches) {
+  // /api/probes/{id}/samples отдаёт по убыванию времени (свежее
+  // первым) — для чтения слева направо графику нужен обратный порядок.
+  const points = [...samples].reverse();
+  const numeric = points.filter((p) => p.value !== null);
+  if (numeric.length === 0) {
+    container.innerHTML = `<div class="empty" style="padding:8px 0;">Нет числовых данных для графика (проверка не возвращает число)</div>`;
+    return;
+  }
+  const thresholds = watches
+    .filter((w) => (w.operator === "gt" || w.operator === "lt") && w.threshold !== null)
+    .map((w) => ({ value: w.threshold, severity: w.severity, label: w.label }));
+
+  const values = numeric.map((p) => p.value);
+  const allValues = thresholds.length ? values.concat(thresholds.map((t) => t.value)) : values;
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const range = max - min || 1;
+  const w = 600;
+  const h = 90;
+  const pad = 4;
+  const stepX = numeric.length > 1 ? (w - pad * 2) / (numeric.length - 1) : 0;
+  const yFor = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
+  const linePoints = numeric.map((p, i) => `${(pad + i * stepX).toFixed(1)},${yFor(p.value).toFixed(1)}`).join(" ");
+  const dots = numeric
+    .map((p, i) => {
+      const cls = p.ok ? "" : "chart-dot-fail";
+      return `<circle class="chart-dot ${cls}" cx="${(pad + i * stepX).toFixed(1)}" cy="${yFor(p.value).toFixed(1)}" r="2"><title>${escapeHtml(String(p.value))} · ${escapeHtml(timeAgo(p.taken_at))}</title></circle>`;
+    })
+    .join("");
+  const thresholdLines = thresholds
+    .map((t) => {
+      const y = yFor(t.value).toFixed(1);
+      return `<line class="chart-threshold sev-${t.severity}" x1="${pad}" y1="${y}" x2="${w - pad}" y2="${y}"><title>${escapeHtml(t.label)}: порог ${escapeHtml(String(t.value))}</title></line>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="probe-chart-svg">
+      ${thresholdLines}
+      <polyline points="${linePoints}" fill="none" class="chart-line"/>
+      ${dots}
+    </svg>
+    <div class="probe-chart-range"><span>${escapeHtml(String(min))}</span><span>${escapeHtml(String(max))}</span></div>`;
+}
+
 function renderNodeItem(n) {
   const probeChips = n.probes.length
     ? n.probes
         .map((p) => {
+          _probeWatchesById[p.id] = p.watches;
           const s = p.latest_sample;
           const dotClass = !s ? "unknown" : s.ok ? "up" : "down";
           let label = "нет данных";
@@ -274,10 +354,13 @@ function renderNodeItem(n) {
             <span><span class="ok-dot ${dotClass}"></span>${escapeHtml(p.kind)}</span>
             <span>${escapeHtml(String(label))}</span>
             <span class="chip-actions">
+              <button type="button" class="show-chart" data-probe-id="${p.id}">график</button>
               <button type="button" class="add-watch" data-probe-id="${p.id}" data-probe-kind="${escapeHtml(p.kind)}">+ условие</button>
               <button type="button" class="del-probe" data-probe-id="${p.id}" data-probe-kind="${escapeHtml(p.kind)}">×</button>
             </span>
-          </div>${watchRows}`;
+          </div>
+          <div class="probe-chart" id="chart-${p.id}" hidden></div>
+          ${watchRows}`;
         })
         .join("")
     : `<div class="probe-chip" style="color:var(--text-dim)">проверок нет</div>`;

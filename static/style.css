@@ -460,6 +460,20 @@ a{color:var(--accent);}
   background:none;border:none;color:var(--accent);cursor:pointer;font-family:var(--mono);
   font-size:11px;padding:0;
 }
+/* График истории значений проверки (по образцу Netdata, запрос
+   пользователя 2026-09-25) — под строкой проверки, не модалкой: смотрят
+   мельком, по одному графику за раз, отдельное окно было бы лишним
+   действием "открыть-закрыть" на каждый взгляд. */
+.probe-chart{margin:4px 0 2px;padding:6px 9px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;}
+.probe-chart-svg{width:100%;height:70px;display:block;}
+.chart-line{stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke;}
+.chart-dot{fill:var(--accent);}
+.chart-dot.chart-dot-fail{fill:var(--crit);}
+.chart-threshold{stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke;}
+.chart-threshold.sev-critical{stroke:var(--crit);}
+.chart-threshold.sev-warning{stroke:var(--warn);}
+.chart-threshold.sev-info{stroke:var(--info);}
+.probe-chart-range{display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:2px;}
 
 .form-row{padding:14px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;}
 .form-row input,.form-row select,.form-row textarea{
