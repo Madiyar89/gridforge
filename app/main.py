@@ -61,7 +61,7 @@ from app.geoip_engine import lookup as geoip_lookup
 from app.lifecycle_engine import suggest_offline_archival, suggest_vendor_grouping
 from app.sync_engine import create_site, latest_reports, record_report, resolve_site
 from app.ask_engine import AskError, ask_network
-from app.dashboard_engine import build_dashboard
+from app.dashboard_engine import build_dashboard, build_incident_trend
 from app.metrics_engine import render_prometheus_metrics
 from app.capture_engine import CaptureValidationError, analyze_capture, run_capture
 from app.console_ws import handle_console
@@ -878,6 +878,15 @@ def dashboard(db: Session = Depends(_db), key: Principal = Depends(require_api_k
     """Всё для главной страницы одним запросом — она обновляется каждые
     5 секунд, и десяток отдельных вызовов на виджет тут заметен."""
     return build_dashboard(db, key)
+
+
+@api_read.get("/api/dashboard/incident-trend")
+def dashboard_incident_trend(db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Спарклайн для CRITICAL/WARNING карточек — отдельный эндпоинт, не
+    внутри /api/dashboard: он не нужен на каждый 5-секундный тик (график
+    за час не меняется каждые 5 секунд так, чтобы это было заметно на
+    глаз), достаточно раз в минуту."""
+    return build_incident_trend(db, key)
 
 
 @api_read.get("/api/lifecycle/suggestions")

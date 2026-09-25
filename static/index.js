@@ -122,13 +122,44 @@ async function refreshIncidents() {
   renderIncidentsGrouped(incidents);
 }
 
+// Спарклайн в карточках CRITICAL/WARNING (по образцу Netdata — живой
+// мини-график прямо в самой метрике, запрос пользователя 2026-09-25).
+// Свой интервал обновления, реже основного REFRESH_MS: часовой график
+// не меняется настолько, чтобы дёргать его каждые 5 секунд.
+const SPARK_REFRESH_MS = 60000;
+
+function renderSparkline(svgId, values) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  const max = Math.max(1, ...values);
+  const w = 100;
+  const h = 28;
+  const stepX = values.length > 1 ? w / (values.length - 1) : w;
+  const points = values.map((v, i) => `${(i * stepX).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`).join(" ");
+  svg.innerHTML = `<polyline points="${points}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+}
+
+async function refreshTrend() {
+  let trend;
+  try {
+    trend = await api("/api/dashboard/incident-trend");
+  } catch (e) {
+    return;
+  }
+  renderSparkline("stat-crit-spark", trend.critical);
+  renderSparkline("stat-warn-spark", trend.warning);
+}
+
 async function refreshAll() {
   await Promise.all([refreshSummary(), refreshIncidents(), updateRolePill()]);
 }
 
 function onKeySaved() {
   refreshAll();
+  refreshTrend();
 }
 
 refreshAll();
+refreshTrend();
 setInterval(refreshAll, REFRESH_MS);
+setInterval(refreshTrend, SPARK_REFRESH_MS);

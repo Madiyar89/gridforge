@@ -27,6 +27,7 @@ from app.models import (
     Watch,
     WatchSeverity,
     _now,
+    as_aware,
 )
 
 RECENT_WINDOW = timedelta(hours=24)
@@ -144,3 +145,32 @@ _SEVERITY_ORDER = {
     WatchSeverity.warning.value: 1,
     WatchSeverity.critical.value: 2,
 }
+
+
+def build_incident_trend(db: Session, key: Principal, hours: int = 24) -> dict:
+    """Спарклайн для CRITICAL/WARNING карточек Дашборда (запрос
+    пользователя, 2026-09-25, по образцу Netdata — живой мини-график в
+    самой карточке метрики). Не "сколько сейчас открыто" (это отдельный
+    подсчёт с интервальной арифметикой, здесь не нужен), а "сколько
+    инцидентов ОТКРЫЛОСЬ в каждый час" — честный, простой в чтении
+    показатель динамики: видно всплеск, даже если инциденты потом
+    быстро закрылись и в текущем счётчике уже не отражены."""
+    node_ids = _visible_node_ids(db, key)
+    since = _now() - timedelta(hours=hours)
+    trend = {"critical": [0] * hours, "warning": [0] * hours}
+    if not node_ids:
+        return trend
+
+    rows = (
+        db.query(Incident.opened_at, Watch.severity)
+        .join(Incident.watch)
+        .join(Watch.probe)
+        .filter(Incident.opened_at >= since, Probe.node_id.in_(node_ids))
+        .all()
+    )
+    for opened_at, severity in rows:
+        idx = min(max(int((as_aware(opened_at) - since).total_seconds() // 3600), 0), hours - 1)
+        bucket = trend.get(severity.value)
+        if bucket is not None:
+            bucket[idx] += 1
+    return trend

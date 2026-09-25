@@ -180,3 +180,74 @@ def test_incident_list_now_says_which_node(client, admin_key, db):
 
 def test_dashboard_endpoint_requires_auth(client):
     assert client.get("/api/dashboard").status_code == 401
+
+
+# --- build_incident_trend: спарклайн для CRITICAL/WARNING карточек
+# (запрос пользователя, 2026-09-25, по образцу Netdata) ---
+
+
+def test_incident_trend_empty_installation_gives_zero_buckets(db):
+    from app.dashboard_engine import build_incident_trend
+
+    trend = build_incident_trend(db, _unscoped(), hours=24)
+    assert trend == {"critical": [0] * 24, "warning": [0] * 24}
+
+
+def test_incident_trend_buckets_by_hour_of_opening(db):
+    from app.dashboard_engine import build_incident_trend
+
+    _node_with_incident(db, "критичный", WatchSeverity.critical)
+    incident = db.query(Incident).first()
+    incident.opened_at = _now() - timedelta(hours=5, minutes=10)
+    db.commit()
+
+    trend = build_incident_trend(db, _unscoped(), hours=24)
+    assert sum(trend["critical"]) == 1
+    assert trend["critical"][24 - 6] == 1  # бакет "6 часов назад" (5ч10м округляется вниз до целого часа)
+
+
+def test_incident_trend_separates_by_severity(db):
+    from app.dashboard_engine import build_incident_trend
+
+    _node_with_incident(db, "критичный", WatchSeverity.critical)
+    _node_with_incident(db, "предупреждение", WatchSeverity.warning)
+
+    trend = build_incident_trend(db, _unscoped(), hours=24)
+    assert sum(trend["critical"]) == 1
+    assert sum(trend["warning"]) == 1
+
+
+def test_incident_trend_ignores_incidents_outside_window(db):
+    from app.dashboard_engine import build_incident_trend
+
+    _node_with_incident(db, "старый", WatchSeverity.critical)
+    incident = db.query(Incident).first()
+    incident.opened_at = _now() - timedelta(hours=48)
+    db.commit()
+
+    trend = build_incident_trend(db, _unscoped(), hours=24)
+    assert sum(trend["critical"]) == 0
+
+
+def test_incident_trend_respects_group_scope(db):
+    from app.dashboard_engine import build_incident_trend
+
+    own = Group(name="своя-2")
+    other = Group(name="чужая-2")
+    db.add_all([own, other])
+    db.commit()
+    _node_with_incident(db, "свой", group_id=own.id)
+    _node_with_incident(db, "чужой", group_id=other.id)
+
+    scoped = Principal(label="ограниченный", role=ApiKeyRole.admin, group_id=own.id, kind="api_key")
+    trend = build_incident_trend(db, scoped, hours=24)
+    assert sum(trend["critical"]) == 1
+
+
+def test_incident_trend_endpoint(client, admin_key, db):
+    _node_with_incident(db, "LAB-9", WatchSeverity.warning)
+    resp = client.get("/api/dashboard/incident-trend", headers={"X-API-Key": admin_key})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["critical"]) == 24
+    assert sum(body["warning"]) == 1

@@ -370,10 +370,16 @@ a{color:var(--accent);}
    .active ставится из index.js): постоянно подсвеченная карточка с
    нулём внутри перестаёт читаться как сигнал, тот же принцип, что уже
    применялся к .stat-silent-box. */
-.stat-major{min-width:130px;}
+.stat-major{min-width:130px;position:relative;overflow:hidden;}
 .stat-major .n{font-size:34px;}
 .stat-major.crit.active{background:color-mix(in srgb, var(--crit) 12%, var(--surface));border-color:var(--crit);}
 .stat-major.warn.active{background:color-mix(in srgb, var(--warn) 12%, var(--surface));border-color:var(--warn);}
+/* Спарклайн (по образцу Netdata, запрос пользователя 2026-09-25) —
+   тонкий график в самом низу карточки, под цифрой, а не поверх неё:
+   opacity приглушена, чтобы не спорить с числом за внимание. */
+.stat-major .spark{position:absolute;left:0;right:0;bottom:0;width:100%;height:22px;opacity:.55;}
+.stat-major.crit .spark{color:var(--crit);}
+.stat-major.warn .spark{color:var(--warn);}
 
 .grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start;}
 @media (max-width:860px){.grid{grid-template-columns:1fr;}}
