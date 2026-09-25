@@ -12,6 +12,10 @@ services:
     ports:
       - "8100:8100"
       - "5140:5140/udp"
+      # NetFlow v9 (docs/landscape-report.md, п.4.5, app/netflow_server.py) —
+      # без публикации порта реальные свитчи снаружи контейнера не достучатся,
+      # тот же принцип, что уже применён для syslog выше.
+      - "2055:2055/udp"
     volumes:
       - gridforge_data:/app/data
 
