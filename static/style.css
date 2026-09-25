@@ -431,7 +431,16 @@ a{color:var(--accent);}
 .node-head .name{font-weight:600;font-size:13px;}
 .node-head .addr{font-family:var(--mono);font-size:11.5px;color:var(--text-dim);}
 .node-head .actions{display:flex;gap:6px;align-items:center;}
-.probe-list{padding:0 16px 10px;display:flex;flex-direction:column;gap:6px;}
+/* Свернуть/развернуть проверки узла (запрос пользователя, 2026-09-25:
+   на парке в десятки узлов список из "+ проверка"/условий на каждом
+   растягивался на весь экран). По умолчанию свёрнуто — .probe-list
+   виден только у .node-item.expanded; шеврон крутится тем же
+   transform, что и у .sidebar-pin. */
+.node-toggle{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
+.node-chevron{width:12px;height:12px;flex-shrink:0;color:var(--text-dim);transition:transform .15s ease;}
+.node-item.expanded .node-chevron{transform:rotate(90deg);}
+.probe-list{padding:0 16px 10px;display:none;flex-direction:column;gap:6px;}
+.node-item.expanded .probe-list{display:flex;}
 .probe-chip{
   font-family:var(--mono);font-size:11.5px;background:var(--surface-2);border:1px solid var(--border);
   border-radius:6px;padding:6px 9px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;

@@ -1,5 +1,12 @@
 // Инвентарь — Группы, Узлы, Проверки, Условия, Действия.
 
+// Список узлов и проверок обновляется раз в REFRESH_MS (пересобирает
+// body.innerHTML целиком) — состояние "развёрнут/свёрнут" нужно
+// пережить это пересоздание DOM, поэтому хранится отдельно от разметки
+// (по умолчанию свёрнуты, запрос пользователя 2026-09-25: список из
+// нескольких десятков узлов иначе не окинуть взглядом).
+const expandedNodes = new Set();
+
 async function refreshGroups() {
   const body = document.getElementById("groups-body");
   const select = document.getElementById("new-node-group");
@@ -71,8 +78,9 @@ function scrollToLinkedNode() {
   const el = document.getElementById(`node-${nodeId}`);
   if (!el) return;
   scrolledToLinkedNode = true;
+  expandedNodes.add(Number(nodeId));
+  el.classList.add("highlight", "expanded");
   el.scrollIntoView({ behavior: "smooth", block: "center" });
-  el.classList.add("highlight");
 }
 
 async function refreshNodes() {
@@ -144,6 +152,15 @@ async function refreshNodes() {
 
   scrollToLinkedNode();
 
+  body.querySelectorAll(".node-toggle").forEach((el) => {
+    el.addEventListener("click", () => {
+      const item = el.closest(".node-item");
+      const nodeId = Number(item.id.slice("node-".length));
+      if (expandedNodes.has(nodeId)) expandedNodes.delete(nodeId);
+      else expandedNodes.add(nodeId);
+      item.classList.toggle("expanded");
+    });
+  });
   body.querySelectorAll(".add-probe").forEach((btn) => {
     btn.addEventListener("click", () => openProbeModal(btn.dataset.nodeId, btn.dataset.nodeName));
   });
@@ -235,10 +252,14 @@ function renderNodeItem(n) {
         .join("")
     : `<div class="probe-chip" style="color:var(--text-dim)">проверок нет</div>`;
   const vendorBadge = n.vendor ? `<span class="vendor-badge">${escapeHtml(n.vendor)}</span>` : "";
+  const isExpanded = expandedNodes.has(n.id);
   return `
-    <div class="node-item" id="node-${n.id}">
+    <div class="node-item${isExpanded ? " expanded" : ""}" id="node-${n.id}">
       <div class="node-head">
-        <span class="name">${escapeHtml(n.name)}${vendorBadge}</span>
+        <span class="name node-toggle">
+          <svg class="node-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 5l5 5-5 5"/></svg>
+          ${escapeHtml(n.name)}${vendorBadge}
+        </span>
         <span class="actions">
           <span class="addr">${escapeHtml(n.address)}</span>
           <button type="button" class="icon-btn add-probe" data-node-id="${n.id}" data-node-name="${escapeHtml(n.name)}">+ проверка</button>
