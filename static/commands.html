@@ -55,6 +55,13 @@
       <tr><td>MAC-таблица</td><td><code>show mac address-table</code></td></tr>
       <tr><td>ARP</td><td><code>show ip arp</code></td></tr>
       <tr><td>Создать VLAN и назначить на порты</td><td><code>vlan 100</code> → <code>name FLOOR_5</code>; <code>interface range Gi1/0/1-10</code> → <code>switchport access vlan 100</code></td></tr>
+      <tr><td>Транк-порт</td><td><code>interface Gi1/0/1</code> → <code>switchport trunk encapsulation dot1q</code> → <code>switchport mode trunk</code> → <code>switchport trunk allowed vlan 10,20,30</code></td></tr>
+      <tr><td>LACP / агрегация каналов (EtherChannel)</td><td><code>interface range Gi1/0/1-2</code> → <code>channel-group 1 mode active</code> (создаёт <code>Port-channel1</code>)</td></tr>
+      <tr><td>STP — статус / показать root</td><td><code>show spanning-tree</code> / <code>show spanning-tree vlan 10</code></td></tr>
+      <tr><td>STP — root guard, portfast, BPDU guard на порту</td><td><code>interface Gi1/0/1</code> → <code>spanning-tree guard root</code> / <code>spanning-tree portfast</code> → <code>spanning-tree bpduguard enable</code></td></tr>
+      <tr><td>Диагностика интерфейса (ошибки/счётчики)</td><td><code>show interfaces Gi1/0/1</code> / <code>show interfaces Gi1/0/1 counters errors</code></td></tr>
+      <tr><td>DHCP snooping</td><td><code>ip dhcp snooping</code> → <code>ip dhcp snooping vlan 10</code>; на аплинке к DHCP-серверу — <code>interface Gi1/0/1</code> → <code>ip dhcp snooping trust</code></td></tr>
+      <tr><td>Dynamic ARP Inspection</td><td><code>ip arp inspection vlan 10</code>; на доверенном аплинке — <code>interface Gi1/0/1</code> → <code>ip arp inspection trust</code></td></tr>
       <tr><td>Сохранить конфиг</td><td><code>copy running-config startup-config</code> (или <code>write memory</code>)</td></tr>
       <tr><td>Перезагрузка</td><td><code>reload</code></td></tr>
       <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8</code> / <code>traceroute 8.8.8.8</code></td></tr>
@@ -62,6 +69,9 @@
       <tr><td>SSH-only на vty, ACL источников</td><td><code>line vty 0 4</code> → <code>transport input ssh</code> → <code>access-class 23 in</code></td></tr>
       <tr><td>Standard ACL</td><td><code>ip access-list standard 23</code> → <code>permit 192.0.2.0 0.0.0.255</code></td></tr>
       <tr><td>Port security на порту</td><td><code>interface Gi1/0/1</code> → <code>switchport port-security</code> → <code>switchport port-security maximum 1</code></td></tr>
+      <tr><td>SNMP (community / v3)</td><td><code>snmp-server community public RO</code>; v3 — <code>snmp-server group GRP v3 priv</code> → <code>snmp-server user USER GRP v3 auth sha &lt;pass&gt; priv aes 128 &lt;pass&gt;</code></td></tr>
+      <tr><td>AAA — RADIUS</td><td><code>aaa new-model</code> → <code>radius server RAD1</code> → <code>address ipv4 192.0.2.10 auth-port 1812 acct-port 1813</code> → <code>key &lt;secret&gt;</code> → <code>aaa authentication login default group radius local</code></td></tr>
+      <tr><td>AAA — TACACS+</td><td><code>tacacs server TAC1</code> → <code>address ipv4 192.0.2.11</code> → <code>key &lt;secret&gt;</code> → <code>aaa authentication login default group tacacs+ local</code></td></tr>
       <tr><td>NTP / syslog</td><td><code>ntp server 192.0.2.140</code> / <code>logging host 192.0.2.115 transport udp port 1514</code></td></tr>
       <tr><td>Бэкап конфига на TFTP</td><td><code>copy running-config tftp://192.0.2.7/backup.cfg</code></td></tr>
     </tbody></table>
@@ -76,6 +86,13 @@
       <tr><td>MAC-таблица</td><td><code>show ethernet-switching table</code></td></tr>
       <tr><td>ARP</td><td><code>show arp</code></td></tr>
       <tr><td>Создать VLAN и назначить на порт</td><td><code>set vlans FLOOR_5 vlan-id 100</code>; <code>set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members FLOOR_5</code></td></tr>
+      <tr><td>Транк-порт (несколько VLAN)</td><td><code>set interfaces ge-0/0/1 unit 0 family ethernet-switching port-mode trunk</code> → <code>set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members [FLOOR_5 FLOOR_6]</code></td></tr>
+      <tr><td>LACP / агрегация (ae)</td><td><code>set chassis aggregated-devices ethernet device-count 1</code> → <code>set interfaces ge-0/0/1 ether-options 802.3ad ae0</code> → <code>set interfaces ge-0/0/2 ether-options 802.3ad ae0</code> → <code>set interfaces ae0 aggregated-ether-options lacp active</code></td></tr>
+      <tr><td>STP — статус</td><td><code>show spanning-tree bridge</code> / <code>show spanning-tree interface</code></td></tr>
+      <tr><td>STP — root guard, edge-port, BPDU block</td><td><code>set protocols rstp interface ge-0/0/1 no-root-port</code> / <code>set protocols rstp interface ge-0/0/1 edge</code> / <code>set ethernet-switching-options bpdu-block interface ge-0/0/1</code></td></tr>
+      <tr><td>Диагностика интерфейса (ошибки/счётчики)</td><td><code>show interfaces ge-0/0/1 extensive</code> (Input/Output errors — там же)</td></tr>
+      <tr><td>DHCP snooping (examine-dhcp)</td><td><code>set ethernet-switching-options secure-access-port vlan FLOOR_5 examine-dhcp</code>; доверенный аплинк — <code>... interface ge-0/0/1 dhcp-trusted</code></td></tr>
+      <tr><td>ARP inspection</td><td><code>set ethernet-switching-options secure-access-port vlan FLOOR_5 arp-inspection</code></td></tr>
       <tr><td>Применить и сохранить конфиг</td><td><code>commit</code></td></tr>
       <tr><td>Перезагрузка</td><td><code>request system reboot</code></td></tr>
       <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8 count 5</code> / <code>traceroute 8.8.8.8</code></td></tr>
@@ -83,6 +100,8 @@
       <tr><td>Включить SSH</td><td><code>set system services ssh</code></td></tr>
       <tr><td>Firewall filter (аналог ACL)</td><td><code>set firewall filter VTY_IN term allow from source-address 192.168.250.0/24 then accept</code></td></tr>
       <tr><td>Port security (secure-access-port)</td><td><code>set ethernet-switching-options secure-access-port interface ge-0/0/1 mac-limit 1</code></td></tr>
+      <tr><td>SNMP (community / v3)</td><td><code>set snmp community public authorization read-only</code>; v3 — <code>set snmp v3 usm local-engine user USER authentication-sha authentication-password &lt;pass&gt; privacy-aes128 privacy-password &lt;pass&gt;</code></td></tr>
+      <tr><td>AAA — RADIUS / TACACS+</td><td><code>set system radius-server 192.0.2.10 secret &lt;secret&gt;</code> → <code>set system authentication-order radius</code>; TACACS — <code>set system tacplus-server 192.0.2.11 secret &lt;secret&gt;</code> → <code>set system authentication-order tacplus</code></td></tr>
       <tr><td>NTP / syslog</td><td><code>set system ntp server 192.0.2.140</code> / <code>set system syslog host 192.0.2.115 any any</code></td></tr>
     </tbody></table>
   </div>
@@ -96,6 +115,13 @@
       <tr><td>MAC-таблица</td><td><code>display mac-address</code></td></tr>
       <tr><td>ARP</td><td><code>display arp</code></td></tr>
       <tr><td>Создать VLAN и назначить на порты</td><td><code>vlan 100</code>; <code>interface range GigabitEthernet1/0/1 to GigabitEthernet1/0/10</code> → <code>port access vlan 100</code></td></tr>
+      <tr><td>Транк-порт</td><td><code>interface GigabitEthernet1/0/1</code> → <code>port link-type trunk</code> → <code>port trunk permit vlan 10 20 30</code></td></tr>
+      <tr><td>LACP / агрегация (bridge-aggregation)</td><td><code>interface bridge-aggregation 1</code> → <code>link-aggregation mode dynamic</code>; на каждом члене — <code>interface GigabitEthernet1/0/1</code> → <code>port link-aggregation group 1</code></td></tr>
+      <tr><td>STP — статус</td><td><code>display stp brief</code></td></tr>
+      <tr><td>STP — root guard, edge-port, BPDU protection</td><td><code>interface GigabitEthernet1/0/1</code> → <code>stp root-protection</code> / <code>stp edged-port enable</code>; глобально — <code>stp bpdu-protection</code></td></tr>
+      <tr><td>Диагностика интерфейса (ошибки/счётчики)</td><td><code>display interface GigabitEthernet1/0/1</code></td></tr>
+      <tr><td>DHCP snooping</td><td><code>dhcp snooping enable</code> → в VLAN — <code>dhcp snooping enable</code>; доверенный порт — <code>interface GigabitEthernet1/0/1</code> → <code>dhcp snooping trust</code></td></tr>
+      <tr><td>ARP inspection (по таблице DHCP snooping)</td><td><code>arp detection enable</code> (в VLAN); доверенный аплинк — <code>interface GigabitEthernet1/0/1</code> → <code>arp detection trust</code></td></tr>
       <tr><td>Сохранить конфиг</td><td><code>save</code> (подтвердить <code>Y</code>)</td></tr>
       <tr><td>Перезагрузка</td><td><code>reboot</code></td></tr>
       <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8</code> / <code>tracert 8.8.8.8</code></td></tr>
@@ -103,6 +129,9 @@
       <tr><td>SSH на vty</td><td><code>user-interface vty 0 4</code> → <code>authentication-mode scheme</code> → <code>protocol inbound ssh</code></td></tr>
       <tr><td>Basic ACL</td><td><code>acl basic 2000</code> → <code>rule permit source 192.0.2.0 0.0.0.255</code></td></tr>
       <tr><td>Port security</td><td><code>interface GigabitEthernet1/0/1</code> → <code>port-security enable</code></td></tr>
+      <tr><td>SNMP (community / v3)</td><td><code>snmp-agent community read public</code>; v3 — <code>snmp-agent usm-user v3 USER GRP authentication-mode sha &lt;pass&gt; privacy-mode aes128 &lt;pass&gt;</code></td></tr>
+      <tr><td>AAA — RADIUS</td><td><code>radius scheme RAD1</code> → <code>primary authentication 192.0.2.10</code> → <code>key authentication simple &lt;secret&gt;</code> → <code>domain default</code> → <code>authentication login radius-scheme RAD1</code></td></tr>
+      <tr><td>AAA — TACACS+</td><td><code>hwtacacs scheme TAC1</code> → <code>primary authentication 192.0.2.11</code> → <code>key authentication simple &lt;secret&gt;</code></td></tr>
       <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.140</code> / <code>info-center loghost 192.0.2.115</code></td></tr>
     </tbody></table>
   </div>
@@ -116,6 +145,13 @@
       <tr><td>MAC-таблица</td><td><code>display mac-address</code></td></tr>
       <tr><td>ARP</td><td><code>display arp</code></td></tr>
       <tr><td>Создать VLAN и назначить на порт</td><td><code>vlan batch 100</code>; <code>interface GigabitEthernet0/0/1</code> → <code>port link-type access</code> → <code>port default vlan 100</code></td></tr>
+      <tr><td>Транк-порт</td><td><code>interface GigabitEthernet0/0/1</code> → <code>port link-type trunk</code> → <code>port trunk allow-pass vlan 10 20 30</code></td></tr>
+      <tr><td>LACP / агрегация (Eth-Trunk)</td><td><code>interface Eth-Trunk 1</code> → <code>mode lacp-static</code>; на каждом члене — <code>interface GigabitEthernet0/0/1</code> → <code>eth-trunk 1</code></td></tr>
+      <tr><td>STP — статус</td><td><code>display stp brief</code></td></tr>
+      <tr><td>STP — root guard, edge-port, BPDU protection</td><td><code>interface GigabitEthernet0/0/1</code> → <code>stp root-protection</code> / <code>stp edged-port enable</code>; глобально — <code>stp bpdu-protection</code></td></tr>
+      <tr><td>Диагностика интерфейса (ошибки/счётчики)</td><td><code>display interface GigabitEthernet0/0/1</code></td></tr>
+      <tr><td>DHCP snooping</td><td><code>dhcp snooping enable</code>; в VLAN — <code>dhcp snooping enable</code>; доверенный порт — <code>interface GigabitEthernet0/0/1</code> → <code>dhcp snooping trusted</code></td></tr>
+      <tr><td>ARP anti-attack (по таблице DHCP snooping)</td><td><code>interface GigabitEthernet0/0/1</code> → <code>arp anti-attack check user-bind enable</code></td></tr>
       <tr><td>Сохранить конфиг</td><td><code>save</code></td></tr>
       <tr><td>Перезагрузка</td><td><code>reboot</code></td></tr>
       <tr><td>Ping / traceroute</td><td><code>ping 8.8.8.8</code> / <code>tracert 8.8.8.8</code></td></tr>
@@ -123,6 +159,9 @@
       <tr><td>SSH на vty</td><td><code>user-interface vty 0 4</code> → <code>authentication-mode aaa</code> → <code>protocol inbound ssh</code></td></tr>
       <tr><td>ACL</td><td><code>acl 2000</code> → <code>rule permit source 192.0.2.0 0.0.0.255</code></td></tr>
       <tr><td>Port security</td><td><code>interface GigabitEthernet0/0/1</code> → <code>port-security enable</code></td></tr>
+      <tr><td>SNMP (community / v3)</td><td><code>snmp-agent community read cipher public</code>; v3 — <code>snmp-agent usm-user v3 USER GRP authentication-mode sha &lt;pass&gt; privacy-mode aes128 &lt;pass&gt;</code></td></tr>
+      <tr><td>AAA — RADIUS</td><td><code>radius-server template RAD1</code> → <code>radius-server authentication 192.0.2.10 1812</code> → <code>radius-server shared-key cipher &lt;secret&gt;</code> → <code>aaa</code> → <code>authentication-scheme default</code> → <code>authentication-mode radius</code></td></tr>
+      <tr><td>AAA — TACACS+</td><td><code>hwtacacs-server template TAC1</code> → <code>hwtacacs-server authentication 192.0.2.11</code></td></tr>
       <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.140</code> / <code>info-center loghost 192.0.2.115</code></td></tr>
     </tbody></table>
   </div>
@@ -136,6 +175,13 @@
       <tr><td>MAC-таблица (на bridge)</td><td><code>/interface bridge host print</code></td></tr>
       <tr><td>ARP</td><td><code>/ip arp print</code></td></tr>
       <tr><td>VLAN на bridge-порту</td><td><code>/interface bridge vlan add bridge=bridge1 tagged=ether1 vlan-ids=100</code></td></tr>
+      <tr><td>Транк (несколько VLAN, тегированный порт)</td><td><code>/interface bridge vlan add bridge=bridge1 tagged=ether1 vlan-ids=10,20,30</code> (тот же <code>tagged=</code>, просто несколько vlan-ids через запятую)</td></tr>
+      <tr><td>LACP / агрегация (bonding)</td><td><code>/interface bonding add slaves=ether1,ether2 mode=802.3ad name=bond1</code></td></tr>
+      <tr><td>STP — статус / настройка на bridge</td><td><code>/interface bridge print</code>; включить RSTP — <code>/interface bridge set bridge1 protocol-mode=rstp</code></td></tr>
+      <tr><td>STP — root guard, edge-port, BPDU guard на порту</td><td><code>/interface bridge port set [find interface=ether1] restricted-role=yes</code> / <code>edge=yes</code> / <code>bpdu-guard=yes</code></td></tr>
+      <tr><td>Диагностика интерфейса (ошибки/счётчики)</td><td><code>/interface ethernet print stats</code> / <code>/interface monitor-traffic ether1</code></td></tr>
+      <tr><td>DHCP snooping (доверенный порт)</td><td><code>/interface bridge set bridge1 dhcp-snooping=yes</code> → <code>/interface bridge port set [find interface=ether1] trusted=yes</code> (на порту к легитимному DHCP-серверу)</td></tr>
+      <tr><td>ARP inspection</td><td>Прямого аналога (DAI) нет — ближайшее: <code>/interface bridge set bridge1 arp=reply-only</code> (отвечать только на статические ARP-записи, не то же самое, что проверка по DHCP snooping-таблице)</td></tr>
       <tr><td>Сохранить конфиг</td><td><code>/system backup save name=backup1</code> (бинарный) или <code>/export file=backup1</code> (текстовый)</td></tr>
       <tr><td>Перезагрузка</td><td><code>/system reboot</code></td></tr>
       <tr><td>Ping / traceroute</td><td><code>/ping 8.8.8.8</code> / <code>/tool traceroute 8.8.8.8</code></td></tr>
@@ -143,6 +189,9 @@
       <tr><td>Включить SSH, выключить Telnet</td><td><code>/ip service set ssh disabled=no</code> / <code>/ip service set telnet disabled=yes</code></td></tr>
       <tr><td>Firewall filter (аналог ACL)</td><td><code>/ip firewall filter add chain=input src-address=192.168.250.0/24 action=accept</code></td></tr>
       <tr><td>Port security</td><td>Прямого аналога нет — ближайшее: <code>/interface bridge port set [find interface=ether1] learn=no</code> (жёсткий allowlist MAC вручную, не то же самое, что sticky port-security)</td></tr>
+      <tr><td>SNMP (community / v3)</td><td><code>/snmp set enabled=yes</code> → <code>/snmp community add name=public addresses=192.0.2.0/24</code>; v3 — <code>/snmp community add name=v3user security=private authentication-protocol=sha authentication-password=&lt;pass&gt; encryption-protocol=aes encryption-password=&lt;pass&gt;</code></td></tr>
+      <tr><td>AAA — RADIUS</td><td><code>/radius add address=192.0.2.10 secret=&lt;secret&gt; service=login</code> → <code>/user aaa set use-radius=yes</code></td></tr>
+      <tr><td>AAA — TACACS+</td><td>Встроенной поддержки TACACS+ нет — только RADIUS</td></tr>
       <tr><td>NTP / удалённый лог</td><td><code>/system ntp client set enabled=yes primary-ntp=192.0.2.140</code> / <code>/system logging action add name=remote target=remote remote=192.0.2.115</code></td></tr>
     </tbody></table>
   </div>
