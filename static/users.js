@@ -2,6 +2,35 @@
 
 let _groupsById = {};
 
+// Пункт 3 запроса пользователя (2026-09-25: "разработать выбирать кто с
+// чем будет работать") — чек-лист разделов сайта строится из того же
+// NAV_GROUPS, что и сама навигация (common.js), не дублируется здесь
+// отдельным списком: появится новый раздел в меню — появится и в
+// чек-листе сам собой.
+function renderPageChecklist(containerId, checkedPages) {
+  const container = document.getElementById(containerId);
+  const checked = new Set(checkedPages || []);
+  container.innerHTML = NAV_GROUPS.map((group) => {
+    const title = group.title || "Дашборд";
+    const items = group.items
+      .map(
+        (item) => `
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 0;">
+          <input type="checkbox" value="${item.href}" ${checked.has(item.href) ? "checked" : ""}> ${escapeHtml(item.label)}
+        </label>`
+      )
+      .join("");
+    return `<div style="padding:8px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-size:11px;text-transform:uppercase;color:var(--text-dim);letter-spacing:.05em;margin-bottom:4px;">${escapeHtml(title)}</div>
+      ${items}
+    </div>`;
+  }).join("");
+}
+
+function readPageChecklist(containerId) {
+  return [...document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)].map((el) => el.value);
+}
+
 async function refreshGroupOptions() {
   let groups;
   try {
@@ -39,11 +68,16 @@ async function refreshUsers() {
       const pending = u.must_change_password
         ? ` · <span style="color:var(--warn)">ждёт смены пароля</span>`
         : "";
+      const pagesNote = u.allowed_pages ? ` · разделов: ${u.allowed_pages.length}` : "";
       return `
       <div class="channel-row">
-        <span><b>${escapeHtml(u.username)}</b>${source} · ${escapeHtml(u.role)} · ${scope} · вход: ${escapeHtml(lastLogin)}${inactive}${pending}</span>
-        <button data-id="${u.id}" data-name="${escapeHtml(u.username)}" class="del-user">удалить</button>
-      </div>`;
+        <span><b>${escapeHtml(u.username)}</b>${source} · ${escapeHtml(u.role)} · ${scope} · вход: ${escapeHtml(lastLogin)}${inactive}${pending}${pagesNote}</span>
+        <span style="display:flex;gap:6px;">
+          <button data-id="${u.id}" class="edit-pages-toggle">разделы</button>
+          <button data-id="${u.id}" data-name="${escapeHtml(u.username)}" class="del-user">удалить</button>
+        </span>
+      </div>
+      <div id="edit-pages-${u.id}" hidden style="padding:0 16px 10px;border-bottom:1px solid var(--border);"></div>`;
     })
     .join("");
 
@@ -65,13 +99,55 @@ async function refreshUsers() {
       }
     });
   });
+
+  body.querySelectorAll(".edit-pages-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.id;
+      const box = document.getElementById(`edit-pages-${id}`);
+      const wasHidden = box.hidden;
+      box.hidden = !wasHidden;
+      if (!wasHidden) return; // сворачиваем — содержимое можно оставить как есть
+      const u = users.find((x) => String(x.id) === id);
+      const listId = `edit-pages-list-${id}`;
+      box.innerHTML =
+        `<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:8px 0 4px;">` +
+        `<input type="checkbox" id="edit-restrict-${id}" ${u.allowed_pages ? "checked" : ""}> ограничить разделы (иначе видит все)</label>` +
+        `<div id="${listId}" ${u.allowed_pages ? "" : "hidden"}></div>` +
+        `<button id="edit-pages-save-${id}" style="margin-top:6px;">Сохранить</button>`;
+      renderPageChecklist(listId, u.allowed_pages);
+      document.getElementById(`edit-restrict-${id}`).addEventListener("change", (ev) => {
+        document.getElementById(listId).hidden = !ev.target.checked;
+      });
+      document.getElementById(`edit-pages-save-${id}`).addEventListener("click", async () => {
+        const restrict = document.getElementById(`edit-restrict-${id}`).checked;
+        const pages = restrict ? readPageChecklist(listId) : null;
+        if (restrict && pages.length === 0) return toast("Отметь хотя бы один раздел", true);
+        try {
+          await api(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify({ allowed_pages: pages }) });
+          toast("Разделы сохранены");
+          refreshUsers();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      });
+    });
+  });
 }
+
+document.getElementById("new-user-restrict-pages").addEventListener("change", (ev) => {
+  const box = document.getElementById("new-user-pages");
+  box.hidden = !ev.target.checked;
+  if (ev.target.checked) renderPageChecklist("new-user-pages", null);
+});
 
 document.getElementById("add-user").addEventListener("click", async () => {
   const username = document.getElementById("new-user-name").value.trim();
   const password = document.getElementById("new-user-password").value;
   const groupValue = document.getElementById("new-user-group").value;
   if (!username || !password) return toast("Нужны логин и пароль", true);
+  const restrictPages = document.getElementById("new-user-restrict-pages").checked;
+  const allowedPages = restrictPages ? readPageChecklist("new-user-pages") : null;
+  if (restrictPages && allowedPages.length === 0) return toast("Отметь хотя бы один раздел", true);
   try {
     await api("/api/users", {
       method: "POST",
@@ -80,10 +156,13 @@ document.getElementById("add-user").addEventListener("click", async () => {
         password,
         role: document.getElementById("new-user-role").value,
         group_id: groupValue ? Number(groupValue) : null,
+        allowed_pages: allowedPages,
       }),
     });
     document.getElementById("new-user-name").value = "";
     document.getElementById("new-user-password").value = "";
+    document.getElementById("new-user-restrict-pages").checked = false;
+    document.getElementById("new-user-pages").hidden = true;
     toast("Пользователь создан");
     refreshUsers();
   } catch (e) {

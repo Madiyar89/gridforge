@@ -195,6 +195,21 @@ class UserIn(BaseModel):
     password: str
     role: ApiKeyRole = ApiKeyRole.viewer
     group_id: int | None = None
+    # None — без ограничения (видит все разделы, как раньше у всех
+    # учёток). Список конкретных href из NAV_GROUPS (common.js) — видит
+    # только их. См. User.allowed_pages в models.py.
+    allowed_pages: list[str] | None = None
+
+
+class UserUpdateIn(BaseModel):
+    """Изменение уже созданной учётки — только эти поля можно поменять
+    задним числом. Логин/пароль — отдельными путями (логин не меняется
+    вообще, пароль — через /password)."""
+
+    role: ApiKeyRole | None = None
+    group_id: int | None = None
+    active: bool | None = None
+    allowed_pages: list[str] | None = None
 
 
 class PasswordChangeIn(BaseModel):

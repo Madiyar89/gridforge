@@ -327,6 +327,74 @@ def test_admin_account_cannot_be_deleted(client, db):
     assert resp.status_code == 403
 
 
+# --- allowed_pages: выбор разделов (запрос пользователя, 2026-09-25:
+# "разработать выбирать кто с чем будет работать") ---
+
+
+def test_new_user_unrestricted_by_default(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    client.post("/api/users", json={"username": "безограничений", "password": "временный-пароль-5"})
+    listed = client.get("/api/users").json()
+    assert next(u for u in listed if u["username"] == "безограничений")["allowed_pages"] is None
+
+
+def test_create_user_with_restricted_pages(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    client.post(
+        "/api/users",
+        json={
+            "username": "ограниченный2",
+            "password": "временный-пароль-6",
+            "allowed_pages": ["index.html", "ports.html"],
+        },
+    )
+    listed = client.get("/api/users").json()
+    row = next(u for u in listed if u["username"] == "ограниченный2")
+    assert row["allowed_pages"] == ["index.html", "ports.html"]
+
+
+def test_whoami_reports_allowed_pages(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    client.post(
+        "/api/users",
+        json={"username": "огр3", "password": "временный-пароль-7", "allowed_pages": ["index.html"]},
+    )
+    client.post("/api/logout")
+    client.post("/api/login", json={"username": "огр3", "password": "временный-пароль-7"})
+    assert client.get("/api/whoami").json()["allowed_pages"] == ["index.html"]
+
+
+def test_patch_updates_allowed_pages(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    created = client.post("/api/users", json={"username": "изменяемый", "password": "временный-пароль-8"}).json()
+    resp = client.patch(f"/api/users/{created['id']}", json={"allowed_pages": ["ports.html"]})
+    assert resp.status_code == 200
+    listed = client.get("/api/users").json()
+    assert next(u for u in listed if u["id"] == created["id"])["allowed_pages"] == ["ports.html"]
+
+
+def test_patch_can_clear_restriction_back_to_unrestricted(client, db, user):
+    client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    created = client.post(
+        "/api/users",
+        json={"username": "снова-без-ограничений", "password": "временный-пароль-9", "allowed_pages": ["ports.html"]},
+    ).json()
+    client.patch(f"/api/users/{created['id']}", json={"allowed_pages": None})
+    listed = client.get("/api/users").json()
+    assert next(u for u in listed if u["id"] == created["id"])["allowed_pages"] is None
+
+
+def test_patch_rejects_editing_admin_from_another_admin(client, db):
+    bootstrap_first_user(db)
+    admin_row = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
+    other_admin = User(username="четвёртый-админ", password_hash=hash_password("длинный-пароль-9"), role=ApiKeyRole.admin)
+    db.add(other_admin)
+    db.commit()
+    client.post("/api/login", json={"username": "четвёртый-админ", "password": "длинный-пароль-9"})
+    resp = client.patch(f"/api/users/{admin_row.id}", json={"allowed_pages": ["ports.html"]})
+    assert resp.status_code == 403
+
+
 def test_other_admin_cannot_change_admin_password(client, db):
     bootstrap_first_user(db)
     admin_row = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()

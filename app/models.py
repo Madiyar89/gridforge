@@ -402,6 +402,13 @@ class User(Base):
     # (см. db.py: ADD COLUMN ... DEFAULT 0) — не заставляем задним числом
     # менять то, что уже работает.
     must_change_password: Mapped[bool] = mapped_column(default=True)
+    # Пункт 3 запроса пользователя (2026-09-25: "разработать выбирать кто
+    # с чем будет работать") — список разрешённых разделов сайта (href из
+    # NAV_GROUPS в common.js, например "ports.html"). None — без
+    # ограничения, видит всё (поведение по умолчанию, как раньше у всех
+    # учёток). Хранится списком строк, не отдельной таблицей — набор
+    # разделов меняется редко и целиком, не построчно.
+    allowed_pages: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class Session(Base):

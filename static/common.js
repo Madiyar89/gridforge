@@ -250,6 +250,7 @@ async function updateRolePill() {
   if (me.kind === "user") showLogoutButton();
   if (me.default_password) showDefaultPasswordWarning();
   if (me.must_change_password) showMustChangePasswordWarning();
+  applyPageRestrictions(me.allowed_pages);
 }
 
 // Вход по паролю и по API-ключу существуют параллельно: ключ нужен
@@ -270,6 +271,26 @@ async function requireAuth() {
     if (apiKey()) localStorage.removeItem(KEY_STORAGE);
     window.location.href = "login.html";
   }
+}
+
+// Пункт 3 запроса пользователя (2026-09-25: "разработать выбирать кто с
+// чем будет работать") — allowed_pages из /api/whoami, список href из
+// NAV_GROUPS. null — без ограничения (видит всё, как раньше). Прячет
+// пункты навигации, которых нет в списке (и в свёрнутой рельсе, и во
+// флайауте зоны — оба используют одни и те же href внутри #nav, один
+// проход по всем ссылкам покрывает обе копии), и не даёт остаться на
+// закрытой странице при прямом переходе по URL.
+function applyPageRestrictions(allowedPages) {
+  if (!allowedPages) return;
+  const here = location.pathname.split("/").pop() || "index.html";
+  if (!allowedPages.includes(here)) {
+    window.location.href = allowedPages[0] || "index.html";
+    return;
+  }
+  document.querySelectorAll("#nav a[href]").forEach((a) => {
+    const href = a.getAttribute("href");
+    if (href && href.endsWith(".html") && !allowedPages.includes(href)) a.hidden = true;
+  });
 }
 
 function showLogoutButton() {

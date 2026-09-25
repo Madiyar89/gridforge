@@ -206,6 +206,7 @@ from app.schemas import (
     TemplateApplyIn,
     TemplateIn,
     UserIn,
+    UserUpdateIn,
     VlanIn,
     VulnScanRunIn,
     VulnScanScheduleIn,
@@ -2367,6 +2368,7 @@ def create_user(payload: UserIn, db: Session = Depends(_db), key: Principal = De
         password_hash=hash_password(payload.password),
         role=payload.role,
         group_id=payload.group_id,
+        allowed_pages=payload.allowed_pages,
     )
     db.add(user)
     db.commit()
@@ -2395,10 +2397,35 @@ def list_users(db: Session = Depends(_db), admin: Principal = Depends(require_ad
             "active": u.active,
             "last_login_at": iso(u.last_login_at) if u.last_login_at else None,
             "must_change_password": u.must_change_password,
+            "allowed_pages": u.allowed_pages,
         }
         for u in db.query(User).order_by(User.username).all()
         if u.username != DEFAULT_ADMIN_USERNAME or admin.label == DEFAULT_ADMIN_USERNAME
     ]
+
+
+@api_write.patch("/api/users/{user_id}")
+def update_user(
+    user_id: int, payload: UserUpdateIn, db: Session = Depends(_db), admin: Principal = Depends(require_admin_key)
+):
+    """Роль/группа/активность/разрешённые разделы — задним числом,
+    отдельно от создания. Логин не меняется вообще (это первичный ключ
+    для входа), пароль — только через свой путь (/password)."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.username == DEFAULT_ADMIN_USERNAME and admin.label != DEFAULT_ADMIN_USERNAME:
+        raise HTTPException(status_code=403, detail="Учётку Admin может менять только она сама")
+    fields = payload.model_dump(exclude_unset=True)
+    if "group_id" in fields:
+        if fields["group_id"] is not None and db.get(Group, fields["group_id"]) is None:
+            raise HTTPException(status_code=404, detail="Group не найдена")
+        if not key_sees_group(admin, fields["group_id"]):
+            raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    for field, value in fields.items():
+        setattr(user, field, value)
+    db.commit()
+    return {"id": user.id}
 
 
 @api_write.post("/api/users/{user_id}/password")
@@ -3111,15 +3138,22 @@ def whoami(key: Principal = Depends(require_api_key), db: Session = Depends(_db)
     # Показываем врозь: если уже светится default_password, второй баннер
     # с тем же смыслом только путал бы.
     must_change_password = False
+    # Пункт 3 запроса пользователя (2026-09-25) — какие разделы сайта
+    # видны этой учётке (None у API-ключей и у большинства User — без
+    # ограничения). Фронтенд (common.js) фильтрует навигацию и не даёт
+    # открыть прямым переходом по ссылке страницу не из списка.
+    allowed_pages = None
     if key.kind == "user":
         user = db.query(User).filter(User.username == key.label).first()
         default_password = bool(user and is_default_password(user.password_hash))
         must_change_password = bool(user and user.must_change_password and not default_password)
+        allowed_pages = user.allowed_pages if user else None
     return {
         "label": key.label,
         "role": key.role.value,
         "group_id": key.group_id,
         "must_change_password": must_change_password,
+        "allowed_pages": allowed_pages,
         "kind": key.kind,
         "default_password": default_password,
     }
