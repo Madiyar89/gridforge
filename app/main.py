@@ -37,6 +37,7 @@ from app.auth import (
 from app.db import get_session, init_db
 from app.scenario_catalog import seed_default_scenarios
 from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
+from app.credential_check_engine import run_credential_check
 from app.network_audit_engine import build_network_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
 from app.oidc_auth import (
@@ -101,6 +102,7 @@ from app.models import (
     CaptureStatus,
     Channel,
     Credential,
+    CredentialCheckRun,
     DiscoveryScanSchedule,
     DomainScan,
     DomainScanCredentialSet,
@@ -175,6 +177,7 @@ from app.schemas import (
     CableLinkIn,
     CaptureIn,
     ChannelIn,
+    CredentialCheckIn,
     CredentialIn,
     DiscoveryScanScheduleIn,
     DomainScanCredentialSetIn,
@@ -256,6 +259,7 @@ def _recover_interrupted_background_jobs(db: Session) -> None:
         (DomainScan, ScanStatus.failed),
         (VulnScan, VulnScanStatus.failed),
         (Capture, CaptureStatus.failed),
+        (CredentialCheckRun, ScanStatus.failed),
     )
     recovered = 0
     for model, failed_value in failed_models:
@@ -2003,6 +2007,82 @@ async def get_ad_audit_report(db: Session = Depends(_db)):
     по категориям (см. ad_audit_engine.run_ad_audit_fleet_report). Считается
     заново на каждый запрос, ничего не пишет в БД."""
     return await run_ad_audit_fleet_report(db)
+
+
+@api_operate.post("/api/groups/{group_id}/credential-checks", status_code=201)
+async def create_credential_check(
+    group_id: int,
+    payload: CredentialCheckIn,
+    db: Session = Depends(_db),
+    key: Principal = Depends(require_api_key),
+):
+    """Проверка SMB-учётки на узлах группы (docs/landscape-report.md,
+    доразбор security-инструментов, третий после Nuclei/Feroxbuster) —
+    сознательно самый узкий по возможностям: только "этот логин/пароль
+    работает на этих хостах", без выполнения команд и без модулей
+    дампа секретов (см. докстринг CredentialCheckRun в models.py).
+    Пароль уходит только в этот запрос, в БД не попадает."""
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    group = db.get(Group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group не найдена")
+    if not payload.consent_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Нужно подтвердить разрешение на тестирование этой сети перед запуском",
+        )
+    targets = [n.address for n in group.nodes]
+    if not targets:
+        raise HTTPException(status_code=400, detail="В группе нет узлов — проверять нечего")
+
+    run = CredentialCheckRun(
+        group_id=group_id,
+        protocol="smb",
+        username=payload.username,
+        domain=payload.domain,
+        triggered_by=key.label,
+        consent_confirmed=True,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    asyncio.create_task(
+        run_credential_check(run.id, targets, payload.username, payload.password, payload.domain, get_session)
+    )
+    return {"id": run.id, "targets": len(targets)}
+
+
+@api_read.get("/api/groups/{group_id}/credential-checks")
+def list_credential_checks(group_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    if not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    runs = (
+        db.query(CredentialCheckRun)
+        .filter(CredentialCheckRun.group_id == group_id)
+        .order_by(desc(CredentialCheckRun.started_at))
+        .all()
+    )
+    return [
+        {
+            "id": r.id, "protocol": r.protocol, "username": r.username, "domain": r.domain,
+            "triggered_by": r.triggered_by, "status": r.status.value,
+            "started_at": iso(r.started_at), "finished_at": iso(r.finished_at) if r.finished_at else None,
+            "error": r.error, "target_count": len(r.targets),
+            "success_count": sum(1 for t in r.targets if t.ok),
+        }
+        for r in runs
+    ]
+
+
+@api_read.get("/api/credential-checks/{run_id}/targets")
+def get_credential_check_targets(run_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    run = db.get(CredentialCheckRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Прогон не найден")
+    if not key_sees_group(key, run.group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    return [{"address": t.address, "ok": t.ok, "error": t.error} for t in run.targets]
 
 
 @api_read.get("/api/network-audit/report")

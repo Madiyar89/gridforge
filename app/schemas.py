@@ -302,6 +302,20 @@ class AdAuditIn(BaseModel):
     port: int = 636
 
 
+class CredentialCheckIn(BaseModel):
+    """Проверка SMB-учётки на узлах группы (docs/landscape-report.md,
+    доразбор security-инструментов, третий после Nuclei/Feroxbuster).
+    Пароль уходит только в этот запрос, никуда не сохраняется — см.
+    CredentialCheckRun в models.py. consent_confirmed обязателен
+    (проверяется в эндпоинте) — без явного подтверждения разрешения на
+    тестирование запуск отклоняется."""
+
+    username: str
+    password: str
+    domain: str | None = None
+    consent_confirmed: bool = False
+
+
 class ScanIn(BaseModel):
     cidr: str
     ports: str | None = None

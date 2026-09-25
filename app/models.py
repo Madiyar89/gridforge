@@ -1014,6 +1014,61 @@ class AdFinding(Base):
     run: Mapped["AdAuditRun"] = relationship(back_populates="findings")
 
 
+class CredentialCheckRun(Base):
+    """Проверка учётки по SMB на узлах группы — третий инструмент из
+    доразбора security-инструментов (после Nuclei/Feroxbuster, docs/
+    landscape-report.md), сознательно самый узкий по возможностям.
+
+    NetExec (Pennyw0rth/NetExec, тот, что мы обсуждали) сюда НЕ
+    встроен — его дерево зависимостей (impacket из git, bloodhound_ce,
+    pypykatz, dploot, certipy-ad, certihound и десятки других
+    AD-атакующих библиотек) стабильно упирается в тот же прокси-обрыв
+    больших закачек, что уже решался вендорингом impacket, но здесь
+    пакетов на порядок больше — вендорить весь этот список ради
+    функции "проверить один SMB-логин" несоразмерно. Вместо этого —
+    напрямую через уже вендоренный impacket.smbconnection (тот же
+    примитив, что уже работает в domain_scan_engine.py), см.
+    app/credential_check_engine.py.
+
+    Пароль передаётся ТОЛЬКО в запросе на запуск, в БД не хранится ни
+    в каком виде (тот же принцип, что у AdAuditRun/учётки SSH-консоли)
+    — по прямому решению с владельцем: каждая проверка требует
+    осознанного ввода, не должна становиться "нажал кнопку не думая"
+    через сохранённую центральную учётку. Логин — хранится (не
+    секрет), нужен для журнала "кто чем стучался". triggered_by и
+    consent_confirmed — тоже для журнала: кто запустил и подтвердил
+    разрешение на тестирование, не для работы самой проверки."""
+
+    __tablename__ = "credential_check_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), nullable=False)
+    protocol: Mapped[str] = mapped_column(String(16), default="smb")  # пока только smb, задел на будущее
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)  # Principal.label запросившего
+    consent_confirmed: Mapped[bool] = mapped_column(default=False)
+    status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.running)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    group: Mapped["Group"] = relationship()
+    targets: Mapped[list["CredentialCheckTarget"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class CredentialCheckTarget(Base):
+    __tablename__ = "credential_check_targets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("credential_check_runs.id"), nullable=False)
+    address: Mapped[str] = mapped_column(String(64), nullable=False)
+    ok: Mapped[bool] = mapped_column(default=False)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    run: Mapped["CredentialCheckRun"] = relationship(back_populates="targets")
+
+
 class AuditCheckKind(str, enum.Enum):
     must_contain = "must_contain"          # находка, если pattern НЕ найден
     must_not_contain = "must_not_contain"  # находка, если pattern НАЙДЕН
