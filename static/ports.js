@@ -8,6 +8,42 @@ let _selectedNodeId = null;
 let _multiMode = false;
 let _pickedPorts = new Set();
 
+// Кэш MAC/флаппинга по порту (запрос пользователя, 2026-09-25): раньше
+// "Показать MAC"/"Показать время up/down" были чисто живым запросом без
+// сохранения — переключился на другой порт и вернулся, данные пропали;
+// а массовая "Проверить MAC на портах" вообще не пересекалась с панелью
+// одиночного порта, хотя дёргает тот же самый эндпоинт. Единый кэш,
+// заполняемый ОБОИМИ путями — при открытии панели порта, если данные уже
+// есть (от одиночного запроса или от массовой проверки), показываются
+// сразу с пометкой "опрошено N назад", без повторного похода на
+// устройство.
+const _portDataCache = new Map(); // portName -> {macs, macCheckedAt, macError, downTime, upTime, flapCheckedAt, flapError}
+
+function _cacheEntry(name) {
+  if (!_portDataCache.has(name)) _portDataCache.set(name, {});
+  return _portDataCache.get(name);
+}
+
+function macResultHtml(entry) {
+  if (!entry || !entry.macCheckedAt) return "";
+  const age = `<div style="color:var(--text-dim);margin-bottom:4px;">опрошено ${timeAgo(entry.macCheckedAt)}</div>`;
+  if (entry.macError) return age + `<span style="color:var(--crit);">${escapeHtml(entry.macError)}</span>`;
+  if (!entry.macs || entry.macs.length === 0) return age + `<span style="color:var(--text-dim);">MAC-адресов на порту не видно</span>`;
+  return (
+    age +
+    entry.macs
+      .map((m) => `<div style="font-family:var(--mono);padding:2px 0;">${escapeHtml(m.mac)} · VLAN ${escapeHtml(m.vlan || "—")}${m.type ? " · " + escapeHtml(m.type) : ""}</div>`)
+      .join("")
+  );
+}
+
+function flapResultHtml(entry) {
+  if (!entry || !entry.flapCheckedAt) return "";
+  const age = `<div style="color:var(--text-dim);margin-bottom:4px;">опрошено ${timeAgo(entry.flapCheckedAt)}</div>`;
+  if (entry.flapError) return age + `<span style="color:var(--crit);">${escapeHtml(entry.flapError)}</span>`;
+  return age + `<div>Down Time: <b>${escapeHtml(entry.downTime || "—")}</b></div><div>Up Time: <b>${escapeHtml(entry.upTime || "—")}</b></div>`;
+}
+
 const STATE_LABEL = {
   up: "линк есть",
   notconnect: "кабель не подключён",
@@ -311,6 +347,15 @@ document.getElementById("bulk-port-mac").addEventListener("click", async () => {
     } catch (e) {
       rows.push({ name: names[i], ok: false, macs: [], error: e.message });
     }
+    // Тот же кэш, что у одиночной кнопки "Показать MAC" (запрос
+    // пользователя, 2026-09-25) — открыв потом один из этих портов на
+    // схеме, видно результат именно этой массовой проверки, не пустую
+    // панель.
+    const entry = _cacheEntry(names[i]);
+    const last = rows[rows.length - 1];
+    entry.macCheckedAt = new Date().toISOString();
+    entry.macError = last.ok ? null : last.error || "не удалось опросить";
+    entry.macs = last.macs;
   }
   btn.disabled = false;
   status.textContent = `MAC: проверено портов ${names.length}`;
@@ -363,6 +408,9 @@ let _detailPort = null;
 function showPortDetail(port) {
   if (!port) return;
   _detailPort = port;
+  const cached = _portDataCache.get(port.name);
+  const macBtnLabel = cached && cached.macCheckedAt ? "Обновить MAC" : "Показать MAC";
+  const flapBtnLabel = cached && cached.flapCheckedAt ? "Обновить время up/down" : "Показать время up/down";
   document.getElementById("port-detail-body").innerHTML = `
     <b>${escapeHtml(port.name)}</b>
     <dl>
@@ -374,12 +422,12 @@ function showPortDetail(port) {
     </dl>
     <div class="port-edit">
       <h3 style="margin:14px 0 6px;font-size:13px;">MAC-адреса на порту</h3>
-      <button id="mac-fetch" class="btn-ghost">Показать MAC</button>
-      <div id="mac-result" style="margin-top:8px;font-size:12px;"></div>
+      <button id="mac-fetch" class="btn-ghost">${macBtnLabel}</button>
+      <div id="mac-result" style="margin-top:8px;font-size:12px;">${macResultHtml(cached)}</div>
 
       <h3 style="margin:16px 0 6px;font-size:13px;">Флаппинг (Down/Up Time)</h3>
-      <button id="downup-fetch" class="btn-ghost">Показать время up/down</button>
-      <div id="downup-result" style="margin-top:8px;font-size:12px;"></div>
+      <button id="downup-fetch" class="btn-ghost">${flapBtnLabel}</button>
+      <div id="downup-result" style="margin-top:8px;font-size:12px;">${flapResultHtml(cached)}</div>
 
       <h3 style="margin:14px 0 6px;font-size:13px;">Изменить порт</h3>
       <div class="form-row">
@@ -449,26 +497,23 @@ async function fetchPortMac(port) {
   const btn = document.getElementById("mac-fetch");
   btn.disabled = true;
   btn.textContent = "Опрашиваю…";
-  resultEl.innerHTML = "";
+  const entry = _cacheEntry(port.name);
   try {
     const result = await apiWithCredentials(
       `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/mac`,
       { method: "POST", body: JSON.stringify({}) }
     );
-    if (!result.ok) {
-      resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(result.error || "не удалось опросить")}</span>`;
-    } else if (result.macs.length === 0) {
-      resultEl.innerHTML = `<span style="color:var(--text-dim);">MAC-адресов на порту не видно</span>`;
-    } else {
-      resultEl.innerHTML = result.macs
-        .map((m) => `<div style="font-family:var(--mono);padding:2px 0;">${escapeHtml(m.mac)} · VLAN ${escapeHtml(m.vlan || "—")}${m.type ? " · " + escapeHtml(m.type) : ""}</div>`)
-        .join("");
-    }
+    entry.macCheckedAt = new Date().toISOString();
+    entry.macError = result.ok ? null : result.error || "не удалось опросить";
+    entry.macs = result.ok ? result.macs : [];
   } catch (e) {
-    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+    entry.macCheckedAt = new Date().toISOString();
+    entry.macError = e.message;
+    entry.macs = [];
   } finally {
+    resultEl.innerHTML = macResultHtml(entry);
     btn.disabled = false;
-    btn.textContent = "Показать MAC";
+    btn.textContent = "Обновить MAC";
   }
 }
 
@@ -478,22 +523,23 @@ async function fetchPortDownup(port) {
   const btn = document.getElementById("downup-fetch");
   btn.disabled = true;
   btn.textContent = "Опрашиваю…";
-  resultEl.innerHTML = "";
+  const entry = _cacheEntry(port.name);
   try {
     const result = await apiWithCredentials(
       `/api/nodes/${nodeId}/ports/${encodeURIComponent(port.name)}/downup`,
       { method: "POST", body: JSON.stringify({}) }
     );
-    if (!result.ok) {
-      resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(result.error || "не удалось опросить")}</span>`;
-    } else {
-      resultEl.innerHTML = `<div>Down Time: <b>${escapeHtml(result.down_time || "—")}</b></div><div>Up Time: <b>${escapeHtml(result.up_time || "—")}</b></div>`;
-    }
+    entry.flapCheckedAt = new Date().toISOString();
+    entry.flapError = result.ok ? null : result.error || "не удалось опросить";
+    entry.downTime = result.ok ? result.down_time : null;
+    entry.upTime = result.ok ? result.up_time : null;
   } catch (e) {
-    resultEl.innerHTML = `<span style="color:var(--crit);">${escapeHtml(e.message)}</span>`;
+    entry.flapCheckedAt = new Date().toISOString();
+    entry.flapError = e.message;
   } finally {
+    resultEl.innerHTML = flapResultHtml(entry);
     btn.disabled = false;
-    btn.textContent = "Показать время up/down";
+    btn.textContent = "Обновить время up/down";
   }
 }
 
