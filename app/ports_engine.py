@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from app.models import Vendor
 
@@ -462,6 +463,50 @@ DOWNUP_COMMANDS = {
     Vendor.junos: "show interfaces {port} extensive",
 }
 
+# Резерв на случай, когда "show interfaces link" не существует вообще —
+# реальная находка (LAB-11, WS-C2950G-48-EI, 2026-09-25): старые
+# 2950/2960 отвечают "Line has invalid autocommand", команда там просто
+# не заведена. show logging по умолчанию хранит в буфере последние
+# %LINK-3-UPDOWN — из него можно вытащить время последней смены
+# состояния конкретного порта, пусть и не так точно и надёжно, как
+# прямой командой (буфер ограничен по размеру, старые записи вытесняются
+# новыми — если порт не менял состояние достаточно долго, записи в
+# буфере уже может не быть).
+CISCO_LOG_COMMAND = "show logging"
+_CISCO_LOG_UPDOWN_RE = re.compile(
+    r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})(?:\.\d+)?:\s*%LINK-3-UPDOWN: Interface (\S+), changed state to (up|down)"
+)
+
+
+def parse_cisco_log_link_time(output: str, port_name: str, now: datetime) -> dict | None:
+    """Разбирает `show logging` — последняя запись %LINK-3-UPDOWN для
+    запрошенного порта (проверено на живом LAB-11, 2026-09-25).
+    Устройство печатает время без года ("Sep 25 12:46:23") — берём год
+    ближайшей прошедшей даты к `now`. Часы устройства и сервера не
+    идеально синхронны — точность до минуты, не до секунды, этого
+    достаточно для "примерно сколько назад"."""
+    target = normalize_iface(port_name)
+    last_match = None
+    for m in _CISCO_LOG_UPDOWN_RE.finditer(output):
+        if normalize_iface(m.group(2)) == target:
+            last_match = m  # буфер хронологический — последнее совпадение самое свежее
+    if last_match is None:
+        return None
+    raw_ts, _iface, direction = last_match.groups()
+    try:
+        parsed = datetime.strptime(f"{now.year} {raw_ts}", "%Y %b %d %H:%M:%S").replace(tzinfo=timezone.utc)
+        if parsed > now:
+            parsed = parsed.replace(year=now.year - 1)
+    except ValueError:
+        return None
+    total_seconds = max(0, int((now - parsed).total_seconds()))
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    duration = f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}" if days else f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    is_up = direction == "up"
+    return {"down_time": "00:00:00" if is_up else duration, "up_time": duration if is_up else "00:00:00"}
+
 _IFACE_PREFIXES = [
     ("HundredGigE", "Hu"),
     ("FortyGigabitEthernet", "Fo"),
@@ -571,6 +616,22 @@ async def live_port_downup(
         if node.vendor is Vendor.junos
         else parse_cisco_link_times(result.stdout, port_name)
     )
+    if times is None and node.vendor is not Vendor.junos:
+        # "show interfaces link" не существует на устройстве вообще
+        # (реальный случай, см. CISCO_LOG_COMMAND выше) — пробуем резерв
+        # через журнал, прежде чем сдаваться.
+        log_result = await run_device_command(
+            vendor=node.vendor,
+            host=node.address,
+            command=CISCO_LOG_COMMAND,
+            username=username,
+            password=password,
+            key_path=key_path,
+            port=port if port not in (0, 22) else default_port(node.vendor),
+            timeout_seconds=timeout_seconds,
+        )
+        if log_result.ok:
+            times = parse_cisco_log_link_time(log_result.stdout, port_name, datetime.now(timezone.utc))
     if times is None:
         return {"ok": False, "error": "команда не поддержана устройством или порт не найден в выводе", "down_time": None, "up_time": None}
     return {"ok": True, "error": None, "down_time": times["down_time"], "up_time": times["up_time"]}

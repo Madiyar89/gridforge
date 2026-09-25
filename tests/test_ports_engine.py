@@ -10,12 +10,15 @@
 здесь воспроизведены дословно.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from app.models import Vendor
 from app.ports_engine import (
     PortState,
     group_ports,
+    parse_cisco_log_link_time,
     parse_cisco_status,
     parse_junos_combined,
     parse_junos_descriptions,
@@ -269,7 +272,7 @@ def test_hex_blocks_below_the_table_are_not_taken_for_ports():
     hex-блоки сертификатов. Их строки случайно похожи на «имя + поле», и
     разбор принимал ABBD8026 за порт со статусом 414d414d."""
     output = """\
-Port      Name               Status       Vlan       Duplex  Speed Type 
+Port      Name               Status       Vlan       Duplex  Speed Type
 Gi1/0/1                      connected    1          a-full a-1000 10/100/1000BaseTX
 
 crypto pki certificate chain TP-self-signed
@@ -279,3 +282,51 @@ crypto pki certificate chain TP-self-signed
 """
     ports = parse_cisco_status(output)
     assert [p.name for p in ports] == ["Gi1/0/1"]
+
+
+# Реальная находка (LAB-11, WS-C2950G-48-EI, 2026-09-25, по запросу
+# пользователя "отработать по 2950/2960"): "show interfaces link" на
+# этом IOS отвечает "Line has invalid autocommand" — команда там не
+# заведена вообще, не просто "порт не найден". show logging — рабочий
+# резерв (структура строк дословная из реального буфера устройства,
+# сами номера портов и время — из этого же снимка, но это не
+# чувствительные данные, тот же принцип, что у остальных образцов
+# Cisco в этом файле).
+CISCO_LOG_BUFFER = """\
+Sep 24 10:15:03.221: %LINK-3-UPDOWN: Interface FastEthernet0/5, changed state to down
+Sep 24 10:15:05.221: %LINK-3-UPDOWN: Interface FastEthernet0/5, changed state to up
+Sep 25 12:46:21.411: %LINK-3-UPDOWN: Interface FastEthernet0/6, changed state to down
+Sep 25 12:46:23.607: %LINK-3-UPDOWN: Interface FastEthernet0/6, changed state to up
+"""
+
+
+def test_cisco_log_link_time_picks_latest_entry_for_port():
+    now = datetime(2026, 9, 25, 12, 47, 23, tzinfo=timezone.utc)  # ровно минута после последнего "up"
+    result = parse_cisco_log_link_time(CISCO_LOG_BUFFER, "Fa0/6", now)
+    assert result == {"down_time": "00:00:00", "up_time": "00:01:00"}
+
+
+def test_cisco_log_link_time_uses_short_or_full_port_name():
+    now = datetime(2026, 9, 24, 10, 15, 10, tzinfo=timezone.utc)
+    assert parse_cisco_log_link_time(CISCO_LOG_BUFFER, "FastEthernet0/5", now) == {
+        "down_time": "00:00:00",
+        "up_time": "00:00:05",
+    }
+
+
+def test_cisco_log_link_time_returns_none_when_port_never_flapped():
+    """Буфер ограничен по размеру — если порт давно не менял состояние,
+    записи о нём уже может не быть. Честное "не знаю", не выдуманное
+    значение."""
+    now = datetime(2026, 9, 25, 13, 0, 0, tzinfo=timezone.utc)
+    assert parse_cisco_log_link_time(CISCO_LOG_BUFFER, "Fa0/1", now) is None
+
+
+def test_cisco_log_link_time_handles_year_wraparound():
+    """Устройство печатает время без года — если по дате получается
+    "будущее" относительно текущего момента сервера, это на самом деле
+    прошлый год (буфер попал через границу нового года)."""
+    log = "Dec 31 23:00:00: %LINK-3-UPDOWN: Interface FastEthernet0/1, changed state to up\n"
+    now = datetime(2027, 1, 2, 1, 0, 0, tzinfo=timezone.utc)
+    result = parse_cisco_log_link_time(log, "Fa0/1", now)
+    assert result == {"down_time": "00:00:00", "up_time": "1d 02:00:00"}
