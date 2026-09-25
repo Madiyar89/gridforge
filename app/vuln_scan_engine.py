@@ -22,15 +22,20 @@ dumpcap. Severity Nuclei (5 уровней: critical/high/medium/low/info)
 см. NUCLEI_SEVERITY_MAP; исходный уровень Nuclei остаётся в
 finding["nuclei_severity"] для UI, где нужна точность выше трёх ступеней.
 
-ВНИМАНИЕ (2026-09-25): интеграция написана по официальной, стабильной
-JSON-схеме вывода Nuclei (`-jsonl`: template-id/info.severity/matched-
-at/host) — та же схема годами не менялась, задокументирована в PD
-wiki. Живой прогон на этой машине не подтверждён: скачивание
-nuclei-templates упёрлось в сетевой таймаут (конкурирующая по полосе
-фоновая синхронизация apt-mirror на той же машине, см. HANDOFF.md).
-Разобрать реальный вывод перед тем, как доверять этому парсеру
-вслепую — обязательно, тот же урок, что уже был с CDP/LLDP в этом
-проекте (см. CLAUDE.md, "Прогресс по docs/landscape-report.md")."""
+ПРОВЕРЕНО ВЖИВУЮ (2026-09-25, продолжение сессии на другой машине):
+предыдущая версия не запускалась в принципе — "-l -" не читает цели из
+stdin (эта версия nuclei понимает под -l только путь к файлу), плюс
+nuclei возвращает returncode=0 даже на фатальную ошибку ("no templates
+provided for scan" тоже exit 0) — оба бага нашлись и исправлены только
+благодаря реальному прогону, не по документации. Шаблоны на прошлой
+машине не скачивались из-за сетевого прокси, обрывающего передачи
+крупнее ~5МБ (перепроверено на двух машинах — не разовая перегрузка,
+системное ограничение; codeload.github.com/GitHub release assets
+недоступны, `git clone` — рабочий обходной путь, см. Dockerfile).
+Живой прогон подтверждён дважды: точечный (-tags tech) поймал и
+корректно разобрал реальную находку (apache-detect, severity info),
+полный (все ~14000 шаблонов) прошёл через run_nuclei_scan() целиком
+end-to-end (VulnScan.status=done, VulnScanHost записан) без ошибок."""
 
 from __future__ import annotations
 
@@ -207,8 +212,15 @@ async def run_nuclei_scan(scan_id: int, targets: list[str], get_session) -> None
         if scan is None:
             return
 
+        # РЕАЛЬНАЯ находка 2026-09-25 (живая проверка, которой не было у
+        # прошлой сессии — см. Dockerfile): "-l -" не читает цели из
+        # stdin, эта версия nuclei понимает под "-l" только путь к файлу
+        # ("could not open targets file: open -: no such file or
+        # directory"). Правильно — вообще не передавать -l/-u: nuclei
+        # сам распознаёт пайпнутый stdin как список целей, если ни один
+        # из этих флагов не задан (проверено на реальном запуске).
         proc = await asyncio.create_subprocess_exec(
-            "nuclei", "-l", "-", "-jsonl", "-silent",
+            "nuclei", "-jsonl", "-silent",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -224,9 +236,21 @@ async def run_nuclei_scan(scan_id: int, targets: list[str], get_session) -> None
             db.commit()
             return
 
-        if proc.returncode != 0:
+        stderr_text = stderr.decode(errors="replace")
+        # РЕАЛЬНАЯ находка 2026-09-25: nuclei возвращает returncode=0
+        # даже на фатальную ошибку (проверено вживую — "no templates
+        # provided for scan" тоже отдаёт exit 0). Полагаться только на
+        # код возврата нельзя — иначе такой сбой молча стал бы "скан
+        # выполнен, находок 0" вместо честного failed, а это для скана
+        # уязвимостей хуже, чем явная ошибка: тихий "чисто" при 0
+        # реально проверенных шаблонах. Ищем "FTL" без скобки — реальный
+        # байтовый вывод nuclei обрамляет уровень лога ANSI-кодом цвета
+        # ("[\x1b[1;31mFTL\x1b[0m] ..."), так что "FTL]" как непрерывная
+        # подстрока НЕ встречается — проверено побайтово (repr вывода),
+        # не только на глаз.
+        if proc.returncode != 0 or "FTL" in stderr_text:
             scan.status = VulnScanStatus.failed
-            scan.error = (stderr.decode(errors="replace") or "nuclei завершился с ошибкой")[:500]
+            scan.error = (stderr_text or "nuclei завершился с ошибкой")[:500]
             db.commit()
             return
 

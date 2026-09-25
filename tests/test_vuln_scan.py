@@ -324,3 +324,143 @@ def test_run_due_vuln_schedules_triggers_matching_and_skips_others(db, group_wit
     assert len(scans) == 1
     assert scans[0].profile.value == "ping"
     assert scans[0].responsible == "плановый запуск по расписанию"
+
+
+# --- Профиль Nuclei (docs/landscape-report.md, доразбор security-
+# инструментов) — реальный вывод захвачен на живом прогоне против
+# scanme.nmap.org (2026-09-25), синтетика ниже собрана по той же схеме,
+# не выдумана по документации.
+
+NUCLEI_JSONL = (
+    '{"template-id":"apache-detect","info":{"name":"Apache Detection","severity":"info",'
+    '"classification":{}},"host":"10.0.0.5","matched-at":"http://10.0.0.5"}\n'
+    '{"template-id":"CVE-2023-9999-fake","info":{"name":"Пример критической уязвимости",'
+    '"severity":"critical","classification":{"cve-id":["CVE-2023-9999"]}},'
+    '"host":"10.0.0.5","matched-at":"http://10.0.0.5:8080"}\n'
+)
+
+
+def test_parse_nuclei_jsonl_maps_severity_and_cves():
+    from app.vuln_scan_engine import parse_nuclei_jsonl
+
+    hosts = parse_nuclei_jsonl(NUCLEI_JSONL, ["10.0.0.5"])
+    assert len(hosts) == 1
+    findings = {f["script_id"]: f for f in hosts[0]["findings"]}
+    assert findings["apache-detect"]["severity"] == "info"
+    assert findings["apache-detect"]["nuclei_severity"] == "info"
+    assert findings["CVE-2023-9999-fake"]["severity"] == "vulnerable"  # critical -> vulnerable
+    assert findings["CVE-2023-9999-fake"]["nuclei_severity"] == "critical"
+    assert findings["CVE-2023-9999-fake"]["cves"] == ["CVE-2023-9999"]
+
+
+def test_parse_nuclei_jsonl_skips_non_json_lines():
+    """Реальный вывод nuclei может содержать баннер/статусные строки
+    вперемешку с -jsonl, если -silent забыли — не должны ронять разбор."""
+    from app.vuln_scan_engine import parse_nuclei_jsonl
+
+    raw = "some banner text\n" + NUCLEI_JSONL + "\ntrailing garbage, not json"
+    hosts = parse_nuclei_jsonl(raw, ["10.0.0.5"])
+    assert sum(len(h["findings"]) for h in hosts) == 2
+
+
+class _FakeNucleiProc:
+    def __init__(self, stdout: bytes, stderr: bytes = b"", returncode: int = 0):
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+        self.sent_input = None
+
+    async def communicate(self, input=None):
+        self.sent_input = input
+        return self._stdout, self._stderr
+
+    def kill(self):
+        pass
+
+
+def test_run_nuclei_scan_does_not_pass_dash_l_dash(monkeypatch, db, group_with_node):
+    """Регрессия реальной находки (2026-09-25): "-l -" не читает цели из
+    stdin в этой версии nuclei ("could not open targets file: open -: no
+    such file or directory") — вызов не должен передавать -l/-u вовсе,
+    цели уходят только через stdin."""
+    from app.vuln_scan_engine import run_nuclei_scan
+    from app.db import SessionLocal
+    from app.models import VulnScan
+
+    captured = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _FakeNucleiProc(NUCLEI_JSONL.encode())
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    scan = VulnScan(group_id=group_with_node.id, profile="nuclei")
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    asyncio.run(run_nuclei_scan(scan.id, ["10.0.0.5"], SessionLocal))
+
+    assert "-l" not in captured["args"]
+    assert "-u" not in captured["args"]
+    assert "-" not in captured["args"]
+
+    db.refresh(scan)
+    assert scan.status.value == "done"
+    assert len(scan.hosts) == 1
+    assert len(scan.hosts[0].findings) == 2
+
+
+def test_run_nuclei_scan_fails_on_ftl_even_with_exit_code_zero(monkeypatch, db, group_with_node):
+    """Регрессия реальной находки (2026-09-25): nuclei возвращает
+    returncode=0 даже на фатальную ошибку ("no templates provided for
+    scan" — проверено живым запуском) — полагаться только на код
+    возврата нельзя, иначе это молча стало бы "готово, находок 0"."""
+    from app.vuln_scan_engine import run_nuclei_scan
+    from app.db import SessionLocal
+    from app.models import VulnScan
+
+    # Байты как в реальном выводе — уровень лога обёрнут ANSI-кодом
+    # цвета, "FTL]" непрерывной подстрокой НЕ встречается.
+    real_ftl_stderr = b"[\x1b[1;31mFTL\x1b[0m] Could not run nuclei: no templates provided for scan\n"
+
+    async def fake_exec(*args, **kwargs):
+        return _FakeNucleiProc(b"", stderr=real_ftl_stderr, returncode=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    scan = VulnScan(group_id=group_with_node.id, profile="nuclei")
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+
+    asyncio.run(run_nuclei_scan(scan.id, ["10.0.0.5"], SessionLocal))
+
+    db.refresh(scan)
+    assert scan.status.value == "failed"
+    assert "no templates" in scan.error
+
+
+def test_run_nuclei_scan_via_api(monkeypatch, client, operator_key, group_with_node):
+    """Тот же путь, что и у nmap-профилей — POST .../vuln-scans с
+    profile=nuclei должен пойти через run_nuclei_scan, а не PROFILE_ARGS
+    (у "nuclei" нет записи там намеренно, см. VALID_PROFILES)."""
+
+    async def fake_exec(*args, **kwargs):
+        return _FakeNucleiProc(NUCLEI_JSONL.encode())
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/vuln-scans",
+        json={"profile": "nuclei", "responsible": "тест"},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 201
+
+    scan = _wait_done(client, operator_key, group_with_node.id)
+    assert scan["status"] == "done"
+    # findings_count исключает severity="info" (см. main.py) - из двух
+    # синтетических находок в NUCLEI_JSONL считается только vulnerable.
+    assert scan["findings_count"] == 1
