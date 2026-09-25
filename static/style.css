@@ -27,7 +27,12 @@ body{
   font-family:var(--sans);font-size:14px;line-height:1.5;
   padding-inline:20px;padding-block:0 40px;
   padding-left:calc(var(--sidebar-w) + var(--sidebar-gutter) + 20px);
+  transition:padding-left .15s ease;
 }
+/* Закреплённая (открытая) панель шире рельсы — без этого правила
+   body-отступ оставался под 52px, и .topbar.pinned (196px) перекрывала
+   контент. Класс ставится из common.js:setPinned(). */
+body.sidebar-pinned{padding-left:calc(var(--sidebar-w-open) + var(--sidebar-gutter) + 20px);}
 a{color:var(--accent);}
 
 /* Полосы прокрутки по всему сайту. Системная светлая полоса на тёмной
@@ -278,7 +283,7 @@ a{color:var(--accent);}
      показываем по кнопке. */
   /* На телефоне наведения нет — панель открывается кнопкой и сразу
      развёрнутой, со всеми подписями. */
-  body{padding-left:20px;padding-top:56px;}
+  body,body.sidebar-pinned{padding-left:20px;padding-top:56px;}
   .topbar{transform:translateX(-100%);transition:transform .15s ease;width:240px;overflow-y:auto;}
   .topbar.open{transform:translateX(0);box-shadow:0 0 0 100vmax rgba(0,0,0,.5);}
   .topbar .nav-label,.topbar .keybox,.topbar .role-pill{opacity:1;}
@@ -360,6 +365,15 @@ a{color:var(--accent);}
 .stat.crit .n{color:var(--crit);}
 .stat.warn .n{color:var(--warn);}
 .stat.info .n{color:var(--info);}
+/* Critical/warning несут больше веса, чем остальные метрики — крупнее
+   шрифт и заметная плашка, но только когда счётчик не ноль (класс
+   .active ставится из index.js): постоянно подсвеченная карточка с
+   нулём внутри перестаёт читаться как сигнал, тот же принцип, что уже
+   применялся к .stat-silent-box. */
+.stat-major{min-width:130px;}
+.stat-major .n{font-size:34px;}
+.stat-major.crit.active{background:color-mix(in srgb, var(--crit) 12%, var(--surface));border-color:var(--crit);}
+.stat-major.warn.active{background:color-mix(in srgb, var(--warn) 12%, var(--surface));border-color:var(--warn);}
 
 .grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start;}
 @media (max-width:860px){.grid{grid-template-columns:1fr;}}
@@ -381,13 +395,38 @@ a{color:var(--accent);}
 .sev-dot.critical{background:var(--crit);}
 .sev-dot.warning{background:var(--warn);}
 .sev-dot.info{background:var(--info);}
-.incident-row .main{flex:1;min-width:0;}
-.incident-row .label{font-weight:600;font-size:13px;}
-.incident-row .detail{color:var(--text-dim);font-size:12.5px;margin-top:2px;overflow-wrap:anywhere;}
-.incident-row .time{font-family:var(--mono);font-size:11px;color:var(--text-dim);white-space:nowrap;}
+.incident-row .main,.node-group-head .main,.incident-sub .main{flex:1;min-width:0;}
+.incident-row .label,.node-group-head .label,.incident-sub .label{font-weight:600;font-size:13px;}
+.incident-row .detail,.node-group-head .detail,.incident-sub .detail{color:var(--text-dim);font-size:12.5px;margin-top:2px;overflow-wrap:anywhere;}
+.incident-row .time,.node-group-head .time,.incident-sub .time{font-family:var(--mono);font-size:11px;color:var(--text-dim);white-space:nowrap;}
+
+/* Группа инцидентов одного узла — цветная полоса серьёзности слева
+   вместо точки (тот же паттерн, что у Problems-виджета Zabbix), вся
+   карточка кликабельна и ведёт в Инвентарь на этот узел. */
+.node-group{
+  display:block;border-bottom:1px solid var(--border);border-left:3px solid transparent;
+  text-decoration:none;color:inherit;transition:background-color .12s;
+}
+.node-group:last-child{border-bottom:none;}
+.node-group:hover{background:var(--surface-2);}
+.node-group.sev-critical{border-left-color:var(--crit);}
+.node-group.sev-warning{border-left-color:var(--warn);}
+.node-group.sev-info{border-left-color:var(--info);}
+.node-group-head{padding:10px 16px 10px 13px;display:flex;gap:10px;align-items:flex-start;}
+.incident-sub{padding:6px 16px 6px 29px;display:flex;gap:10px;align-items:flex-start;}
+.incident-sub .label{font-weight:400;}
+.incident-sub .detail{opacity:.85;}
 
 .node-item{border-bottom:1px solid var(--border);}
 .node-item:last-child{border-bottom:none;}
+/* Подсветка узла при переходе с Дашборда (?node=<id>) — яркая вспышка,
+   гаснущая до едва заметного тона, чтобы было видно, куда прокрутило,
+   но не мешало читать остальной список. */
+.node-item.highlight{animation:node-highlight-flash 2s ease-out forwards;}
+@keyframes node-highlight-flash{
+  0%{background:color-mix(in srgb, var(--info) 25%, transparent);}
+  100%{background:color-mix(in srgb, var(--info) 6%, transparent);}
+}
 .node-head{padding:11px 16px;display:flex;justify-content:space-between;gap:10px;align-items:center;}
 .node-head .name{font-weight:600;font-size:13px;}
 .node-head .addr{font-family:var(--mono);font-size:11.5px;color:var(--text-dim);}

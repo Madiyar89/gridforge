@@ -27,30 +27,25 @@
 </div>
 
 <div class="stat-strip" id="stat-strip">
-  <div class="stat crit"><div class="n" id="stat-crit">–</div><div class="l">critical</div></div>
-  <div class="stat warn"><div class="n" id="stat-warn">–</div><div class="l">warning</div></div>
-  <div class="stat info"><div class="n" id="stat-info">–</div><div class="l">info</div></div>
-  <div class="stat"><div class="n" id="stat-nodes">–</div><div class="l">узлов</div></div>
+  <div class="stat stat-major crit"><div class="n" id="stat-crit">–</div><div class="l">critical</div></div>
+  <div class="stat stat-major warn"><div class="n" id="stat-warn">–</div><div class="l">warning</div></div>
   <div class="stat" id="stat-silent-box" title="Есть проверки, но за сутки ни одного измерения — состояние неизвестно">
     <div class="n" id="stat-silent">–</div><div class="l">молчат</div>
   </div>
+  <div class="stat"><div class="n" id="stat-info">–</div><div class="l">info</div></div>
+  <div class="stat"><div class="n" id="stat-nodes">–</div><div class="l">узлов</div></div>
 </div>
 
 <div class="widgets">
   <div class="panel">
-    <h2>Проблемные узлы <span class="count" id="problem-count"></span></h2>
-    <div class="body" id="problem-body"><div class="empty">Загрузка…</div></div>
+    <h2>Открытые инциденты <span class="count" id="incidents-count"></span></h2>
+    <div class="body" id="incidents-body"><div class="empty">Загрузка…</div></div>
   </div>
 
   <div class="panel">
     <h2>Состояние за сутки</h2>
     <div class="body" id="health-body"><div class="empty">Загрузка…</div></div>
   </div>
-</div>
-
-<div class="panel">
-  <h2>Открытые инциденты <span class="count" id="incidents-count"></span></h2>
-  <div class="body" id="incidents-body"><div class="empty">Загрузка…</div></div>
 </div>
 
 <div class="toast" id="toast"></div>

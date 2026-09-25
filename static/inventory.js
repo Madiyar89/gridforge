@@ -52,6 +52,22 @@ async function refreshGroups() {
   });
 }
 
+// Переход с Дашборда по клику на инцидент (index.html передаёт
+// ?node=<id>) — прокручиваем к узлу и подсвечиваем его. Срабатывает
+// один раз за загрузку страницы, не на каждое авто-обновление раз в 5
+// секунд: иначе подсветка мигала бы бесконечно, пока страница открыта.
+let scrolledToLinkedNode = false;
+function scrollToLinkedNode() {
+  if (scrolledToLinkedNode) return;
+  const nodeId = new URLSearchParams(location.search).get("node");
+  if (!nodeId) return;
+  const el = document.getElementById(`node-${nodeId}`);
+  if (!el) return;
+  scrolledToLinkedNode = true;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("highlight");
+}
+
 async function refreshNodes() {
   const body = document.getElementById("nodes-body");
   const filterValue = document.getElementById("nodes-group-filter").value;
@@ -118,6 +134,8 @@ async function refreshNodes() {
       return showHeadings ? `<div class="group-heading">${escapeHtml(groupName)}</div>${rows}` : rows;
     })
     .join("");
+
+  scrollToLinkedNode();
 
   body.querySelectorAll(".add-probe").forEach((btn) => {
     btn.addEventListener("click", () => openProbeModal(btn.dataset.nodeId, btn.dataset.nodeName));
@@ -211,7 +229,7 @@ function renderNodeItem(n) {
     : `<div class="probe-chip" style="color:var(--text-dim)">проверок нет</div>`;
   const vendorBadge = n.vendor ? `<span class="vendor-badge">${escapeHtml(n.vendor)}</span>` : "";
   return `
-    <div class="node-item">
+    <div class="node-item" id="node-${n.id}">
       <div class="node-head">
         <span class="name">${escapeHtml(n.name)}${vendorBadge}</span>
         <span class="actions">

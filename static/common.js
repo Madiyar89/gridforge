@@ -329,6 +329,11 @@ function setPinned(next) {
   const bar = document.querySelector(".topbar");
   if (!bar) return;
   bar.classList.toggle("pinned", next);
+  // Реальная находка (2026-09-25): body{padding-left} — статичный calc()
+  // под свёрнутую ширину (--sidebar-w, 52px), а .pinned раздвигает саму
+  // панель до --sidebar-w-open (196px) — без этого класса контент
+  // перекрывался закреплённой панелью на ~144px.
+  document.body.classList.toggle("sidebar-pinned", next);
   localStorage.setItem(SIDEBAR_PIN_KEY, next ? "1" : "0");
 }
 
