@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import generate_key
 from app.main import app
-from app.models import ApiKeyRole, CredentialCheckRun, Group, Node
+from app.models import ApiKeyRole, CredentialCheckRun, Group, Node, Scan, ScanHost, Vlan
 
 import app.credential_check_engine as cce
 
@@ -183,6 +183,72 @@ def test_viewer_cannot_run_credential_check(client, db, group_with_node):
         headers=_h(viewer_key),
     )
     assert resp.status_code == 403
+
+
+# --- проверка по VLAN (цели = живые хосты последнего скана подсети) ---
+
+
+def test_create_credential_check_rejects_vlan_without_scan(client, operator_key, db, group_with_node):
+    vlan = Vlan(name="Пользователи", cidr="10.0.1.0/24", group_id=group_with_node.id)
+    db.add(vlan)
+    db.commit()
+    db.refresh(vlan)
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/credential-checks",
+        json={"username": "admin", "password": "x", "consent_confirmed": True, "vlan_id": vlan.id},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 400
+
+
+def test_create_credential_check_rejects_vlan_from_other_group(client, operator_key, db, group_with_node):
+    other_group = Group(name="Другая группа")
+    db.add(other_group)
+    db.commit()
+    db.refresh(other_group)
+    vlan = Vlan(name="Чужой VLAN", cidr="10.0.2.0/24", group_id=other_group.id)
+    db.add(vlan)
+    db.commit()
+    db.refresh(vlan)
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/credential-checks",
+        json={"username": "admin", "password": "x", "consent_confirmed": True, "vlan_id": vlan.id},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 404
+
+
+def test_create_and_complete_credential_check_by_vlan(monkeypatch, client, operator_key, db, group_with_node):
+    """VLAN выбран — цели должны браться из последнего скана VLAN (живые
+    пользовательские хосты подсети), а не из узла-коммутатора группы."""
+    monkeypatch.setattr(cce, "_check_smb_login_sync", lambda *a, **k: None)
+
+    vlan = Vlan(name="Пользователи", cidr="10.0.1.0/24", group_id=group_with_node.id)
+    db.add(vlan)
+    db.commit()
+    db.refresh(vlan)
+    scan = Scan(cidr=vlan.cidr, vlan_id=vlan.id)
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    db.add(ScanHost(scan_id=scan.id, address="10.0.1.42", hostname="pc-42"))
+    db.commit()
+
+    resp = client.post(
+        f"/api/groups/{group_with_node.id}/credential-checks",
+        json={"username": "admin", "password": "x", "consent_confirmed": True, "vlan_id": vlan.id},
+        headers=_h(operator_key),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["targets"] == 1
+
+    run = _wait_run_done(client, operator_key, group_with_node.id)
+    assert run["success_count"] == 1
+    assert run["vlan_id"] == vlan.id
+    assert run["vlan_name"] == "Пользователи"
+
+    targets = client.get(f"/api/credential-checks/{run['id']}/targets", headers=_h(operator_key)).json()
+    assert targets == [{"address": "10.0.1.42", "ok": True, "error": None}]
 
 
 def test_group_scoped_key_cannot_run_in_other_group(client, db, group_with_node):

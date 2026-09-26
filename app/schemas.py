@@ -349,6 +349,10 @@ class CredentialCheckIn(BaseModel):
     password: str
     domain: str | None = None
     consent_confirmed: bool = False
+    # Задан — цели берутся из последнего скана этого VLAN (живые хосты
+    # подсети, см. app/vlan_engine.py), не из узлов группы. VLAN должен
+    # принадлежать той же group_id, что и путь запроса.
+    vlan_id: int | None = None
 
 
 class ScanIn(BaseModel):

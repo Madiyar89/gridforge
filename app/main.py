@@ -2184,12 +2184,33 @@ async def create_credential_check(
             status_code=400,
             detail="Нужно подтвердить разрешение на тестирование этой сети перед запуском",
         )
-    targets = [n.address for n in group.nodes]
-    if not targets:
-        raise HTTPException(status_code=400, detail="В группе нет узлов — проверять нечего")
+    vlan = None
+    if payload.vlan_id is not None:
+        vlan = db.get(Vlan, payload.vlan_id)
+        if vlan is None or vlan.group_id != group_id:
+            raise HTTPException(status_code=404, detail="VLAN не найден в этой группе")
+        last_scan = (
+            db.query(Scan)
+            .filter(Scan.vlan_id == vlan.id)
+            .order_by(desc(Scan.started_at))
+            .first()
+        )
+        if last_scan is None:
+            raise HTTPException(
+                status_code=400,
+                detail="У VLAN ещё нет скана — сначала запусти проверку VLAN на странице Инвентаря",
+            )
+        targets = [h.address for h in last_scan.hosts]
+        if not targets:
+            raise HTTPException(status_code=400, detail="В последнем скане VLAN нет живых адресов — проверять нечего")
+    else:
+        targets = [n.address for n in group.nodes]
+        if not targets:
+            raise HTTPException(status_code=400, detail="В группе нет узлов — проверять нечего")
 
     run = CredentialCheckRun(
         group_id=group_id,
+        vlan_id=vlan.id if vlan else None,
         protocol="smb",
         username=payload.username,
         domain=payload.domain,
@@ -2222,6 +2243,7 @@ def list_credential_checks(group_id: int, db: Session = Depends(_db), key: Princ
             "started_at": iso(r.started_at), "finished_at": iso(r.finished_at) if r.finished_at else None,
             "error": r.error, "target_count": len(r.targets),
             "success_count": sum(1 for t in r.targets if t.ok),
+            "vlan_id": r.vlan_id, "vlan_name": r.vlan.name if r.vlan else None,
         }
         for r in runs
     ]

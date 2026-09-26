@@ -106,6 +106,9 @@ def _migrate_missing_columns() -> None:
         "scans": [
             ("vlan_id", "INTEGER"),
         ],
+        "credential_check_runs": [
+            ("vlan_id", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

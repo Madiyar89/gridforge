@@ -1106,8 +1106,14 @@ class CredentialCheckRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Заполняется, только когда прогон запущен по конкретному VLAN
+    # (payload.vlan_id) — цели тогда берутся из последнего скана этого
+    # VLAN (ScanHost, "живые" пользовательские хосты подсети), не из
+    # Node группы. NULL — старое поведение, цели = узлы группы.
+    vlan_id: Mapped[int | None] = mapped_column(ForeignKey("vlans.id"), nullable=True)
 
     group: Mapped["Group"] = relationship()
+    vlan: Mapped["Vlan | None"] = relationship()
     targets: Mapped[list["CredentialCheckTarget"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
