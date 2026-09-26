@@ -1292,3 +1292,35 @@ class RemoteSiteReport(Base):
     incidents: Mapped[list] = mapped_column(JSON, default=list)
 
     site: Mapped["RemoteSite"] = relationship()
+
+
+class FlowAlertRule(Base):
+    """Пороговое оповещение по объёму трафика узла (docs/landscape-report.md
+    §4.5, доработка 2026-09-26, по прямому запросу пользователя "улучшим")
+    — НЕ через Watch/Incident: тот жёстко привязан к Probe на Node (см.
+    докстринг Incident), а поток трафика не результат Probe, заводить его
+    как Incident было бы смысловой натяжкой. Тот же лёгкий путь мимо
+    Incident, что уже применён в signal.notify_new_devices() — переиспользует
+    только рассылку по Channel, без создания Incident.
+
+    Порог — суммарный трафик узла В ОБЕ СТОРОНЫ (и как источник, и как
+    получатель) за `window_minutes`, та же агрегация, что у
+    /api/flows/top-talkers. `last_triggered_at` — защита от повторной
+    рассылки на каждый тик планировщика, пока порог всё ещё превышен
+    (перегенерируется не чаще раза в window_minutes, тот же принцип, что
+    last_triggered_on у VulnScanSchedule)."""
+
+    __tablename__ = "flow_alert_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    bytes_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id"), nullable=False)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    node: Mapped["Node"] = relationship()
+    channel: Mapped["Channel"] = relationship()

@@ -17,6 +17,9 @@
   .talker-bar-fill{height:100%;background:var(--accent);}
   .pair-row{padding:8px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;display:flex;justify-content:space-between;gap:10px;}
   .pair-row:last-child{border-bottom:none;}
+  .proto-row{padding:7px 16px;border-bottom:1px solid var(--border);font-size:12.5px;display:flex;justify-content:space-between;gap:10px;}
+  .proto-row:last-child{border-bottom:none;}
+  .proto-row .name{font-weight:600;}
 </style>
 </head>
 <body>
@@ -62,8 +65,31 @@
 </div>
 
 <div class="panel">
+  <h2>Топ протоколов <span class="count" id="protocols-count"></span></h2>
+  <div class="body" id="protocols-body"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="panel">
   <h2>Последние потоки <span class="count" id="flows-count"></span></h2>
   <div class="body" id="flows-body" style="max-height:400px"><div class="empty">Загрузка…</div></div>
+</div>
+
+<div class="page-head">
+  <h1>Оповещения по трафику</h1>
+  <p>Если суммарный трафик узла (в обе стороны) за выбранное окно превысит порог — уходит уведомление в выбранный канал. Не чаще раза на своё же окно, пока порог не спадёт и не превысится заново.</p>
+</div>
+
+<div class="panel">
+  <h2>Новое правило</h2>
+  <div class="form-row" style="border-top:none">
+    <select id="fa-node"><option value="">выбери узел…</option></select>
+    <input id="fa-label" placeholder="название, например «Аплинк LAB-9»">
+    <input id="fa-threshold" type="number" min="1" placeholder="порог, МБ">
+    <input id="fa-window" type="number" min="1" value="15" placeholder="окно, мин" style="max-width:110px">
+    <select id="fa-channel"><option value="">выбери канал…</option></select>
+    <button id="fa-add">+ правило</button>
+  </div>
+  <div class="body" id="fa-rules-body"><div class="empty">Правил ещё нет</div></div>
 </div>
 
 <div class="toast" id="toast"></div>

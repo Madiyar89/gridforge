@@ -42,6 +42,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.models import Backup, Capture, FlowRecord, RemoteSiteReport, Sample, SyslogMessage, _now
+from app.netflow_server import purge_stale_templates
 
 logger = logging.getLogger("gridforge.retention")
 
@@ -110,12 +111,15 @@ def run_retention(db: Session) -> dict[str, int]:
         "sync_reports": _delete_old(
             db, RemoteSiteReport, RemoteSiteReport.received_at, _days("GRIDFORGE_RETENTION_SYNC_REPORTS_DAYS", 30)
         ),
+        # Не про БД — очистка in-memory кэша шаблонов NetFlow (netflow_server.py),
+        # тот же ежедневный ритм, что и у остального retention, просто не SQL.
+        "netflow_templates": purge_stale_templates(),
     }
     db.commit()
     if any(result.values()):
         logger.info(
-            "очистка: samples=%s syslog=%s captures=%s backups=%s flows=%s sync_reports=%s",
+            "очистка: samples=%s syslog=%s captures=%s backups=%s flows=%s sync_reports=%s netflow_templates=%s",
             result["samples"], result["syslog"], result["captures"], result["backups"], result["flows"],
-            result["sync_reports"],
+            result["sync_reports"], result["netflow_templates"],
         )
     return result

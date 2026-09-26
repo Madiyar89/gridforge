@@ -253,3 +253,23 @@ async def notify_new_devices(client: httpx.AsyncClient, db: Session, hosts: list
             await sender(client, channel, message)
         except httpx.HTTPError as exc:
             logger.warning("channel_id=%s: доставка (новые устройства) не удалась: %s", channel.id, exc)
+
+
+async def notify_flow_alert(client: httpx.AsyncClient, db: Session, channel_id: int, message: str) -> None:
+    """Оповещение по порогу трафика (FlowAlertRule, docs/landscape-report.md
+    §4.5) — тот же принцип, что и notify_new_devices: событие не привязано
+    к Watch на Probe, рассылка мимо Incident, переиспользует только уже
+    существующие отправители по ChannelKind (тот же реестр). В отличие от
+    notify_new_devices — рассылка на ОДИН конкретный канал (тот, что указан
+    в самом правиле), не на все общие каналы разом: порог трафика — свойство
+    конкретного правила, не общесетевое событие."""
+    channel = db.get(Channel, channel_id)
+    if channel is None or not channel.enabled:
+        return
+    sender = _NEW_DEVICE_REGISTRY.get(channel.kind)
+    if sender is None:
+        return
+    try:
+        await sender(client, channel, message)
+    except httpx.HTTPError as exc:
+        logger.warning("channel_id=%s: доставка (порог трафика) не удалась: %s", channel.id, exc)

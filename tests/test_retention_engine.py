@@ -125,6 +125,7 @@ def test_recent_capture_and_its_file_kept(db, tmp_path, monkeypatch):
 def test_empty_database_is_a_no_op(db):
     assert run_retention(db) == {
         "samples": 0, "syslog": 0, "captures": 0, "backups": 0, "flows": 0, "sync_reports": 0,
+        "netflow_templates": 0,
     }
 
 

@@ -110,6 +110,7 @@ from app.models import (
     DomainScanHost,
     DomainScanMethod,
     EscalationStep,
+    FlowAlertRule,
     FlowRecord,
     Group,
     Incident,
@@ -173,6 +174,7 @@ from app.schemas import (
     ApiKeyIn,
     AskIn,
     AuditRuleIn,
+    FlowAlertRuleIn,
     RemoteSiteIn,
     SyncReportIn,
     BackupTriggerIn,
@@ -3272,17 +3274,33 @@ def _flows_since(db: Session, minutes: int):
     return db.query(FlowRecord).filter(FlowRecord.received_at >= cutoff)
 
 
+def _node_names_by_address(db: Session) -> dict[str, tuple[int, str]]:
+    """address -> (node_id, name) для уже заведённых узлов — доработка
+    2026-09-26 ("объединить с портом... что мы можем улучшить"): раньше
+    топ говорящих/пар показывал голый IP, даже если адрес давно заведён
+    как Node. Один запрос на весь список узлов, не по одному на адрес."""
+    return {n.address: (n.id, n.name) for n in db.query(Node.id, Node.name, Node.address).all() if n.address}
+
+
+_PROTOCOL_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP", 58: "ICMPv6"}
+
+
 @api_read.get("/api/flows")
 def list_flows(minutes: int = 15, limit: int = 100, db: Session = Depends(_db)):
     rows = _flows_since(db, minutes).order_by(desc(FlowRecord.received_at)).limit(min(limit, 500)).all()
-    return [
-        {
+    nodes = _node_names_by_address(db)
+    out = []
+    for f in rows:
+        src_node = nodes.get(f.src_addr)
+        dst_node = nodes.get(f.dst_addr)
+        out.append({
             "id": f.id, "exporter_ip": f.exporter_ip, "src_addr": f.src_addr, "dst_addr": f.dst_addr,
+            "src_node_name": src_node[1] if src_node else None,
+            "dst_node_name": dst_node[1] if dst_node else None,
             "src_port": f.src_port, "dst_port": f.dst_port, "protocol": f.protocol,
             "byte_count": f.byte_count, "packet_count": f.packet_count, "received_at": iso(f.received_at),
-        }
-        for f in rows
-    ]
+        })
+    return out
 
 
 @api_read.get("/api/flows/top-talkers")
@@ -3305,10 +3323,15 @@ def flows_top_talkers(minutes: int = 60, limit: int = 20, db: Session = Depends(
         .limit(min(limit, 100))
         .all()
     )
-    return [
-        {"address": addr, "bytes": int(total_bytes), "geo": geoip_lookup(addr)}
-        for addr, total_bytes in rows
-    ]
+    nodes = _node_names_by_address(db)
+    out = []
+    for addr, total_bytes in rows:
+        node = nodes.get(addr)
+        out.append({
+            "address": addr, "bytes": int(total_bytes), "geo": geoip_lookup(addr),
+            "node_id": node[0] if node else None, "node_name": node[1] if node else None,
+        })
+    return out
 
 
 @api_read.get("/api/flows/top-pairs")
@@ -3325,10 +3348,85 @@ def flows_top_pairs(minutes: int = 60, limit: int = 20, db: Session = Depends(_d
         .limit(min(limit, 100))
         .all()
     )
+    nodes = _node_names_by_address(db)
+    out = []
+    for src, dst, total_bytes, total_packets in rows:
+        src_node, dst_node = nodes.get(src), nodes.get(dst)
+        out.append({
+            "src_addr": src, "dst_addr": dst, "bytes": int(total_bytes), "packets": int(total_packets),
+            "src_node_name": src_node[1] if src_node else None,
+            "dst_node_name": dst_node[1] if dst_node else None,
+        })
+    return out
+
+
+@api_read.get("/api/flows/top-protocols")
+def flows_top_protocols(minutes: int = 60, limit: int = 10, db: Session = Depends(_db)):
+    """Топ протоколов по объёму трафика (доработка 2026-09-26) — номер
+    протокола IANA (см. FlowRecord.protocol) переводится в человекочитаемое
+    имя из небольшого справочника самых частых; неизвестные — как есть,
+    "протокол N", не гадаем."""
+    rows = (
+        _flows_since(db, minutes)
+        .with_entities(
+            FlowRecord.protocol,
+            func.sum(FlowRecord.byte_count).label("total_bytes"),
+            func.sum(FlowRecord.packet_count).label("total_packets"),
+        )
+        .group_by(FlowRecord.protocol)
+        .order_by(desc("total_bytes"))
+        .limit(min(limit, 50))
+        .all()
+    )
     return [
-        {"src_addr": src, "dst_addr": dst, "bytes": int(total_bytes), "packets": int(total_packets)}
-        for src, dst, total_bytes, total_packets in rows
+        {
+            "protocol": proto,
+            "protocol_name": _PROTOCOL_NAMES.get(proto, f"протокол {proto}" if proto is not None else "неизвестно"),
+            "bytes": int(total_bytes), "packets": int(total_packets),
+        }
+        for proto, total_bytes, total_packets in rows
     ]
+
+
+# --- Оповещения по порогу трафика (FlowAlertRule, доработка 2026-09-26) ---
+
+
+@api_write.post("/api/flow-alert-rules", status_code=201)
+def create_flow_alert_rule(payload: FlowAlertRuleIn, db: Session = Depends(_db)):
+    if db.get(Node, payload.node_id) is None:
+        raise HTTPException(status_code=404, detail="Node не найден")
+    if db.get(Channel, payload.channel_id) is None:
+        raise HTTPException(status_code=404, detail="Канал не найден")
+    rule = FlowAlertRule(
+        node_id=payload.node_id, label=payload.label, bytes_threshold=payload.bytes_threshold,
+        window_minutes=payload.window_minutes, channel_id=payload.channel_id,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return {"id": rule.id}
+
+
+@api_read.get("/api/flow-alert-rules")
+def list_flow_alert_rules(db: Session = Depends(_db)):
+    rules = db.query(FlowAlertRule).order_by(FlowAlertRule.id).all()
+    return [
+        {
+            "id": r.id, "node_id": r.node_id, "node_name": r.node.name if r.node else None,
+            "label": r.label, "bytes_threshold": r.bytes_threshold, "window_minutes": r.window_minutes,
+            "channel_id": r.channel_id, "enabled": r.enabled,
+            "last_triggered_at": iso(r.last_triggered_at) if r.last_triggered_at else None,
+        }
+        for r in rules
+    ]
+
+
+@api_write.delete("/api/flow-alert-rules/{rule_id}", status_code=204)
+def delete_flow_alert_rule(rule_id: int, db: Session = Depends(_db)):
+    rule = db.get(FlowAlertRule, rule_id)
+    if rule is not None:
+        db.delete(rule)
+        db.commit()
 
 
 @api_read.get("/api/ip-lookup")

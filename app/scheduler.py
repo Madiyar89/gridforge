@@ -29,6 +29,7 @@ from app.geoip_engine import GeoipDownloadError, download_databases, needs_refre
 from app.integrations_engine import decrypt_token
 from app.models import Integration, Probe, ProbeKind, Sample, _now
 from app.sync_engine import push_snapshot, sync_enabled
+from app.flow_alerts_engine import run_due_flow_alerts
 from app.probes import run_probe
 from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
@@ -109,6 +110,12 @@ class Scheduler:
         except Exception:
             logger.exception("сбой планового скана новых устройств")
 
+    async def _run_flow_alerts_safe(self) -> None:
+        try:
+            await run_due_flow_alerts(self._http_client, get_session)
+        except Exception:
+            logger.exception("сбой проверки порогов трафика")
+
     async def _run_sync_push_safe(self) -> None:
         """Отправка отчёта на хаб (docs/landscape-report.md §4.10 шаг 2) —
         отсутствие сети/хаба не ошибка (переносной инстанс может быть
@@ -157,6 +164,7 @@ class Scheduler:
         discovery_schedule_interval_seconds: float = 60.0,
         geoip_refresh_interval_seconds: float = 3600.0,
         sync_push_interval_seconds: float = float(os.environ.get("GRIDFORGE_SYNC_INTERVAL_MIN", 15)) * 60,
+        flow_alerts_interval_seconds: float = 60.0,
     ) -> None:
         self._http_client = httpx.AsyncClient()
         try:
@@ -167,6 +175,7 @@ class Scheduler:
             last_discovery_schedule_check = 0.0
             last_geoip_check = 0.0
             last_sync_push_check = 0.0
+            last_flow_alerts_check = 0.0
             # Первая очистка — не сразу при старте, а через сутки работы:
             # перезапуск сервиса не должен каждый раз запускать удаление.
             last_retention = time.monotonic()
@@ -219,6 +228,13 @@ class Scheduler:
                     # плановых проверок выше.
                     asyncio.create_task(self._run_sync_push_safe())
                     last_sync_push_check = now
+                if now - last_flow_alerts_check >= flow_alerts_interval_seconds:
+                    # Раз в минуту — дешёвый агрегатный запрос по FlowRecord
+                    # на каждое включённое правило, реальная отправка только
+                    # если порог превышен и не разослан в пределах своего
+                    # окна (см. FlowAlertRule.last_triggered_at).
+                    asyncio.create_task(self._run_flow_alerts_safe())
+                    last_flow_alerts_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
                     try:

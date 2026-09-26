@@ -72,6 +72,17 @@ class SyncReportIn(BaseModel):
     incidents: list[dict] = []
 
 
+class FlowAlertRuleIn(BaseModel):
+    """Пороговое оповещение по трафику узла (app/flow_alerts_engine.py,
+    docs/landscape-report.md §4.5)."""
+
+    node_id: int
+    label: str
+    bytes_threshold: int
+    window_minutes: int = 15
+    channel_id: int
+
+
 class AskIn(BaseModel):
     """Вопрос для «Спроси про сеть» (app/ask_engine.py)."""
 

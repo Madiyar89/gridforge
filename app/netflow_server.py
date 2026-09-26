@@ -24,6 +24,7 @@ import ipaddress
 import logging
 import os
 import struct
+import time
 
 from app.db import get_session
 from app.models import FlowRecord
@@ -60,6 +61,24 @@ _FIELD_DECODERS = {
 TemplateKey = tuple[str, int, int]
 # Шаблон — список (field_type, field_length) в порядке следования в Data FlowSet.
 _templates: dict[TemplateKey, list[tuple[int, int]]] = {}
+# Последний раз, когда ключ реально использовался (получен заново ИЛИ
+# применён к Data FlowSet) — для purge_stale_templates (доработка
+# 2026-09-26, "что мы можем улучшить"): без этого словарь растёт на весь
+# аптайм процесса, даже если экспортёр давно выключен/переехал.
+_template_last_seen: dict[TemplateKey, float] = {}
+
+
+def purge_stale_templates(max_age_seconds: float = 24 * 3600) -> int:
+    """Вызывается раз в сутки из retention_engine.run_retention() — тот же
+    ритм, что у остальной очистки старых данных. Возвращает, сколько
+    шаблонов убрано (для лога, тот же принцип, что у остальных счётчиков
+    в run_retention)."""
+    now = time.monotonic()
+    stale = [k for k, last_seen in _template_last_seen.items() if now - last_seen > max_age_seconds]
+    for key in stale:
+        _templates.pop(key, None)
+        _template_last_seen.pop(key, None)
+    return len(stale)
 
 
 def _parse_template_flowset(data: bytes, exporter_ip: str, source_id: int) -> None:
@@ -74,7 +93,9 @@ def _parse_template_flowset(data: bytes, exporter_ip: str, source_id: int) -> No
             field_type, field_length = struct.unpack_from(">HH", data, offset)
             offset += 4
             fields.append((field_type, field_length))
-        _templates[(exporter_ip, source_id, template_id)] = fields
+        key = (exporter_ip, source_id, template_id)
+        _templates[key] = fields
+        _template_last_seen[key] = time.monotonic()
 
 
 def _parse_data_flowset(
@@ -124,8 +145,10 @@ def _parse_packet(data: bytes, exporter_ip: str) -> list[dict]:
         if flowset_id == 0:
             _parse_template_flowset(body, exporter_ip, source_id)
         elif flowset_id >= 256:
-            template = _templates.get((exporter_ip, source_id, flowset_id))
+            key = (exporter_ip, source_id, flowset_id)
+            template = _templates.get(key)
             if template is not None:
+                _template_last_seen[key] = time.monotonic()
                 out.extend(_parse_data_flowset(body, template, exporter_ip))
         # flowset_id == 1 (Options Template) — метаданные экспортёра, не
         # поток трафика, сознательно пропускается: дашборду не нужен.
