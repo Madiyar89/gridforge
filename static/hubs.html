@@ -23,15 +23,18 @@
 
 <div class="page-head">
   <h1>Вероятные хабы</h1>
-  <p>Эвристика: access-порт (не trunk), на котором видно 2+ разных MAC разом — обычно «IP-телефон + ПК» (не хаб), 3+ — уже подозрительно. Живой опрос MAC-таблицы каждого Cisco-узла по кнопке, ничего не хранится.</p>
+  <p>Эвристика: access-порт (не trunk), на котором видно 2+ разных MAC разом — обычно «IP-телефон + ПК» (не хаб), 3+ — уже подозрительно. Уточняется через CDP: если сосед на порту сам подтверждает себя телефоном — это факт, не догадка; если сосед — управляемый коммутатор, порт стоит перевести в trunk, а не считать хабом. Живой опрос MAC-таблицы и CDP каждого Cisco-узла по кнопке, ничего не хранится.</p>
 </div>
 
 <div class="panel">
   <h2>
     Результат
-    <span><button id="hubs-scan" class="icon-btn">Просканировать</button></span>
+    <span class="form-row" style="border-top:none;padding:0;display:inline-flex;gap:8px;align-items:center">
+      <select id="hubs-group-select"><option value="">весь парк</option></select>
+      <button id="hubs-scan" class="icon-btn">Просканировать</button>
+    </span>
   </h2>
-  <div class="body" id="hubs-body"><div class="empty">Нажми «Просканировать» — опросит все Cisco-узлы</div></div>
+  <div class="body" id="hubs-body"><div class="empty">Выбери группу (или оставь «весь парк») и нажми «Просканировать»</div></div>
 </div>
 
 <div class="toast" id="toast"></div>

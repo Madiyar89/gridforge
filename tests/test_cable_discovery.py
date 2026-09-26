@@ -40,6 +40,7 @@ def test_parse_cdp_neighbors_detail():
         "local_port": "GigabitEthernet1/0/24",
         "remote_device": "sw-core-2",
         "remote_port": "GigabitEthernet0/1",
+        "capabilities": "Switch IGMP",
     }
     assert neighbors[1]["remote_device"] == "ap-floor3"
 

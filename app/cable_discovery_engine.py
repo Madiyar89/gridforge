@@ -33,11 +33,14 @@ from app.models import CableLink, Node, PortSnapshot, Vendor
 from app.ports_engine import normalize_iface
 
 _CDP_VENDORS = (Vendor.cisco_ios, Vendor.cisco_ios_telnet)
-_CDP_COMMAND = "show cdp neighbors detail"
+# Публичное имя (не _CDP_COMMAND) — переиспользуется в hub_detection_engine.py
+# для того же запроса CDP-соседей, но по access-портам, не только трактовым.
+CDP_COMMAND = "show cdp neighbors detail"
 MAX_PARALLEL = 8
 
 _DEVICE_RE = re.compile(r"Device ID:\s*(\S+)")
 _IFACE_RE = re.compile(r"Interface:\s*(\S+),\s*Port ID \(outgoing port\):\s*(\S+)")
+_CAPS_RE = re.compile(r"Capabilities:\s*(.*)")
 
 
 def parse_cdp_neighbors_detail(output: str) -> list[dict]:
@@ -51,7 +54,14 @@ def parse_cdp_neighbors_detail(output: str) -> list[dict]:
     ("Gi1/0/48", как в `show interfaces status`) — прямое сравнение строк
     в discover_trunk_cable_links всегда давало пустое совпадение и 0
     записей в журнале. Сравнение и хранение теперь идут через
-    normalize_iface (см. app/ports_engine.py)."""
+    normalize_iface (см. app/ports_engine.py).
+
+    `capabilities` (2026-09-26, для уточнения "Вероятные хабы" —
+    hub_detection_engine.py) — сырая строка после "Capabilities:"
+    ("Host Phone", "Router Switch IGMP" и т.п.), не разбита на список:
+    набор токенов у Cisco негласный, надёжнее матчить подстрокой в
+    вызывающем коде под конкретную задачу, чем угадывать здесь полный
+    список возможных значений."""
     neighbors: list[dict] = []
     for block in re.split(r"^-+$", output, flags=re.MULTILINE):
         device_match = _DEVICE_RE.search(block)
@@ -62,7 +72,11 @@ def parse_cdp_neighbors_detail(output: str) -> list[dict]:
         # только короткое имя для читаемости журнала, как показывает CLI.
         remote_device = device_match.group(1).split(".")[0]
         local_port, remote_port = iface_match.group(1), iface_match.group(2)
-        neighbors.append({"local_port": local_port, "remote_device": remote_device, "remote_port": remote_port})
+        caps_match = _CAPS_RE.search(block)
+        neighbors.append({
+            "local_port": local_port, "remote_device": remote_device, "remote_port": remote_port,
+            "capabilities": caps_match.group(1).strip() if caps_match else "",
+        })
     return neighbors
 
 
@@ -82,7 +96,7 @@ async def _discover_one(
         result = await run_device_command(
             vendor=node.vendor,
             host=node.address,
-            command=_CDP_COMMAND,
+            command=CDP_COMMAND,
             username=username,
             password=password,
             key_path=key_path,

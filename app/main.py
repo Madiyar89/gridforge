@@ -1287,12 +1287,15 @@ def get_compliance(db: Session = Depends(_db)):
 
 
 @api_operate.post("/api/reports/probable-hubs")
-async def get_probable_hubs(db: Session = Depends(_db)):
+async def get_probable_hubs(group_id: int | None = None, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Вероятные хабы/неуправляемые свитчи за access-портами — живой опрос
-    полной MAC-таблицы каждого Cisco-узла (см. app/hub_detection_engine.py).
-    На operate (не read) — реально ходит на оборудование по SSH, не только
+    MAC-таблицы + CDP-соседей каждого Cisco-узла, по умолчанию всего парка,
+    либо только выбранной группы (см. app/hub_detection_engine.py). На
+    operate (не read) — реально ходит на оборудование по SSH, не только
     читает БД."""
-    return await find_probable_hubs(db, resolve_credential=resolve_credential)
+    if group_id is not None and not key_sees_group(key, group_id):
+        raise HTTPException(status_code=403, detail="Ключ ограничен другой группой")
+    return await find_probable_hubs(db, resolve_credential=resolve_credential, key=key, group_id=group_id)
 
 
 @api_operate.post("/api/reports/mac-search")
