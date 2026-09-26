@@ -958,7 +958,12 @@ async def ask_network_endpoint(payload: AskIn, db: Session = Depends(_db)):
     """«Спроси про сеть» (docs/landscape-report.md, §4.9) — только admin
     (api_write): инструмент видит ВСЮ БД read-only (см. app/ask_engine.py),
     ограничение по группе (key_sees_group) здесь бессмысленно навешивать
-    частично — либо доступ к отчёту целиком, либо никакого."""
+    частично — либо доступ к отчёту целиком, либо никакого.
+
+    Заморожено 2026-09-26 по решению владельца — эндпоинт временно
+    отключён (страница ask.html остаётся в навигации, но любой запрос
+    получает 403). Убрать этот блок, чтобы включить обратно."""
+    raise HTTPException(status_code=403, detail="Функция «Спроси про сеть» временно заморожена")
     integration = db.query(Integration).filter(Integration.key == "gemini").first()
     if integration is None:
         raise HTTPException(status_code=400, detail="Gemini не настроен — заведи ключ на странице «Интеграции»")
