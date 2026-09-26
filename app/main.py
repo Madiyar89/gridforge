@@ -2229,7 +2229,7 @@ def get_credential_check_targets(run_id: int, db: Session = Depends(_db), key: P
 
 @api_read.get("/api/network-audit/report")
 def get_network_audit_report(db: Session = Depends(_db)):
-    """Безстейтовый флот-отчёт по узлам Cisco/Junos с бэкапом — 26 правил,
+    """Безстейтовый флот-отчёт по узлам Cisco/Junos с бэкапом — 31 правило,
     риск-скор по категориям (см. network_audit_engine). Синхронный (нет
     сетевого I/O — работает по уже снятым Backup.content), в отличие от
     AD-аудита не нужен await."""

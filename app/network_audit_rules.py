@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from app.risk_scoring import Rule
 
-CATALOG_VERSION = "1.1"
-CATALOG_UPDATED_AT = "2026-09-15"
+CATALOG_VERSION = "1.2"
+CATALOG_UPDATED_AT = "2026-09-26"
 
 CAT_ACCESS = "Управление и доступ"
 CAT_L3 = "Резервирование (L3)"
@@ -85,6 +85,16 @@ RULES: list[Rule] = [
          "Задать содержательный hostname по соглашению об именовании площадки.",
          lambda f: not f.get("hostname_is_default", False),
          objects=lambda f: [f"hostname: {f['hostname_raw']}"] if f.get("hostname_raw") else []),
+    Rule("A11", CAT_ACCESS, "high",
+         "Управление (VTY) не ограничено по источнику",
+         "На VTY не найден access-class — зайти по SSH может любой узел, у которого вообще есть маршрут до устройства, не только из сети управления.",
+         "Cisco: access-class <ACL> in на всех line vty, ACL разрешает только подсеть управления.",
+         lambda f: f["vty_source_restricted"]),
+    Rule("A12", CAT_ACCESS, "critical",
+         "Junos: вход под root по SSH не запрещён",
+         "system services ssh root-login не установлен в deny — вход суперпользователем напрямую по SSH возможен, обходя именные учётки и их аудит по логам.",
+         "Junos: set system services ssh root-login deny (входить под именной учёткой + su, не root напрямую).",
+         lambda f: f["junos_root_login_denied"]),
 
     # --- Резервирование (L3) — условные, см. applies ---
     Rule("C1", CAT_L3, "critical",
@@ -155,6 +165,17 @@ RULES: list[Rule] = [
          "ip dhcp snooping / dhcp-security не найден — поддельный DHCP-сервер в сегменте не блокируется.",
          "Cisco: ip dhcp snooping + ip dhcp snooping vlan <x> + trust на uplink. Junos: forwarding-options dhcp-security.",
          lambda f: f["dhcp_snooping_configured"], applies=lambda f: f["access_ports_present"]),
+    Rule("L8", CAT_L2, "high",
+         "Dynamic ARP Inspection не настроена",
+         "ip arp inspection vlan / arp-inspection не найден — DHCP snooping без DAI ловит только поддельный DHCP-сервер, а не ARP-спуфинг с уже выданным легитимным адресом.",
+         "Cisco: ip arp inspection vlan <x> (+ trust на uplink к DHCP-серверу). Junos: secure-access-port ... arp-inspection.",
+         lambda f: f["arp_inspection_configured"], applies=lambda f: f["dhcp_snooping_configured"]),
+    Rule("L9", CAT_L2, "low",
+         "Есть порты без описания и без shutdown",
+         "Слабый сигнал (не операционное состояние, а вывод из running-config): порт настроен как access, но у него нет ни description, ни port-security/нестандартного VLAN, ни явного shutdown — похоже на неиспользуемый и не задокументированный. Требует проверки человеком, не автоматический вывод \"порт точно свободен\".",
+         "Если порт реально не используется — административно выключить (shutdown) и поместить в VLAN-\"чёрную дыру\". Если используется — задать description.",
+         lambda f: len(f.get("unused_ports_raw", [])) == 0,
+         objects=lambda f: [f"интерфейс {p} — без description/shutdown" for p in f.get("unused_ports_raw", [])]),
 
     # --- Гигиена конфигурации ---
     Rule("H2", CAT_HYGIENE, "low",

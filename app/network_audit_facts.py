@@ -73,7 +73,39 @@ def extract_cisco_facts(text: str) -> dict:
 
     facts["weak_password_type7"] = bool(re.search(r"\bpassword 7 \S+", text))
 
+    # --- доразбор аудита сети (2026-09-26, по прямому запросу пользователя:
+    # "написать правила по всему парку") ---
+    facts["arp_inspection_configured"] = bool(re.search(r"^ip arp inspection vlan\b", text, re.MULTILINE))
+    facts["vty_source_restricted"] = any(
+        re.search(r"access-class \S+ in\b", block) for block in vty_blocks
+    )
+    facts["junos_root_login_denied"] = True  # концепции root-логина как у Junos на Cisco IOS нет — правило не должно на нём срабатывать
+
+    facts["unused_ports_raw"] = _find_unused_cisco_ports(text)
+
     return facts
+
+
+def _find_unused_cisco_ports(text: str) -> list[str]:
+    """Слабый эвристический сигнал, не факт: интерфейс без `description` и
+    без `shutdown` — вероятно, физически не используется и не описан, но
+    из статического running-config нельзя узнать реальное состояние линка
+    (это operational-вывод show interfaces, не конфиг) — тот же принцип
+    "слабый сигнал с явной оговоркой", что уже применяется в этом модуле
+    для Junos-фактов (см. докстринг файла). Порт с port-security/access
+    vlan, отличным от дефолтного, или подключённый в port-channel — не
+    считается "неиспользуемым", даже без description."""
+    unused = []
+    for m in re.finditer(r"^interface (\S+)\n((?: .*\n?)*)", text, re.MULTILINE):
+        name, block = m.group(1), m.group(2)
+        if re.search(r"^\s*(description|shutdown|channel-group)\b", block, re.MULTILINE):
+            continue
+        if re.search(r"switchport (port-security|access vlan (?!1\b)\d)", block):
+            continue
+        if not re.search(r"^\s*switchport\b", block, re.MULTILINE):
+            continue  # не L2-порт (SVI/routed-порт без switchport) — не тот случай, который спрашивали
+        unused.append(name)
+    return unused
 
 
 def extract_junos_facts(text: str) -> dict:
@@ -132,7 +164,80 @@ def extract_junos_facts(text: str) -> dict:
     facts["vty_telnet_raw"] = []
     facts["weak_password_type7"] = False  # Junos не имеет аналога обратимого type 7
 
+    # --- доразбор аудита сети (2026-09-26) ---
+    facts["arp_inspection_configured"] = "arp-inspection" in low
+    facts["vty_source_restricted"] = True  # управление доступом к самому Junos — через firewall filter на lo0, не VTY-аналог; отдельная тема, не эта проверка
+    facts["junos_root_login_denied"] = bool(re.search(r"root-login\s+deny\b", text, re.IGNORECASE))
+    facts["unused_ports_raw"] = _find_unused_junos_ports(text)
+
     return facts
+
+
+def _top_level_blocks(text: str, header: str) -> list[tuple[str, str]]:
+    """Разбор иерархического Junos-конфига (`show configuration`, фигурные
+    скобки — реальный формат бэкапа, не `| display set`, живой прогон
+    2026-09-26 поймал именно это несоответствие). Ищет `header { ... }` на
+    верхнем уровне, возвращает дочерние блоки первого уровня внутри как
+    [(имя, содержимое)] — учитывает вложенные фигурные скобки простым
+    счётчиком глубины, не полноценный парсер Junos, но для "есть ли
+    description/disable внутри блока интерфейса" этого достаточно."""
+    m = re.search(re.escape(header) + r"\s*\{", text)
+    if not m:
+        return []
+    start = m.end()
+    depth = 1
+    i = start
+    while i < len(text) and depth > 0:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    body = text[start : i - 1]
+
+    blocks = []
+    depth = 0
+    child_start = None
+    child_name = None
+    j = 0
+    while j < len(body):
+        ch = body[j]
+        if depth == 0 and ch not in "{}\n" and child_name is None:
+            # начало имени дочернего блока — читаем до "{"
+            k = body.find("{", j)
+            if k == -1:
+                break
+            child_name = body[j:k].strip()
+            child_start = k + 1
+            depth = 1
+            j = child_start
+            continue
+        if depth >= 1:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks.append((child_name, body[child_start : j]))
+                    child_name = None
+        j += 1
+    return blocks
+
+
+def _find_unused_junos_ports(text: str) -> list[str]:
+    """Тот же слабый эвристический сигнал, что у Cisco (см.
+    _find_unused_cisco_ports) — интерфейс без description и без явного
+    disable; где-либо внутри своего блока (в т.ч. вложенно, под unit)."""
+    unused = []
+    for name, block in _top_level_blocks(text, "interfaces"):
+        if not name or name.startswith(("lo", "vlan", "irb", "ae")):
+            continue  # логические/агрегированные интерфейсы — не тот "физический незанятый порт", который спрашивали
+        if "unit" not in block:
+            continue  # нет ни одной unit-конфигурации — не L2-порт в обычном смысле здесь
+        if re.search(r"\bdescription\b", block) or re.search(r"^\s*disable\s*;", block, re.MULTILINE):
+            continue
+        unused.append(name)
+    return sorted(unused)
 
 
 def extract_facts(vendor: str, text: str) -> dict | None:
