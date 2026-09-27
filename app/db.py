@@ -13,7 +13,7 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -52,6 +52,28 @@ engine = create_engine(
     pool_timeout=10,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+if _IS_SQLITE:
+    # По умолчанию SQLite использует journal_mode=DELETE — блокировка на
+    # запись эксклюзивная на весь файл (не постраничная), а приложение
+    # пишет в БД параллельно из одного процесса сразу из нескольких мест:
+    # HTTP-обработчики (пул connect_args выше), scheduler.py (периодический
+    # опрос), syslog_server.py (commit на каждое UDP-сообщение) и
+    # netflow_server.py. При pool_size=20/max_overflow=30 это увеличивает
+    # частоту "database is locked". WAL даёт постраничную блокировку и
+    # параллельные читатели во время записи; busy_timeout — чтобы писатель,
+    # упёршийся в чужую запись, подождал и повторил попытку сам (на уровне
+    # sqlite3), а не падал сразу с OperationalError. Выполняется на каждое
+    # новое соединение (event "connect"), а не один раз — journal_mode=WAL
+    # хранится в самом файле БД и обычно достаточно один раз, но
+    # busy_timeout — свойство соединения, сбрасывается на каждое новое.
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # noqa: ANN001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -153,6 +175,15 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
     _migrate_renamed_columns()
     _migrate_missing_columns()
+    if _IS_SQLITE and DB_PATH.exists():
+        # По умолчанию create_all создаёт файл с правами процесса (обычно
+        # 644 — читаемо любым локальным пользователем). Файл содержит
+        # хэши паролей/API-ключей/сессий и (хоть и зашифрованные) секреты
+        # интеграций — тот же уровень строгости, что уже применён к
+        # data/secret.key (secrets_crypto.py). Выставляется на каждый
+        # старт (идемпотентно), не только при первом создании — если
+        # права были ослаблены снаружи, следующий рестарт их вернёт.
+        DB_PATH.chmod(0o600)
 
 
 def get_session() -> Session:

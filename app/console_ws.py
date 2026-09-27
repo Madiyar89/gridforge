@@ -26,26 +26,42 @@ import asyncio
 import json
 
 import asyncssh
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
-from app.auth import _hash_key  # переиспользуем ровно ту же проверку ключа, что и HTTP API
+from app.auth import (  # переиспользуем ровно ту же проверку ключа/роли/области, что и HTTP API
+    ROLE_RANK,
+    Principal,
+    _hash_key,
+    require_node_access,
+)
 from app.credentials_engine import resolve_credential
 from app.db import get_session
-from app.models import ApiKey, Node
+from app.models import ApiKey, ApiKeyRole
 from app.ssh_client import ENCRYPTION_ALGS, KEX_ALGS
 
 
-async def _authenticate(payload: dict) -> str | None:
-    """Возвращает None, если ключ валиден, иначе текст ошибки. Та же
-    проверка, что require_api_key в auth.py, но без HTTP-зависимостей
-    FastAPI (WebSocket — не обычный запрос)."""
+async def _authenticate(payload: dict) -> tuple[Principal | None, str | None]:
+    """Возвращает (Principal, None) если ключ валиден и годится для
+    интерактивного доступа к оборудованию, иначе (None, текст ошибки).
+
+    Та же проверка ключа, что require_api_key в auth.py, но без HTTP-
+    зависимостей FastAPI (WebSocket — не обычный запрос) — плюс проверка
+    роли: консоль это интерактивный доступ к оборудованию (как бэкап/скан/
+    аудит на HTTP-стороне), viewer сюда заходить не должен, см.
+    require_operator_key в auth.py. Область по группе узла проверяется
+    отдельно, в handle_console, вызовом require_node_access — она зависит
+    от конкретного node_id, который в этот момент ещё не пришёл."""
     api_key = payload.get("api_key")
     if not api_key:
-        return "api_key обязателен"
+        return None, "api_key обязателен"
     db = get_session()
     try:
         key = db.query(ApiKey).filter(ApiKey.key_hash == _hash_key(api_key), ApiKey.revoked.is_(False)).first()
-        return None if key else "неверный или отозванный API-ключ"
+        if key is None:
+            return None, "неверный или отозванный API-ключ"
+        if ROLE_RANK[key.role] < ROLE_RANK[ApiKeyRole.operator]:
+            return None, "требуется ключ с ролью operator или admin"
+        return Principal(label=key.label, role=key.role, group_id=key.group_id, kind="api_key"), None
     finally:
         db.close()
 
@@ -64,7 +80,7 @@ async def handle_console(ws: WebSocket) -> None:
         await ws.close(code=1002)
         return
 
-    auth_error = await _authenticate(payload)
+    principal, auth_error = await _authenticate(payload)
     if auth_error:
         await ws.send_json({"type": "error", "message": auth_error})
         await ws.close(code=1008)
@@ -73,7 +89,15 @@ async def handle_console(ws: WebSocket) -> None:
     node_id = payload.get("node_id")
     db = get_session()
     try:
-        node = db.get(Node, node_id)
+        try:
+            # Та же проверка области по группе, что и на HTTP-стороне у
+            # бэкапа/скана/аудита — ключ, ограниченный группой, не должен
+            # мочь открыть интерактивную сессию на чужом узле. 404 (не 403)
+            # по тем же причинам, что в auth.require_node_access — не
+            # подтверждать существование чужого узла.
+            node = require_node_access(db, principal, node_id)
+        except HTTPException:
+            node = None
         username = payload.get("username")
         key_path = payload.get("key_path")
         password = payload.get("password")
@@ -87,7 +111,7 @@ async def handle_console(ws: WebSocket) -> None:
         db.close()
     if node is None:
         await ws.send_json({"type": "error", "message": "Node не найден"})
-        await ws.close(code=1002)
+        await ws.close(code=1008)
         return
 
     if not username:

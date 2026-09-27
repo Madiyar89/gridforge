@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+import re
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.models import (
     ActionKind,
@@ -104,12 +106,25 @@ class LdapConnectionIn(BaseModel):
     use_ssl: bool = True
 
 
+def _reject_flag_like_address(value: str | None) -> str | None:
+    """address доходит до nmap/feroxbuster/impacket подпроцессов — значение,
+    начинающееся с "-", разбирается как флаг, не как цель (argument
+    injection силами уже доверенного operator/admin, добавляющего узел в
+    инвентарь). "--" в вызове nmap (vuln_scan_engine.py) уже защищает от
+    этого на уровне подпроцесса — здесь вторая, независимая линия защиты."""
+    if value is not None and value.lstrip().startswith("-"):
+        raise ValueError("address не может начинаться с '-'")
+    return value
+
+
 class NodeIn(BaseModel):
     name: str
     address: str
     tags: str | None = None
     group_id: int | None = None
     vendor: Vendor | None = None
+
+    _validate_address = field_validator("address")(_reject_flag_like_address)
 
 
 class NodeUpdateIn(BaseModel):
@@ -125,6 +140,8 @@ class NodeUpdateIn(BaseModel):
     group_id: int | None = None
     vendor: Vendor | None = None
     active: bool | None = None
+
+    _validate_address = field_validator("address")(_reject_flag_like_address)
 
 
 class ProbeIn(BaseModel):
@@ -277,14 +294,43 @@ class PortRefreshIn(BaseModel):
     timeout_seconds: float = 20.0
 
 
+# description идёт напрямую в f-строку CLI/Junos-команды
+# (port_commands.build_port_lines: `description {description}` /
+# `set interfaces {port} description "{description}"`) без экранирования —
+# перевод строки превращает одно значение в несколько произвольных команд,
+# отправленных на реальное устройство через интерактивный PTY
+# (ssh_client.run_ssh_config_lines); кавычка дополнительно ломает Junos-
+# синтаксис, ";" — терминатор команды на некоторых CLI. Запрещаем все
+# управляющие символы (\n, \r, ...) и эти два печатных символа явно.
+_PORT_DESCRIPTION_FORBIDDEN_RE = re.compile(r'[\x00-\x1f\x7f";]')
+_PORT_DESCRIPTION_MAX_LENGTH = 100
+
+
+def _reject_unsafe_port_description(value: str | None) -> str | None:
+    if value is None:
+        return value
+    if len(value) > _PORT_DESCRIPTION_MAX_LENGTH:
+        raise ValueError(f"description длиннее {_PORT_DESCRIPTION_MAX_LENGTH} символов")
+    if _PORT_DESCRIPTION_FORBIDDEN_RE.search(value):
+        raise ValueError(
+            'description не может содержать переводы строк/управляющие символы, '
+            'кавычку (") или ";" — они подставляются в CLI/Junos-команду без экранирования'
+        )
+    return value
+
+
 class PortApplyIn(BaseModel):
     """Изменение одного порта (описание/VLAN/up-down/Port Security) — хотя
     бы одно из полей обязательно, см. проверку в
     port_commands.build_port_lines. Учётка не обязательна — см.
-    PortRefreshIn."""
+    PortRefreshIn.
+
+    description/vlan идут прямо в CLI/Junos-команды без экранирования
+    (port_commands.build_port_lines) — поэтому валидация здесь на границе
+    схемы, не только по типу."""
 
     description: str | None = None
-    vlan: str | None = None
+    vlan: int | None = Field(default=None, ge=1, le=4094)
     state: str | None = None  # "up" | "down" | None
     port_security: str | None = None  # "on" | "off" | None
     port_security_maximum: int | str | None = None
@@ -293,6 +339,8 @@ class PortApplyIn(BaseModel):
     key_path: str | None = None
     port: int = 22
     timeout_seconds: float = 40.0  # интерактивная сессия, см. комментарий у ScenarioRunIn
+
+    _validate_description = field_validator("description")(_reject_unsafe_port_description)
 
 
 class PortBounceIn(BaseModel):
