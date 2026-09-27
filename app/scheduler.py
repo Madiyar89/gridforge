@@ -29,7 +29,7 @@ from app.geoip_engine import GeoipDownloadError, download_databases, needs_refre
 from app.integrations_engine import decrypt_token
 from app.models import Integration, Probe, ProbeKind, Sample, _now
 from app.sync_engine import push_snapshot, sync_enabled
-from app.flow_alerts_engine import run_due_flow_alerts
+from app.flow_alerts_engine import run_due_flow_alerts, run_due_flow_anomaly_detection
 from app.probes import run_probe
 from app.rate_engine import apply_rate, previous_rate_sample
 from app.retention_engine import run_retention
@@ -115,6 +115,14 @@ class Scheduler:
             await run_due_flow_alerts(self._http_client, get_session)
         except Exception:
             logger.exception("сбой проверки порогов трафика")
+        # Эвристики аномалий (port-scan/rogue DHCP/DHCP starvation/DNS) — не
+        # настраиваются пользователем как FlowAlertRule, поэтому отдельного
+        # интервала не заводим, проверяем на том же тике. Отдельный try —
+        # сбой одной группы правил не должен глушить другую.
+        try:
+            await run_due_flow_anomaly_detection(self._http_client, get_session)
+        except Exception:
+            logger.exception("сбой проверки аномалий трафика (port-scan/DHCP/DNS)")
 
     async def _run_sync_push_safe(self) -> None:
         """Отправка отчёта на хаб (docs/landscape-report.md §4.10 шаг 2) —

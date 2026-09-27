@@ -439,8 +439,12 @@ async def run_vuln_scan(scan_id: int, targets: list[str], profile: str, get_sess
 
         args = PROFILE_ARGS[profile]
         timeout = PROFILE_TIMEOUT_SECONDS[profile]
+        # "--" перед targets: без него Node.address начинающийся с "-"
+        # (например "-oG=/app/data/pwned") разбирается nmap как флаг, а
+        # не как цель — argument injection силами уже доверенного
+        # operator/admin, добавляющего узел в инвентарь.
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-oX", "-", *args, *targets,
+            "nmap", "-oX", "-", *args, "--", *targets,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

@@ -131,6 +131,9 @@ def _migrate_missing_columns() -> None:
         "credential_check_runs": [
             ("vlan_id", "INTEGER"),
         ],
+        "flow_records": [
+            ("tcp_flags", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:

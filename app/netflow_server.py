@@ -43,6 +43,12 @@ L4_DST_PORT = 11
 PROTOCOL = 4
 IN_BYTES = 1
 IN_PKTS = 2
+# TCP_FLAGS (RFC 3954 §8) — 1 байт, битовая маска (FIN=0x01, SYN=0x02,
+# RST=0x04, PSH=0x08, ACK=0x10, URG=0x20). Нужен для отличения SYN-скана
+# (только SYN, без ACK) от обычного TCP-соединения (см. flow_alerts_engine.py
+# _detect_port_scans) — без этого поля детектор port-скана видит только
+# число портов, не может отличить скан от, например, легитимного веб-краулера.
+TCP_FLAGS = 6
 
 _FIELD_DECODERS = {
     IPV4_SRC_ADDR: lambda b: ("src_addr", str(ipaddress.IPv4Address(b))),
@@ -52,6 +58,7 @@ _FIELD_DECODERS = {
     PROTOCOL: lambda b: ("protocol", int.from_bytes(b, "big")),
     IN_BYTES: lambda b: ("byte_count", int.from_bytes(b, "big")),
     IN_PKTS: lambda b: ("packet_count", int.from_bytes(b, "big")),
+    TCP_FLAGS: lambda b: ("tcp_flags", int.from_bytes(b, "big")),
 }
 
 # Ключ — (exporter_ip, source_id, template_id): template_id назначается
@@ -182,6 +189,7 @@ class NetflowProtocol(asyncio.DatagramProtocol):
                         protocol=rec.get("protocol"),
                         byte_count=rec.get("byte_count", 0),
                         packet_count=rec.get("packet_count", 0),
+                        tcp_flags=rec.get("tcp_flags"),
                     )
                 )
             db.commit()

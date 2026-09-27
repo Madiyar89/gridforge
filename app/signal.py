@@ -16,7 +16,7 @@ import apprise
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models import Channel, ChannelKind, Incident, WatchSeverity, iso
+from app.models import Channel, ChannelKind, Incident, Node, WatchSeverity, iso
 from app.secrets_crypto import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger("gridforge.signal")
@@ -273,3 +273,77 @@ async def notify_flow_alert(client: httpx.AsyncClient, db: Session, channel_id: 
         await sender(client, channel, message)
     except httpx.HTTPError as exc:
         logger.warning("channel_id=%s: доставка (порог трафика) не удалась: %s", channel.id, exc)
+
+
+async def notify_flow_anomaly(client: httpx.AsyncClient, db: Session, message: str) -> None:
+    """Оповещение по эвристике аномалии трафика (port-scan/SYN-скан, rogue
+    DHCP, DHCP starvation, DNS-аномалия — см. flow_alerts_engine.py) — та же
+    ситуация, что у notify_new_devices: находка не привязана к конкретному
+    уже заведённому Node/Watch (это как раз сигнал О НЁМ, не результат его
+    Probe), заводить как Incident было бы смысловой натяжкой. В отличие от
+    notify_flow_alert (FlowAlertRule, один явно настроенный канал на
+    правило) — эти эвристики не настраиваются per-канал, поэтому рассылка
+    на все общие каналы, тот же охват, что у notify_new_devices."""
+    channels = (
+        db.query(Channel)
+        .filter(Channel.enabled.is_(True), Channel.node_id.is_(None), Channel.watch_id.is_(None))
+        .all()
+    )
+    if not channels:
+        return
+    for channel in channels:
+        sender = _NEW_DEVICE_REGISTRY.get(channel.kind)
+        if sender is None:
+            continue
+        try:
+            await sender(client, channel, message)
+        except httpx.HTTPError as exc:
+            logger.warning("channel_id=%s: доставка (аномалия трафика) не удалась: %s", channel.id, exc)
+
+
+def format_security_event_message(source_ip: str, node_name: str | None, description: str) -> str:
+    who = node_name or source_ip
+    return f"[БЕЗОПАСНОСТЬ] {who}: {description}"
+
+
+async def notify_security_event(
+    client: httpx.AsyncClient,
+    db: Session,
+    node_id: int | None,
+    source_ip: str,
+    description: str,
+) -> None:
+    """Оповещение о реально сработавшем защитном механизме коммутатора (DAI/
+    DHCP snooping/port-security), распознанном в сыром syslog (см.
+    syslog_server.py._detect_security_event) — тот же принцип обхода
+    Incident, что у notify_new_devices/notify_flow_alert/notify_flow_anomaly:
+    у события нет Watch на Probe (это разовое системное сообщение, не
+    результат периодической выборки), заводить его как Incident было бы
+    натяжкой поверх схемы (Incident.watch_id NOT NULL).
+
+    В отличие от notify_new_devices/notify_flow_anomaly — здесь узел, как
+    правило, ИЗВЕСТЕН (source_ip UDP-датаграммы совпал с уже заведённым
+    Node), поэтому в дополнение к общим каналам (node_id IS NULL) уходит и
+    на каналы, сужённые именно на этот Node — так же, как per-node сужение
+    учитывается в channel_matches_incident() для обычных Incident."""
+    node_name = None
+    if node_id is not None:
+        node = db.get(Node, node_id)
+        node_name = node.name if node else None
+    channels = (
+        db.query(Channel)
+        .filter(Channel.enabled.is_(True), Channel.watch_id.is_(None))
+        .all()
+    )
+    channels = [c for c in channels if c.node_id is None or c.node_id == node_id]
+    if not channels:
+        return
+    message = format_security_event_message(source_ip, node_name, description)
+    for channel in channels:
+        sender = _NEW_DEVICE_REGISTRY.get(channel.kind)
+        if sender is None:
+            continue
+        try:
+            await sender(client, channel, message)
+        except httpx.HTTPError as exc:
+            logger.warning("channel_id=%s: доставка (security-событие) не удалась: %s", channel.id, exc)

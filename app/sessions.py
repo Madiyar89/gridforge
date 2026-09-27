@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 from datetime import timedelta
 
@@ -18,6 +19,17 @@ from app.models import Session, User, _now, as_aware
 
 COOKIE_NAME = "gridforge_session"
 SESSION_TTL = timedelta(days=7)
+
+# По умолчанию False — реальный деплой (deploy/gridforge.service,
+# боевой 192.0.2.244) сегодня обслуживается напрямую по HTTP, без TLS-
+# терминации (нет reverse-proxy перед uvicorn, в отличие от NetOpsHub с
+# его Caddy); Secure=True по умолчанию сделал бы куку нерабочей прямо
+# сейчас — браузер (и httpx/TestClient) молча не отправит Secure-куку
+# обратно по HTTP-соединению. Включать явно (GRIDFORGE_COOKIE_SECURE=1),
+# когда перед GridForge реально появится TLS (свой Caddy/nginx или
+# терминация на балансировщике) — тогда отсутствие Secure станет
+# реальной дырой, а не текущим фактом транспорта.
+COOKIE_SECURE = os.environ.get("GRIDFORGE_COOKIE_SECURE", "") == "1"
 
 
 def _hash_token(raw_token: str) -> str:

@@ -111,7 +111,21 @@ def make_pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+def safe_redirect_path(candidate: str | None, default: str = "/index.html") -> str:
+    """`next`/`redirect_after` приходит от пользователя (query-параметр на
+    /auth/oidc/login) и в конце потока используется как есть в
+    RedirectResponse — без этой проверки это open redirect: ссылку вида
+    /auth/oidc/login?next=https://evil.example можно разослать жертве,
+    она честно пройдёт SSO на настоящем домене GridForge и в конце уйдёт
+    на сторонний сайт. Разрешён только локальный путь с одним ведущим
+    "/" — не "//host/..." (protocol-relative тоже уводит на другой хост)."""
+    if candidate and candidate.startswith("/") and not candidate.startswith("//"):
+        return candidate
+    return default
+
+
 def pack_state_cookie(state: str, code_verifier: str, redirect_after: str) -> str:
+    redirect_after = safe_redirect_path(redirect_after)
     payload = json.dumps({"state": state, "code_verifier": code_verifier, "redirect_after": redirect_after, "created_at": time.time()})
     return encrypt_secret(payload)
 

@@ -41,12 +41,14 @@ from app.ad_audit_engine import run_ad_audit, run_ad_audit_fleet_report
 from app.credential_check_engine import run_credential_check
 from app.network_audit_engine import build_network_audit_fleet_report
 from app.ad_auth import ad_enabled, check_ad_credentials, sync_ad_user
+from app import login_throttle
 from app.oidc_auth import (
     OidcError,
     STATE_COOKIE_NAME,
     build_authorize_url,
     exchange_code_for_userinfo,
     oidc_enabled,
+    safe_redirect_path,
     sync_oidc_user,
     unpack_state_cookie,
 )
@@ -77,6 +79,7 @@ from app.passwords import (
 from app.secrets_crypto import encrypt_secret
 from app.sessions import (
     COOKIE_NAME,
+    COOKIE_SECURE,
     SESSION_TTL,
     bootstrap_first_user,
     create_session,
@@ -353,6 +356,21 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="GridForge", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """Заголовки без риска что-то сломать (в отличие от CSP — на
+    static/*.html есть инлайн-стили/обработчики, ужесточать без полного
+    прогона по всем страницам небезопасно, оставлено отдельной задачей).
+    X-Frame-Options — от clickjacking (встраивание в чужой <iframe>),
+    X-Content-Type-Options — браузер не должен угадывать тип контента по
+    содержимому мимо заявленного Content-Type."""
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
 
 # Три уровня доступа (см. app/auth.py, ROLE_RANK):
 #   api_read    — любой действующий ключ: смотреть Node/Probe/Sample/
@@ -2289,9 +2307,23 @@ def trigger_retention(db: Session = Depends(_db)):
 
 
 @app.post("/api/login")
-def login(payload: LoginIn, response: Response, db: Session = Depends(_db)):
+def login(payload: LoginIn, request: Request, response: Response, db: Session = Depends(_db)):
     """Вход по логину и паролю. Намеренно НЕ на api_read: чтобы войти,
     ещё нечем авторизоваться."""
+    username_key = payload.username.strip().lower()
+    ip_key = f"ip:{request.client.host if request.client else '?'}:{username_key}"
+    # Троттлинг ДО обращения к AD — иначе этот эндпоинт можно использовать
+    # как усилитель перебора против самого контроллера домена (каждая
+    # попытка бьёт LDAP-bind, см. ad_auth.py), не только против локальных
+    # паролей. Два ключа: (ip,логин) и просто логин — распределённый
+    # перебор одного аккаунта с разных IP тоже должен упереться в лимит.
+    remaining = login_throttle.check_locked(ip_key, username_key)
+    if remaining is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Слишком много неудачных попыток входа, повтори через {int(remaining) + 1} сек.",
+        )
+
     user = db.query(User).filter(User.username == payload.username).first()
     # Проверяем пароль даже для несуществующего пользователя — иначе по
     # времени ответа можно было бы перебором выяснить, какие логины
@@ -2308,16 +2340,20 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(_db)):
         # роль и область по группе — в AD их взять неоткуда.
         user = sync_ad_user(db, payload.username)
         if not user.active:
+            login_throttle.record_failure(ip_key, username_key)
             raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     else:
+        login_throttle.record_failure(ip_key, username_key)
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
+    login_throttle.record_success(ip_key, username_key)
     raw_token = create_session(db, user)
     response.set_cookie(
         COOKIE_NAME,
         raw_token,
         httponly=True,   # недоступна JavaScript: XSS не сможет украсть сессию
         samesite="lax",  # не уходит на сторонние сайты — защита от CSRF
+        secure=COOKIE_SECURE,  # не уходит по голому HTTP (см. sessions.py)
         max_age=int(SESSION_TTL.total_seconds()),
         path="/",
     )
@@ -2358,7 +2394,8 @@ async def oidc_login(request: Request, next: str = "/index.html"):
         raise HTTPException(status_code=502, detail=str(exc))
     response = RedirectResponse(authorize_url, status_code=302)
     response.set_cookie(
-        STATE_COOKIE_NAME, state_cookie, httponly=True, samesite="lax", max_age=300, path="/auth/oidc"
+        STATE_COOKIE_NAME, state_cookie, httponly=True, samesite="lax", secure=COOKIE_SECURE,
+        max_age=300, path="/auth/oidc"
     )
     return response
 
@@ -2391,9 +2428,13 @@ async def oidc_callback(
         raise HTTPException(status_code=401, detail="учётка отключена администратором GridForge")
 
     raw_token = create_session(db, user)
-    redirect = RedirectResponse(saved.get("redirect_after") or "/index.html", status_code=302)
+    # safe_redirect_path тут же (не только при паковке куки в oidc_login) —
+    # вторая линия защиты от open redirect на случай куки, зашифрованной до
+    # этого исправления или подделанной обходным путём.
+    redirect = RedirectResponse(safe_redirect_path(saved.get("redirect_after")), status_code=302)
     redirect.set_cookie(
-        COOKIE_NAME, raw_token, httponly=True, samesite="lax", max_age=int(SESSION_TTL.total_seconds()), path="/"
+        COOKIE_NAME, raw_token, httponly=True, samesite="lax", secure=COOKIE_SECURE,
+        max_age=int(SESSION_TTL.total_seconds()), path="/"
     )
     redirect.delete_cookie(STATE_COOKIE_NAME, path="/auth/oidc")
     return redirect

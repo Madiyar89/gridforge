@@ -1032,6 +1032,11 @@ class FlowRecord(Base):
     protocol: Mapped[int | None] = mapped_column(Integer, nullable=True)  # номер протокола IANA (6=TCP, 17=UDP...)
     byte_count: Mapped[int] = mapped_column(Integer, default=0)
     packet_count: Mapped[int] = mapped_column(Integer, default=0)
+    # RFC 3954 §8 битовая маска (FIN=0x01, SYN=0x02, RST=0x04, PSH=0x08,
+    # ACK=0x10, URG=0x20) — nullable: не все экспортёры шлют это поле в
+    # шаблоне, и старые записи в БД, принятые до появления декодера,
+    # этого значения не имеют. См. app/netflow_server.py TCP_FLAGS.
+    tcp_flags: Mapped[int | None] = mapped_column(Integer, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
 
