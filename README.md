@@ -740,10 +740,24 @@ curl -X POST localhost:8100/api/sync/sites -H 'X-API-Key: <admin-ключ>' -H '
 
 ## Что дальше (не сделано)
 
-- SNMPv3 (USM) — вместо/вместе с v1/v2c.
-- Привязка Channel к конкретным Node/Watch, не только глобально.
-- Более тонкий RBAC (сейчас три роли — viewer/operator/admin — но на весь
-  GridForge целиком, без привязки к отдельным Node/группам, как в NetOpsHub).
-- Многошаговая эскалация уведомлений (сейчас один шаг: алерт + отправка).
-- Полноценная Graylog-интеграция, ESXi-инвентарь, Firepower/PAN-OS API —
-  осознанно не перенесены, нужна недоступная здесь внешняя инфраструктура.
+- Более тонкий RBAC — сейчас две независимые оси: роль (viewer/operator/admin,
+  `app/auth.py`: `ROLE_RANK`) и опциональная привязка ключа/пользователя к
+  ОДНОЙ группе узлов (`ApiKey.group_id`/`User.group_id`, проверка в
+  `key_sees_group`/`require_node_access`/`scope_nodes`). Это уже привязка к
+  группе, но не к отдельным Node и не к нескольким группам с разной ролью в
+  каждой (как в NetOpsHub) — один ключ не может быть admin в группе A и
+  viewer в группе B.
+- Полноценная Graylog-интеграция (сейчас только хранение токена и проверка
+  связи, `app/integrations_engine.py: _test_graylog`; поиск по логам —
+  отдельная, не-Graylog реализация поверх своего SyslogMessage,
+  `app/ip_lookup.py`), ESXi-инвентарь, Firepower/PAN-OS API — осознанно не
+  перенесены, нужна недоступная здесь внешняя инфраструктура.
+- Подтверждение (acknowledge) инцидентов — см. `app/models.py: EscalationStep`
+  и `docs/archive/HANDOFF.md`.
+
+SNMPv3/USM (`app/probes.py: _build_snmp_v3_auth`, `_snmp_get`), привязка
+Channel к конкретным Node/Watch (`app/models.py: Channel.node_id`/`watch_id`,
+`app/signal.py: channel_matches_incident`) и многошаговая эскалация
+уведомлений (`app/escalation_engine.py: run_escalations`,
+`EscalationStep`) — уже реализованы, несмотря на то, что раньше здесь
+значились как «не сделано».
