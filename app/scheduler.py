@@ -50,6 +50,21 @@ class Scheduler:
         # отслеживаем, чтобы на остановке планировщика не бросить их
         # молча оборванными: ждём завершения (с таймаутом) в run_forever.
         self._action_tasks: set[asyncio.Task] = set()
+        # Те же соображения — для плановых фоновых задач run_forever()
+        # (vuln/cable/discovery-schedule, geoip-refresh, sync-push,
+        # flow-alerts): раньше asyncio.create_task() для них вызывался
+        # "выстрелил и забыл", без ссылки на задачу после создания — на
+        # остановке планировщика (run_forever() возвращается) эти задачи
+        # никак не отслеживались и не ожидались, то есть могли быть молча
+        # оборваны вместе с event loop (см. задачу аудита — тот же класс
+        # проблемы, что был у _action_tasks выше, до отдельного фикса).
+        # Тот же паттерн: множество + add_done_callback для очистки +
+        # asyncio.wait(...) с таймаутом на остановке в run_forever.
+        self._periodic_tasks: set[asyncio.Task] = set()
+
+    def _track_periodic(self, task: asyncio.Task) -> None:
+        self._periodic_tasks.add(task)
+        task.add_done_callback(self._periodic_tasks.discard)
 
     def _reload_probes(self, db: Session) -> None:
         now = time.monotonic()
@@ -233,37 +248,37 @@ class Scheduler:
                     # профилей, full_ports/vuln по 900с каждый) — если ждать
                     # его прямо в этом цикле, всё это время встанет опрос
                     # Probe (куча/heap ждать не умеет, пока цикл занят).
-                    asyncio.create_task(self._run_due_vuln_schedules_safe())
+                    self._track_periodic(asyncio.create_task(self._run_due_vuln_schedules_safe()))
                     last_vuln_schedule_check = now
                 if now - last_cable_schedule_check >= cable_schedule_interval_seconds:
                     # Тоже в фоне отдельной задачей — CDP-опрос группы узлов
                     # по SSH не мгновенный, тот же довод, что у vuln-schedule.
-                    asyncio.create_task(self._run_due_cable_discovery_schedules_safe())
+                    self._track_periodic(asyncio.create_task(self._run_due_cable_discovery_schedules_safe()))
                     last_cable_schedule_check = now
                 if now - last_discovery_schedule_check >= discovery_schedule_interval_seconds:
                     # Тоже фоновой задачей — скан диапазона может занять до
                     # SCAN_TIMEOUT_SECONDS (120с), тот же довод, что у
                     # vuln/cable-schedule.
-                    asyncio.create_task(self._run_due_discovery_schedules_safe())
+                    self._track_periodic(asyncio.create_task(self._run_due_discovery_schedules_safe()))
                     last_discovery_schedule_check = now
                 if now - last_geoip_check >= geoip_refresh_interval_seconds:
                     # Час — дёшево проверить (needs_refresh() почти всегда
                     # просто stat() двух файлов), реальное скачивание раз в
                     # ~7 дней, см. _run_geoip_refresh_safe.
-                    asyncio.create_task(self._run_geoip_refresh_safe())
+                    self._track_periodic(asyncio.create_task(self._run_geoip_refresh_safe()))
                     last_geoip_check = now
                 if now - last_sync_push_check >= sync_push_interval_seconds:
                     # Фоновой задачей — сетевой вызов на чужой хаб не должен
                     # задерживать опрос Probe, тот же довод, что у остальных
                     # плановых проверок выше.
-                    asyncio.create_task(self._run_sync_push_safe())
+                    self._track_periodic(asyncio.create_task(self._run_sync_push_safe()))
                     last_sync_push_check = now
                 if now - last_flow_alerts_check >= flow_alerts_interval_seconds:
                     # Раз в минуту — дешёвый агрегатный запрос по FlowRecord
                     # на каждое включённое правило, реальная отправка только
                     # если порог превышен и не разослан в пределах своего
                     # окна (см. FlowAlertRule.last_triggered_at).
-                    asyncio.create_task(self._run_flow_alerts_safe())
+                    self._track_periodic(asyncio.create_task(self._run_flow_alerts_safe()))
                     last_flow_alerts_check = now
                 if now - last_retention >= retention_interval_seconds:
                     db = get_session()
@@ -285,14 +300,37 @@ class Scheduler:
         finally:
             if self._action_tasks:
                 # Даём фоновым Action-задачам шанс дописать ActionRun перед
-                # остановкой процесса — то же ограничение, что и у
-                # остальных фоновых задач (vuln/cable/discovery/sync/geoip)
-                # ниже по коду, но именно для Action решили не оставлять
-                # его нерешённым (см. задачу): ждём с таймаутом, зависшие
-                # SSH-сессии не должны бесконечно держать shutdown.
+                # остановкой процесса: ждём с таймаутом, зависшие SSH-сессии
+                # не должны бесконечно держать shutdown.
                 await asyncio.wait(self._action_tasks, timeout=actions_engine.DEFAULT_ACTION_TIMEOUT_SECONDS + 5)
+            await self._shutdown_periodic_tasks()
             await self._http_client.aclose()
             self._http_client = None
+
+    async def _shutdown_periodic_tasks(self, grace_seconds: float = 5.0) -> None:
+        """Останавливает плановые фоновые задачи (vuln/cable/discovery-
+        schedule, geoip-refresh, sync-push, flow-alerts) — раньше они
+        вообще нигде не отслеживались после asyncio.create_task() в
+        run_forever() (см. _track_periodic в __init__). В отличие от
+        Action (SSH-команда с известным ограниченным таймаутом,
+        actions_engine.DEFAULT_ACTION_TIMEOUT_SECONDS), у этих задач нет
+        общего верхнего предела — прогон всех профилей vuln-schedule
+        может занять до ~40 минут (см. комментарий у
+        vuln_schedule_interval_seconds в run_forever), а Docker всё равно
+        не даёт больше ~10с грейс-периода на SIGTERM по умолчанию.
+        Поэтому вместо долгого ожидания: короткое "дай доработать" окно,
+        а всё, что не успело — явно cancel() + дожидаемся отмены, чтобы
+        задачи не остались бесконтрольно висеть на закрывающемся event
+        loop. _run_due_*_safe() ловят только `except Exception`, не
+        `BaseException` — asyncio.CancelledError свободно долетает и
+        останавливает задачу по cancel()."""
+        if not self._periodic_tasks:
+            return
+        _, still_pending = await asyncio.wait(self._periodic_tasks, timeout=grace_seconds)
+        for pending_task in still_pending:
+            pending_task.cancel()
+        if still_pending:
+            await asyncio.gather(*still_pending, return_exceptions=True)
 
     def stop(self) -> None:
         self._stop.set()

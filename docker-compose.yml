@@ -3,6 +3,12 @@ services:
     build: .
     container_name: gridforge
     restart: unless-stopped
+    # Дефолтный grace period Docker (10с) короче, чем может занять
+    # штатное завершение: drain Action-задач (до 20с, см. actions_engine.py
+    # DEFAULT_ACTION_TIMEOUT_SECONDS) + periodic-задач планировщика (до 5с)
+    # в scheduler.py. Без этого Docker просто убьёт процесс SIGKILL раньше,
+    # чем успеет сработать код graceful shutdown.
+    stop_grace_period: 30s
     # nmap (scan_engine.py) и dumpcap/tshark (capture_engine.py) нужны сырые
     # сокеты — без этих capability оба работали бы только как root целиком,
     # так безопаснее (точечные права, не полный root).
