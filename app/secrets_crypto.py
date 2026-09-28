@@ -12,14 +12,49 @@ NetOpsHub).
 
 from __future__ import annotations
 
+import logging
+import stat
+import sys
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
+
+logger = logging.getLogger("gridforge.secrets_crypto")
 
 _KEY_PATH = Path(__file__).resolve().parent.parent / "data" / "secret.key"
 _fernet: Fernet | None = None
 
 SECRET_MARKER = "enc:"  # префикс, отличающий уже зашифрованное значение от старого plaintext
+
+_EXPECTED_MODE = 0o600
+
+
+def _enforce_key_permissions(path: Path) -> None:
+    """Проверяет права на файл ключа и принудительно возвращает их к 0600.
+
+    Ключ шифрует все секреты приложения (SSH-пароли, API-токены, bind-пароль
+    LDAP и т.д.), поэтому если права расширились — например файл
+    восстановлен из бэкапа с другим umask или скопирован вручную без
+    сохранения прав, — тихо продолжать работу с ним небезопасно. Правим
+    автоматически (не просто предупреждаем): это собственный служебный
+    файл приложения, которым кроме нас никто не управляет, так что молчаливое
+    "подождать, пока админ заметит warning в логах" оставляло бы ключ
+    доступным на чтение дольше, чем нужно. На Windows (вне Docker,
+    локальная разработка) os.chmod не имеет смысла — POSIX-биты прав там
+    не поддерживаются, поэтому проверку пропускаем."""
+    if sys.platform == "win32":
+        return
+    current_mode = stat.S_IMODE(path.stat().st_mode)
+    if current_mode != _EXPECTED_MODE:
+        logger.warning(
+            "%s had permissions %o, expected %o — corrected automatically. "
+            "If this file was restored from a backup or copied manually, "
+            "verify no other process/user can read it.",
+            path,
+            current_mode,
+            _EXPECTED_MODE,
+        )
+        path.chmod(_EXPECTED_MODE)
 
 
 def _get_fernet() -> Fernet:
@@ -28,6 +63,7 @@ def _get_fernet() -> Fernet:
         return _fernet
     _KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
     if _KEY_PATH.exists():
+        _enforce_key_permissions(_KEY_PATH)
         key = _KEY_PATH.read_bytes()
     else:
         key = Fernet.generate_key()
