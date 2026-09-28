@@ -76,7 +76,11 @@ PROFILE_ARGS: dict[str, list[str]] = {
     "quick": ["-F", "-sV"],
     "full_ports": ["-p-", "-sV"],
     "vuln": ["-sV", "--script", "vuln"],
-    "os": ["-O", "-sV"],
+    # "os" (nmap -O/-sV) отключён при переходе контейнера на non-root
+    # пользователя (Docker security-фикс) — nmap делает жёсткую проверку
+    # geteuid()==0 для -O/-sS в своём коде, а не capability-aware
+    # проверку, так что setcap(cap_net_raw,cap_net_admin) её не обходит.
+    # Профиль отключён целиком, а не оставлен молча падать.
 }
 
 # Все допустимые профили — используется валидацией в main.py вместо
@@ -101,7 +105,6 @@ PROFILE_TIMEOUT_SECONDS: dict[str, int] = {
     "quick": 180,
     "full_ports": 900,
     "vuln": 900,
-    "os": 180,
 }
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d+")

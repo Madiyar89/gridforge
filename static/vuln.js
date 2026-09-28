@@ -44,13 +44,12 @@ responsibleInput.addEventListener("change", () => {
   localStorage.setItem(VULN_RESPONSIBLE_KEY, responsibleInput.value.trim());
 });
 
-const PROFILE_ORDER = ["ping", "quick", "full_ports", "vuln", "os", "nuclei", "web_discovery"];
+const PROFILE_ORDER = ["ping", "quick", "full_ports", "vuln", "nuclei", "web_discovery"];
 const PROFILE_LABELS = {
   ping: "Обнаружение узлов",
   quick: "Быстрое сканирование портов",
   full_ports: "Полное сканирование портов",
   vuln: "Проверка на известные уязвимости",
-  os: "Определение ОС",
   nuclei: "Nuclei — шаблонная проверка CVE/misconfig",
   web_discovery: "Feroxbuster — поиск скрытых путей/файлов",
 };
