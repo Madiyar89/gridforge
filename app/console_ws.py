@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import asyncssh
 from fastapi import WebSocket, WebSocketDisconnect
@@ -33,6 +34,8 @@ from app.credentials_engine import resolve_credential
 from app.db import get_session
 from app.models import ApiKey, ApiKeyRole, Node
 from app.ssh_client import HostKeyRejected, open_ssh_connection
+
+logger = logging.getLogger("gridforge.console_ws")
 
 # Минимальная роль для SSH-консоли — та же граница, что и у /api/actions
 # (api_write в main.py, только admin): запуск Action и интерактивная
@@ -147,8 +150,34 @@ async def handle_console(ws: WebSocket) -> None:
             host_key_fingerprint_getter=_get_fingerprint,
             host_key_fingerprint_setter=_store_fingerprint,
         )
-    except (asyncssh.Error, OSError, HostKeyRejected) as exc:
-        await ws.send_json({"type": "error", "message": str(exc) or exc.__class__.__name__})
+    except HostKeyRejected as exc:
+        # Не путать с веткой ниже: это осознанное предупреждение
+        # безопасности (host key узла не совпал с сохранённым TOFU-
+        # fingerprint), а не сведения о файловой системе сервера —
+        # безопасно показать клиенту как есть.
+        await ws.send_json({"type": "error", "message": str(exc)})
+        await ws.close(code=1011)
+        return
+    except (asyncssh.Error, OSError) as exc:
+        # key_path приходит от клиента напрямую (см. docstring модуля),
+        # а не всегда через Credential — при явном username ниже
+        # resolve_credential не участвует. asyncssh/OSError различают
+        # "файла нет" (FileNotFoundError и т.п.) от "файл есть, но не
+        # ключ" от "хендшейк не удался" — если отдать exc текстом как
+        # есть, админ (уже прошедший auth-проверку выше) получает
+        # оракул существования/читаемости произвольных файлов на
+        # сервере через key_path. Раз доступ и так уже admin-only и
+        # низкой критичности (аудит 2026-09-28), не городим отдельный
+        # allowlist путей — просто не отдаём причину на клиент,
+        # только в лог сервера, который админу и так доступен по SSH.
+        logger.warning(
+            "SSH-консоль: подключение к node_id=%s (%s@%s:%s) не удалось: %s",
+            node.id, username, node.address, payload.get("port", 22), exc,
+        )
+        await ws.send_json({
+            "type": "error",
+            "message": "не удалось подключиться по SSH — подробности в логах сервера",
+        })
         await ws.close(code=1011)
         return
 
