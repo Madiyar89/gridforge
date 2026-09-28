@@ -28,24 +28,37 @@ import json
 import asyncssh
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.auth import _hash_key  # переиспользуем ровно ту же проверку ключа, что и HTTP API
+from app.auth import ROLE_RANK, _hash_key  # переиспользуем ровно ту же проверку ключа, что и HTTP API
 from app.credentials_engine import resolve_credential
 from app.db import get_session
-from app.models import ApiKey, Node
+from app.models import ApiKey, ApiKeyRole, Node
 from app.ssh_client import ENCRYPTION_ALGS, KEX_ALGS
+
+# Минимальная роль для SSH-консоли — та же граница, что и у /api/actions
+# (api_write в main.py, только admin): запуск Action и интерактивная
+# SSH-консоль обе дают произвольные команды на живом оборудовании, а
+# консоль — даже более прямой путь к этому, чем Action, поэтому ей не
+# место ниже той же планки.
+MIN_CONSOLE_ROLE = ApiKeyRole.admin
 
 
 async def _authenticate(payload: dict) -> str | None:
-    """Возвращает None, если ключ валиден, иначе текст ошибки. Та же
-    проверка, что require_api_key в auth.py, но без HTTP-зависимостей
-    FastAPI (WebSocket — не обычный запрос)."""
+    """Возвращает None, если ключ валиден И его роли достаточно для
+    SSH-консоли, иначе текст ошибки. Проверка ключа — та же, что
+    require_api_key в auth.py, но без HTTP-зависимостей FastAPI
+    (WebSocket — не обычный запрос); проверка роли — тот же ROLE_RANK,
+    что require_admin_key использует на HTTP-стороне (см. auth.py)."""
     api_key = payload.get("api_key")
     if not api_key:
         return "api_key обязателен"
     db = get_session()
     try:
         key = db.query(ApiKey).filter(ApiKey.key_hash == _hash_key(api_key), ApiKey.revoked.is_(False)).first()
-        return None if key else "неверный или отозванный API-ключ"
+        if key is None:
+            return "неверный или отозванный API-ключ"
+        if ROLE_RANK[key.role] < ROLE_RANK[MIN_CONSOLE_ROLE]:
+            return "недостаточно прав — SSH-консоль требует роль admin"
+        return None
     finally:
         db.close()
 
