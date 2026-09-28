@@ -1,19 +1,19 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-sqlalchemy>=2.0
-pydantic>=2.9
-asyncssh>=2.14
-pysnmp>=7.1
-httpx>=0.28
-ldap3>=2.9
-cryptography>=42
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+sqlalchemy==2.1.0
+pydantic==2.13.5
+asyncssh==2.24.0
+pysnmp==7.1.29
+httpx==0.28.1
+ldap3==2.9.1
+cryptography==50.0.1
 # нужен FastAPI для разбора multipart/form-data (загрузка файлов образов
 # ПО, см. app/firmware_store.py) — FastAPI сам этого не тащит транзитивно.
-python-multipart>=0.0.9
+python-multipart==0.0.32
 # WinRM/SMB-опрос рабочих станций (Доменная инвентаризация, см.
 # app/domain_scan_engine.py) — перенос из NetOpsHub (там то же самое,
 # только через Ansible-плейбук + отдельный скрипт).
-pywinrm>=0.4
+pywinrm==0.5.0
 # impacket сам НЕ ставится через pip здесь — его .whl стабильно рвёт
 # соединение через прокси этой инфраструктуры (реальная находка, тот же
 # BrokenPipeError и на локальной сборке, и на проде, и даже при повторном
@@ -26,28 +26,28 @@ pywinrm>=0.4
 # NTLM/SMB2), не полный список impacket (pyOpenSSL/flask/ldapdomaindump
 # нужны только для инструментов атаки в impacket/examples/, которые
 # GridForge не импортирует).
-pyasn1>=0.2.3
-pyasn1-modules
-pycryptodomex
-six
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+pycryptodomex==3.23.0
+six==1.17.0
 # MySQL/MariaDB драйвер (2026-09-20) — чистый Python, без компилируемых
 # зависимостей (в отличие от mysqlclient) — проще ставить на разные ОС.
 # Нужен только если GRIDFORGE_DATABASE_URL указывает на mysql+pymysql://.
-pymysql>=1.1
+pymysql==1.2.3
 # накопительный .xlsx-реестр оценки уязвимости (Проверка на уязвимости,
 # см. app/vuln_register.py) — перенос из NetOpsHub, тот же формат бланка
-openpyxl>=3.1
+openpyxl==3.1.5
 # тестовый набор (2026-09-20)
-pytest>=8.3
+pytest==9.1.1
 # каналы уведомлений через один общий URL-формат (docs/landscape-report.md,
 # п.4.2) — 80+ сервисов (Slack/Discord/Matrix/ntfy/email/...) без
 # написания клиента под каждый; webhook/telegram остаются отдельными
 # ChannelKind (уже есть, работают, не ломать), apprise — third вариант
 # для всего остального.
-apprise>=1.13
+apprise==1.13.1
 # GeoIP/ASN офлайн-справочник по внешним адресам (docs/landscape-report.md,
 # п.4.4) — офлайн-чтение .mmdb-баз MaxMind GeoLite2, без запроса в
 # интернет на каждый IP. Сами .mmdb-файлы лежат в data/geoip/ (в
 # .gitignore вместе с остальным data/, лицензия MaxMind запрещает
 # коммитить их в репозиторий).
-geoip2>=5.0
+geoip2==5.3.0
