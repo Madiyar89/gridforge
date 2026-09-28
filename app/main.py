@@ -784,7 +784,7 @@ def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: Princi
 def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_node_access(db, key, payload.node_id)
     params = dict(payload.params)
-    for secret_field in ("password", "auth_password", "priv_password"):
+    for secret_field in ("password", "auth_password", "priv_password", "community"):
         if params.get(secret_field):
             params[secret_field] = encrypt_secret(params[secret_field])
     probe = Probe(

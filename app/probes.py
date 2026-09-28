@@ -252,7 +252,7 @@ def _build_snmp_auth(params: dict) -> tuple[CommunityData | UsmUserData | None, 
         if isinstance(auth, str):
             return None, auth
         return auth, None
-    community = params.get("community", "public")
+    community = decrypt_secret(params.get("community", "public"))
     mp_model = 0 if version == "1" else 1  # 0=SNMPv1, 1=SNMPv2c
     return CommunityData(community, mpModel=mp_model), None
 
@@ -269,7 +269,10 @@ async def _snmp_get(address: str, params: dict, timeout_seconds: float, node_id:
     GridForge Rewrite Ledger, раздел «Шаблоны мониторинга».
 
     params (v1/v2c):
-      oid, community (default "public"), version ("1"|"2c", default "2c"), port
+      oid, community (default "public") — шифруется при сохранении
+        (secrets_crypto, тот же ключ data/secret.key, что у password
+        ssh_command) и расшифровывается здесь перед запросом,
+      version ("1"|"2c", default "2c"), port
     params (v3, version="3") — USM, авторизация + опционально шифрование:
       oid, username (обязателен), auth_password (опц. — noAuthNoPriv, если
       не задан), auth_protocol ("sha"|"sha224"|"sha256"|"md5", default sha),
