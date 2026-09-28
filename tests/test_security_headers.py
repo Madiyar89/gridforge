@@ -10,7 +10,7 @@ from app.main import app
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
 
 

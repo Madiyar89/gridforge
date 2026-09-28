@@ -16,7 +16,7 @@ from app.models import Action, ApiKeyRole, Node, Probe, ProbeKind, Watch, WatchO
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
 
 

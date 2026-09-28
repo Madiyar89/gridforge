@@ -18,7 +18,7 @@ from app.sessions import COOKIE_NAME, bootstrap_first_user, resolve_session, rev
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
 
 
@@ -107,6 +107,11 @@ def test_login_sets_httponly_cookie(client, user):
     cookie_header = resp.headers["set-cookie"]
     assert "httponly" in cookie_header.lower()  # JavaScript не достанет — XSS не украдёт сессию
     assert "samesite=lax" in cookie_header.lower()
+    # secure: кука уходит только по https (Caddy на :8443). Проверяем сырой
+    # заголовок Set-Cookie, а не TestClient/httpx cookie jar — httpx гоняет
+    # запросы через тестовый ASGI-транспорт без настоящего TLS и может не
+    # прокинуть secure-куку обратно в свой jar так же, как настоящий браузер.
+    assert "secure" in cookie_header.lower()
 
 
 def test_session_grants_access_without_api_key(client, user):

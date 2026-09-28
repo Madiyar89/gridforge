@@ -2436,6 +2436,10 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(_db)):
         raw_token,
         httponly=True,   # недоступна JavaScript: XSS не сможет украсть сессию
         samesite="lax",  # не уходит на сторонние сайты — защита от CSRF
+        secure=True,      # уходит только по https — через Caddy на :8443. На
+                           # http://127.0.0.1:8100 (локальный health-check
+                           # доступ) кука не будет отправляться браузером,
+                           # это ожидаемо: тот порт не для интерактивного логина
         max_age=int(SESSION_TTL.total_seconds()),
         path="/",
     )
@@ -2476,7 +2480,13 @@ async def oidc_login(request: Request, next: str = "/index.html"):
         raise HTTPException(status_code=502, detail=str(exc))
     response = RedirectResponse(authorize_url, status_code=302)
     response.set_cookie(
-        STATE_COOKIE_NAME, state_cookie, httponly=True, samesite="lax", max_age=300, path="/auth/oidc"
+        STATE_COOKIE_NAME,
+        state_cookie,
+        httponly=True,
+        samesite="lax",
+        secure=True,  # только https (Caddy :8443) — см. комментарий у COOKIE_NAME выше
+        max_age=300,
+        path="/auth/oidc",
     )
     return response
 
@@ -2511,7 +2521,13 @@ async def oidc_callback(
     raw_token = create_session(db, user)
     redirect = RedirectResponse(saved.get("redirect_after") or "/index.html", status_code=302)
     redirect.set_cookie(
-        COOKIE_NAME, raw_token, httponly=True, samesite="lax", max_age=int(SESSION_TTL.total_seconds()), path="/"
+        COOKIE_NAME,
+        raw_token,
+        httponly=True,
+        samesite="lax",
+        secure=True,  # только https (Caddy :8443) — см. комментарий у COOKIE_NAME выше
+        max_age=int(SESSION_TTL.total_seconds()),
+        path="/",
     )
     redirect.delete_cookie(STATE_COOKIE_NAME, path="/auth/oidc")
     return redirect
