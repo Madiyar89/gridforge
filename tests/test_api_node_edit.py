@@ -141,20 +141,20 @@ def test_admin_can_reset_ssh_host_key(client, admin_key, node, db):
     """Легитимная замена устройства: сбросить сохранённый TOFU-fingerprint
     (см. app/ssh_client.py), чтобы новый host key был принят и снова
     запомнен при следующем подключении."""
-    node.ssh_host_key_fingerprint = "SHA256:aaaa"
+    node.ssh_key_fingerprint = "SHA256:aaaa"
     db.commit()
 
-    resp = client.delete(f"/api/nodes/{node.id}/ssh-host-key", headers=_h(admin_key))
+    resp = client.delete(f"/api/nodes/{node.id}/ssh-key", headers=_h(admin_key))
     assert resp.status_code == 204
     db.refresh(node)
-    assert node.ssh_host_key_fingerprint is None
+    assert node.ssh_key_fingerprint is None
 
 
 def test_operator_cannot_reset_ssh_host_key(client, operator_key, node, db):
-    node.ssh_host_key_fingerprint = "SHA256:aaaa"
+    node.ssh_key_fingerprint = "SHA256:aaaa"
     db.commit()
 
-    resp = client.delete(f"/api/nodes/{node.id}/ssh-host-key", headers=_h(operator_key))
+    resp = client.delete(f"/api/nodes/{node.id}/ssh-key", headers=_h(operator_key))
     assert resp.status_code == 403
     db.refresh(node)
-    assert node.ssh_host_key_fingerprint == "SHA256:aaaa"
+    assert node.ssh_key_fingerprint == "SHA256:aaaa"

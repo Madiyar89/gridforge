@@ -118,20 +118,20 @@ async def handle_console(ws: WebSocket) -> None:
 
     cols, rows = int(payload.get("cols", 80)), int(payload.get("rows", 24))
 
-    # TOFU по Node.ssh_host_key_fingerprint — та же единая точка
+    # TOFU по Node.ssh_key_fingerprint — та же единая точка
     # проверки host key, что и у Probe/Action (см. ssh_client.py). node
     # уже загружен выше (сессия, которой он был загружен, уже закрыта,
     # но плоские колонки, включая fingerprint, доступны и после этого);
     # сохранение нового fingerprint открывает свою короткую сессию по id.
     def _get_fingerprint() -> str | None:
-        return node.ssh_host_key_fingerprint
+        return node.ssh_key_fingerprint
 
     def _store_fingerprint(fingerprint: str) -> None:
         write_db = get_session()
         try:
             fresh = write_db.get(Node, node.id)
             if fresh is not None:
-                fresh.ssh_host_key_fingerprint = fingerprint
+                fresh.ssh_key_fingerprint = fingerprint
                 write_db.commit()
         finally:
             write_db.close()

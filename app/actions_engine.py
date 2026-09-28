@@ -5,7 +5,9 @@ evaluate_probe(), на том же списке newly_opened, без отдел�
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,16 @@ from app.ssh_client import run_ssh_command
 logger = logging.getLogger("gridforge.actions")
 
 DEFAULT_ACTION_TIMEOUT_SECONDS = 15.0
+
+# С переходом scheduler.py на asyncio.create_task() для dispatch() (Action
+# больше не сериализуется через единственный цикл опроса) несколько
+# Incident могут открыться в одном тике и запустить SSH-команды
+# параллельно. Ограничиваем число одновременных SSH-подключений по
+# Action — лимит вводим сразу вместе с переходом на конкурентную модель,
+# а не оставляем неограниченным. Переопределяется переменной окружения по
+# тому же принципу, что и GRIDFORGE_SYNC_INTERVAL_MIN в scheduler.py.
+MAX_CONCURRENT_ACTIONS = int(os.environ.get("GRIDFORGE_ACTION_MAX_CONCURRENCY", "8"))
+_action_semaphore = asyncio.Semaphore(MAX_CONCURRENT_ACTIONS)
 
 
 async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool, str]:
@@ -57,31 +69,35 @@ async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool
     # known_hosts, явно заданный в config — обычная проверка asyncssh по
     # этому файлу, TOFU ниже не участвует (см. ssh_client.open_ssh_
     # connection: явный known_hosts всегда в приоритете). Иначе — TOFU по
-    # Node.ssh_host_key_fingerprint: node уже загружен из этой же db-
+    # Node.ssh_key_fingerprint: node уже загружен из этой же db-
     # сессии, поэтому колбэки замыкаются прямо на него, отдельная сессия
     # (как в probes.py/node_fingerprint_callbacks) не нужна.
     known_hosts = cfg.get("known_hosts")
 
     def _get_fingerprint() -> str | None:
-        return node.ssh_host_key_fingerprint
+        return node.ssh_key_fingerprint
 
     def _store_fingerprint(fingerprint: str) -> None:
-        node.ssh_host_key_fingerprint = fingerprint
+        node.ssh_key_fingerprint = fingerprint
         db.add(node)
         db.commit()
 
-    result = await run_ssh_command(
-        host=node.address,
-        port=int(cfg.get("port", 22)),
-        username=username,
-        command=command,
-        timeout_seconds=float(cfg.get("timeout_seconds", DEFAULT_ACTION_TIMEOUT_SECONDS)),
-        key_path=key_path,
-        password=password,
-        known_hosts=known_hosts,
-        host_key_fingerprint_getter=None if known_hosts is not None else _get_fingerprint,
-        host_key_fingerprint_setter=None if known_hosts is not None else _store_fingerprint,
-    )
+    # Семафор — см. MAX_CONCURRENT_ACTIONS выше: с конкурентным dispatch()
+    # несколько Action могут дойти до этой точки одновременно, семафор не
+    # даёт открыть больше MAX_CONCURRENT_ACTIONS SSH-подключений разом.
+    async with _action_semaphore:
+        result = await run_ssh_command(
+            host=node.address,
+            port=int(cfg.get("port", 22)),
+            username=username,
+            command=command,
+            timeout_seconds=float(cfg.get("timeout_seconds", DEFAULT_ACTION_TIMEOUT_SECONDS)),
+            key_path=key_path,
+            password=password,
+            known_hosts=known_hosts,
+            host_key_fingerprint_getter=None if known_hosts is not None else _get_fingerprint,
+            host_key_fingerprint_setter=None if known_hosts is not None else _store_fingerprint,
+        )
     if result.ok:
         return True, result.stdout[:2000]
     output = result.error or "неизвестная ошибка"

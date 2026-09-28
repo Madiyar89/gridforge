@@ -27,7 +27,7 @@ from app.db import get_session
 from app.escalation_engine import run_escalations
 from app.geoip_engine import GeoipDownloadError, download_databases, needs_refresh
 from app.integrations_engine import decrypt_token
-from app.models import Integration, Probe, ProbeKind, Sample, _now
+from app.models import Incident, Integration, Probe, ProbeKind, Sample, _now
 from app.sync_engine import push_snapshot, sync_enabled
 from app.flow_alerts_engine import run_due_flow_alerts
 from app.probes import run_probe
@@ -46,6 +46,10 @@ class Scheduler:
         self._known_probe_ids: set[int] = set()
         self._stop = asyncio.Event()
         self._http_client: httpx.AsyncClient | None = None
+        # Задачи dispatch() Action, запущенные в фоне (см. _run_due) —
+        # отслеживаем, чтобы на остановке планировщика не бросить их
+        # молча оборванными: ждём завершения (с таймаутом) в run_forever.
+        self._action_tasks: set[asyncio.Task] = set()
 
     def _reload_probes(self, db: Session) -> None:
         now = time.monotonic()
@@ -86,13 +90,37 @@ class Scheduler:
                 if newly_opened:
                     if self._http_client is not None:
                         await signal_module.dispatch(self._http_client, db, newly_opened)
-                    await actions_engine.dispatch(db, newly_opened)
+                    # Action может выполнять SSH-команду на устройстве —
+                    # это может занять секунды (см. DEFAULT_ACTION_TIMEOUT_
+                    # SECONDS в actions_engine.py). Раньше await здесь
+                    # блокировал весь цикл: опрос ВСЕХ остальных узлов
+                    # стоял, пока эта одна SSH-команда не завершится.
+                    # Фоновая задача — тот же паттерн, что у vuln/cable/
+                    # discovery/sync-report ниже в run_forever.
+                    incident_ids = [incident.id for incident in newly_opened]
+                    task = asyncio.create_task(self._dispatch_actions_safe(incident_ids))
+                    self._action_tasks.add(task)
+                    task.add_done_callback(self._action_tasks.discard)
                 heapq.heappush(self._heap, (time.monotonic() + probe.interval_seconds, probe.id))
             except Exception:
                 logger.exception("сбой опроса probe_id=%s", probe_id)
                 heapq.heappush(self._heap, (time.monotonic() + 30, probe_id))
             finally:
                 db.close()
+
+    async def _dispatch_actions_safe(self, incident_ids: list[int]) -> None:
+        """Отдельная db-сессия — objects из сессии _run_due закрываются
+        (db.close() в её finally) раньше, чем эта фоновая задача успеет
+        отработать, поэтому Incident перезагружаются по id здесь же, а не
+        передаются как уже присоединённые к сессии ORM-объекты."""
+        db = get_session()
+        try:
+            incidents = db.query(Incident).filter(Incident.id.in_(incident_ids)).all()
+            await actions_engine.dispatch(db, incidents)
+        except Exception:
+            logger.exception("сбой выполнения Action по incident_ids=%s", incident_ids)
+        finally:
+            db.close()
 
     async def _run_due_vuln_schedules_safe(self) -> None:
         try:
@@ -255,6 +283,14 @@ class Scheduler:
                 except asyncio.TimeoutError:
                     pass
         finally:
+            if self._action_tasks:
+                # Даём фоновым Action-задачам шанс дописать ActionRun перед
+                # остановкой процесса — то же ограничение, что и у
+                # остальных фоновых задач (vuln/cable/discovery/sync/geoip)
+                # ниже по коду, но именно для Action решили не оставлять
+                # его нерешённым (см. задачу): ждём с таймаутом, зависшие
+                # SSH-сессии не должны бесконечно держать shutdown.
+                await asyncio.wait(self._action_tasks, timeout=actions_engine.DEFAULT_ACTION_TIMEOUT_SECONDS + 5)
             await self._http_client.aclose()
             self._http_client = None
 

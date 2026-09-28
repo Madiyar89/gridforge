@@ -72,7 +72,7 @@ def _migrate_missing_columns() -> None:
             ("group_id", "INTEGER"),
             ("vendor", "TEXT"),
             ("active", "BOOLEAN DEFAULT 1"),
-            ("ssh_host_key_fingerprint", "TEXT"),
+            ("ssh_key_fingerprint", "TEXT"),
         ],
         "channels": [
             ("node_id", "INTEGER"),

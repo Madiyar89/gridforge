@@ -741,7 +741,7 @@ def update_node(
     return {"id": node.id}
 
 
-@api_write.delete("/api/nodes/{node_id}/ssh-host-key", status_code=204)
+@api_write.delete("/api/nodes/{node_id}/ssh-key", status_code=204)
 def reset_node_ssh_host_key(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Сбрасывает сохранённый TOFU-fingerprint SSH host key узла (см.
     app/ssh_client.py) — легитимный случай: устройство заменили/
@@ -752,7 +752,7 @@ def reset_node_ssh_host_key(node_id: int, db: Session = Depends(_db), key: Princ
     рядовое редактирование карточки узла — тот же admin-гейт (api_write),
     что и у остальных мутаций Node."""
     node = require_node_access(db, key, node_id)
-    node.ssh_host_key_fingerprint = None
+    node.ssh_key_fingerprint = None
     db.commit()
 
 

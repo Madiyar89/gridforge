@@ -227,8 +227,8 @@ class Node(Base):
     # подключения к узлу. Совпадение при последующих подключениях
     # подтверждает, что это тот же хост; несовпадение — сигнал MITM или
     # переустановки устройства, соединение отклоняется (см.
-    # ssh_client.evaluate_host_key). Сброс — DELETE /api/nodes/{id}/ssh-host-key.
-    ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ssh_client.evaluate_host_key). Сброс — DELETE /api/nodes/{id}/ssh-key.
+    ssh_key_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     group: Mapped["Group | None"] = relationship(back_populates="nodes")
     probes: Mapped[list["Probe"]] = relationship(back_populates="node", cascade="all, delete-orphan")

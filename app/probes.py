@@ -149,7 +149,7 @@ async def _ssh_command(
 
     Если known_hosts НЕ задан и есть node_id (штатный случай — Probe
     всегда привязан к Node) — trust-on-first-use по Node.
-    ssh_host_key_fingerprint (см. ssh_client.evaluate_host_key): первое
+    ssh_key_fingerprint (см. ssh_client.evaluate_host_key): первое
     подключение запоминает host key, последующие сверяют, несовпадение
     рвёт соединение. Если node_id тоже нет (например, вызов не из
     обычного планировщика Probe) — старое поведение, host key вообще не

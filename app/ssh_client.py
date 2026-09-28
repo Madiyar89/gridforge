@@ -51,7 +51,7 @@ ENCRYPTION_ALGS = _default_ciphers + [a for a in _LEGACY_CIPHERS if a not in _de
 # (probes.py/actions_engine.py/console_ws.py) — host key вообще не
 # проверялся, MITM неотличим от легитимного узла. Решение по итогам
 # аудита (2026-09-28): TOFU — при первом подключении к узлу запоминаем
-# fingerprint предъявленного ключа (Node.ssh_host_key_fingerprint), при
+# fingerprint предъявленного ключа (Node.ssh_key_fingerprint), при
 # всех следующих сверяем и обрываем соединение при несовпадении.
 #
 # Важный факт об asyncssh, без знания которого это не работает: при
@@ -356,7 +356,7 @@ def node_fingerprint_callbacks(node_id: int) -> tuple[Callable[[], str | None], 
         db = get_session()
         try:
             node = db.get(Node, node_id)
-            return node.ssh_host_key_fingerprint if node is not None else None
+            return node.ssh_key_fingerprint if node is not None else None
         finally:
             db.close()
 
@@ -365,7 +365,7 @@ def node_fingerprint_callbacks(node_id: int) -> tuple[Callable[[], str | None], 
         try:
             node = db.get(Node, node_id)
             if node is not None:
-                node.ssh_host_key_fingerprint = fingerprint
+                node.ssh_key_fingerprint = fingerprint
                 db.commit()
         finally:
             db.close()
