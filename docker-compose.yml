@@ -1,6 +1,12 @@
 services:
   gridforge:
     build: .
+    # Явный тег — без него docker compose называет образ по имени папки
+    # проекта (напр. gridforge-app-gridforge), что ломается при переносе
+    # на другую машину/директорию (офлайн-установка в ЕТС: `docker load`
+    # кладёт образ под этим именем, `docker compose up -d` без --build
+    # использует уже загруженный образ, не пытается пересобрать).
+    image: gridforge:latest
     container_name: gridforge
     restart: unless-stopped
     # Дефолтный grace period Docker (10с) короче, чем может занять
