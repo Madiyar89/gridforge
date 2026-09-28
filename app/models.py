@@ -1224,6 +1224,22 @@ class Action(Base):
     enabled: Mapped[bool] = mapped_column(default=True)
     cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Аудит-трейл: Action решает, какая SSH-команда запускается на
+    # устройстве автоматически по срабатыванию Watch — одна из самых
+    # чувствительных сущностей в системе (см. разбор аудита безопасности,
+    # 2026-09-28). created_by/updated_by хранят Principal.label (метку
+    # ключа или имя пользователя), не FK на ApiKey.id — та же схема, что
+    # уже используют Sweep.started_by/ScenarioRun.started_by/
+    # CredentialCheckRun.triggered_by: запись об авторе переживёт отзыв
+    # ключа (см. ApiKey.revoked — ключи только отзываются, не удаляются
+    # физически) и одинаково работает для входа и по ключу, и по User
+    # (Principal.label — единственное поле, общее для обоих способов
+    # входа; ApiKey.id для входа через User не имел бы смысла).
+    # updated_by/updated_at — пусто, пока Action ни разу не редактировали
+    # после создания.
+    created_by: Mapped[str] = mapped_column(String(128), default="")
+    updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     watch: Mapped["Watch"] = relationship()
 

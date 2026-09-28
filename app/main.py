@@ -1211,7 +1211,7 @@ def apply_template_endpoint(template_id: int, payload: TemplateApplyIn, db: Sess
 
 
 @api_write.post("/api/actions", status_code=201)
-def create_action(payload: ActionIn, db: Session = Depends(_db)):
+def create_action(payload: ActionIn, db: Session = Depends(_db), admin: Principal = Depends(require_admin_key)):
     if db.get(Watch, payload.watch_id) is None:
         raise HTTPException(status_code=404, detail="Watch не найден")
     config = dict(payload.config)
@@ -1222,6 +1222,7 @@ def create_action(payload: ActionIn, db: Session = Depends(_db)):
         kind=payload.kind,
         config=config,
         cooldown_seconds=payload.cooldown_seconds,
+        created_by=admin.label,
     )
     db.add(action)
     db.commit()
@@ -1245,27 +1246,48 @@ def list_actions(watch_id: int | None = None, db: Session = Depends(_db)):
             "config": _safe_config(a.config),
             "enabled": a.enabled,
             "cooldown_seconds": a.cooldown_seconds,
+            "created_at": iso(a.created_at),
+            "created_by": a.created_by,
+            "updated_at": iso(a.updated_at),
+            "updated_by": a.updated_by,
         }
         for a in query.all()
     ]
 
 
 @api_write.patch("/api/actions/{action_id}")
-def update_action(action_id: int, payload: ActionUpdate, db: Session = Depends(_db)):
+def update_action(
+    action_id: int,
+    payload: ActionUpdate,
+    db: Session = Depends(_db),
+    admin: Principal = Depends(require_admin_key),
+):
     """Точечное обновление — на сейчас только cooldown_seconds/enabled
     (см. ActionUpdate в schemas.py), без пересоздания config/учётки."""
     action = db.get(Action, action_id)
     if action is None:
         raise HTTPException(status_code=404, detail="Action не найден")
+    changed = False
     if payload.cooldown_seconds is not None:
         if payload.cooldown_seconds < 0:
             raise HTTPException(status_code=422, detail="cooldown_seconds не может быть отрицательным")
         action.cooldown_seconds = payload.cooldown_seconds
+        changed = True
     if payload.enabled is not None:
         action.enabled = payload.enabled
+        changed = True
+    if changed:
+        action.updated_by = admin.label
+        action.updated_at = _now()
     db.add(action)
     db.commit()
-    return {"id": action.id, "cooldown_seconds": action.cooldown_seconds, "enabled": action.enabled}
+    return {
+        "id": action.id,
+        "cooldown_seconds": action.cooldown_seconds,
+        "enabled": action.enabled,
+        "updated_by": action.updated_by,
+        "updated_at": iso(action.updated_at),
+    }
 
 
 @api_write.delete("/api/actions/{action_id}", status_code=204)

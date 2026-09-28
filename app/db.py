@@ -159,6 +159,15 @@ def _migrate_missing_columns() -> None:
             # молча незащищённым. См. DEFAULT_ACTION_COOLDOWN_SECONDS в
             # actions_engine.py и Action.cooldown_seconds в models.py.
             ("cooldown_seconds", "INTEGER DEFAULT 300"),
+            # Аудит-трейл (см. Action.created_by/updated_by/updated_at в
+            # models.py) — существующие Action, заведённые до появления
+            # этих полей, получают пустой created_by (кто их реально
+            # завёл, неизвестно и восстановить нельзя) и NULL
+            # updated_by/updated_at (ещё не редактировались этой веткой
+            # кода).
+            ("created_by", "VARCHAR(128) DEFAULT ''"),
+            ("updated_by", "VARCHAR(128)"),
+            ("updated_at", "DATETIME"),
         ],
         "action_runs": [
             ("skipped", "BOOLEAN DEFAULT 0"),
