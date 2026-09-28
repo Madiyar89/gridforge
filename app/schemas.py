@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from app.actions_engine import DEFAULT_ACTION_COOLDOWN_SECONDS
 from app.models import (
     ActionKind,
     ApiKeyRole,
@@ -252,6 +253,21 @@ class ActionIn(BaseModel):
     watch_id: int
     kind: ActionKind = ActionKind.ssh_command
     config: dict
+    # Флаппинг-защита (см. Action.cooldown_seconds в models.py и разбор
+    # риска в actions_engine.py) — сколько секунд ждать после последнего
+    # реального срабатывания этого Action, прежде чем сработать снова, даже
+    # если Watch успел переоткрыть Incident. 0 — без cooldown (opt-out).
+    cooldown_seconds: int = DEFAULT_ACTION_COOLDOWN_SECONDS
+
+
+class ActionUpdate(BaseModel):
+    """Частичное обновление Action — на сейчас только то, что реально
+    нужно тюнить после создания (cooldown и enabled/disabled), не полный
+    PUT с пересозданием config (для смены команды/учётки проще удалить и
+    создать Action заново, как и раньше)."""
+
+    cooldown_seconds: int | None = None
+    enabled: bool | None = None
 
 
 class BackupTriggerIn(BaseModel):

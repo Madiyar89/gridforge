@@ -1191,7 +1191,17 @@ class Action(Base):
     config для ssh_command: {"username":..., "key_path"|"password":...,
     "command":..., "port": 22 (опц.)} — тот же формат параметров, что у
     Probe kind=ssh_command (см. probes.py), намеренно: одна ментальная
-    модель на оба места, где GridForge исполняет SSH."""
+    модель на оба места, где GridForge исполняет SSH.
+
+    `cooldown_seconds` — минимальный интервал между двумя срабатываниями
+    ЭТОГО Action, даже если его Watch успел закрыть и снова открыть
+    Incident (дребезг/флаппинг). Без этого поля мигающий Watch мог бы
+    перезапускать сервис по кругу на каждое переоткрытие — см. дословную
+    формулировку риска в исходном handoff-документе проекта. 0 — cooldown
+    отключён (действие срабатывает каждый раз, opt-out для тех, кому это
+    реально нужно). Дефолт — DEFAULT_ACTION_COOLDOWN_SECONDS в
+    actions_engine.py (число здесь и там должно совпадать, значение не
+    импортируется сюда во избежание цикла models.py <-> actions_engine.py)."""
 
     __tablename__ = "actions"
 
@@ -1200,6 +1210,7 @@ class Action(Base):
     kind: Mapped[ActionKind] = mapped_column(Enum(ActionKind), default=ActionKind.ssh_command)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     watch: Mapped["Watch"] = relationship()
@@ -1208,7 +1219,14 @@ class Action(Base):
 class ActionRun(Base):
     """Журнал одного выполнения Action — что реально произошло, когда
     Incident открылся (не факт совпадения условия — это Incident, а факт
-    попытки действия и её результат)."""
+    попытки действия и её результат).
+
+    `skipped` — True, если Action НЕ был реально выполнен из-за cooldown
+    (см. Action.cooldown_seconds и actions_engine.dispatch). Пишем такую
+    запись явно (а не молчим), чтобы в истории Action-runs по Incident
+    было видно, что срабатывание было намеренно подавлено флаппинг-
+    защитой, а не просто "не случилось". ok всегда False при skipped=True
+    (не выполнялось — не может быть "успешным")."""
 
     __tablename__ = "action_runs"
 
@@ -1218,6 +1236,7 @@ class ActionRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     ok: Mapped[bool] = mapped_column(nullable=False)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skipped: Mapped[bool] = mapped_column(default=False)
 
 
 class Incident(Base):

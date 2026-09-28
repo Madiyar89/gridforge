@@ -170,6 +170,7 @@ from app.syslog_server import DEFAULT_SYSLOG_PORT, start_syslog_server
 from app.netflow_server import DEFAULT_NETFLOW_PORT, start_netflow_server
 from app.schemas import (
     ActionIn,
+    ActionUpdate,
     AdAuditIn,
     ApiKeyIn,
     AskIn,
@@ -1173,7 +1174,12 @@ def create_action(payload: ActionIn, db: Session = Depends(_db)):
     config = dict(payload.config)
     if config.get("password"):
         config["password"] = encrypt_secret(config["password"])
-    action = Action(watch_id=payload.watch_id, kind=payload.kind, config=config)
+    action = Action(
+        watch_id=payload.watch_id,
+        kind=payload.kind,
+        config=config,
+        cooldown_seconds=payload.cooldown_seconds,
+    )
     db.add(action)
     db.commit()
     db.refresh(action)
@@ -1189,9 +1195,34 @@ def list_actions(watch_id: int | None = None, db: Session = Depends(_db)):
         return {k: ("***" if k == "password" else v) for k, v in config.items()}
 
     return [
-        {"id": a.id, "watch_id": a.watch_id, "kind": a.kind.value, "config": _safe_config(a.config), "enabled": a.enabled}
+        {
+            "id": a.id,
+            "watch_id": a.watch_id,
+            "kind": a.kind.value,
+            "config": _safe_config(a.config),
+            "enabled": a.enabled,
+            "cooldown_seconds": a.cooldown_seconds,
+        }
         for a in query.all()
     ]
+
+
+@api_write.patch("/api/actions/{action_id}")
+def update_action(action_id: int, payload: ActionUpdate, db: Session = Depends(_db)):
+    """Точечное обновление — на сейчас только cooldown_seconds/enabled
+    (см. ActionUpdate в schemas.py), без пересоздания config/учётки."""
+    action = db.get(Action, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action не найден")
+    if payload.cooldown_seconds is not None:
+        if payload.cooldown_seconds < 0:
+            raise HTTPException(status_code=422, detail="cooldown_seconds не может быть отрицательным")
+        action.cooldown_seconds = payload.cooldown_seconds
+    if payload.enabled is not None:
+        action.enabled = payload.enabled
+    db.add(action)
+    db.commit()
+    return {"id": action.id, "cooldown_seconds": action.cooldown_seconds, "enabled": action.enabled}
 
 
 @api_write.delete("/api/actions/{action_id}", status_code=204)
@@ -1207,7 +1238,14 @@ def delete_action(action_id: int, db: Session = Depends(_db)):
 def list_action_runs(incident_id: int, db: Session = Depends(_db)):
     rows = db.query(ActionRun).filter(ActionRun.incident_id == incident_id).order_by(ActionRun.started_at.desc()).all()
     return [
-        {"id": r.id, "action_id": r.action_id, "started_at": iso(r.started_at), "ok": r.ok, "output": r.output}
+        {
+            "id": r.id,
+            "action_id": r.action_id,
+            "started_at": iso(r.started_at),
+            "ok": r.ok,
+            "output": r.output,
+            "skipped": r.skipped,
+        }
         for r in rows
     ]
 

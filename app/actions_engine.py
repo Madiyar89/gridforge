@@ -8,17 +8,29 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.credentials_engine import resolve_credential
-from app.models import Action, ActionKind, ActionRun, Credential, Incident, Node
+from app.models import Action, ActionKind, ActionRun, Credential, Incident, Node, as_aware
 from app.secrets_crypto import decrypt_secret
 from app.ssh_client import run_ssh_command
 
 logger = logging.getLogger("gridforge.actions")
 
 DEFAULT_ACTION_TIMEOUT_SECONDS = 15.0
+
+# Cooldown по умолчанию для Action, если админ не указал своё значение при
+# создании (см. Action.cooldown_seconds в models.py) — защита от аудитом
+# найденного риска "мигающий Watch может перезапускать сервис по кругу":
+# Incident может закрыться и переоткрыться много раз за флаппинг, и без
+# cooldown Action срабатывал бы на каждое переоткрытие. 5 минут — типичный
+# дефолт для такого рода рейт-лимита (достаточно, чтобы погасить быстрый
+# дребезг типа рестартующегося сервиса, не настолько долго, чтобы реальный
+# повторный инцидент остался без действия надолго). 0 — явный opt-out,
+# действие срабатывает каждый раз (для тех, кому это осознанно нужно).
+DEFAULT_ACTION_COOLDOWN_SECONDS = 300
 
 # С переходом scheduler.py на asyncio.create_task() для dispatch() (Action
 # больше не сериализуется через единственный цикл опроса) несколько
@@ -106,6 +118,23 @@ async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool
     return False, output
 
 
+def _seconds_since_last_run(db: Session, action_id: int) -> float | None:
+    """Секунд с последнего РЕАЛЬНОГО (не skipped) запуска этого Action, или
+    None, если такого запуска ещё не было. Пропущенные из-за cooldown
+    записи не считаются "последним запуском" — иначе cooldown откладывался
+    бы заново на каждой проверке, вместо того чтобы отсчитываться от
+    момента, когда Action фактически что-то выполнил."""
+    last_run = (
+        db.query(ActionRun)
+        .filter(ActionRun.action_id == action_id, ActionRun.skipped.is_(False))
+        .order_by(ActionRun.started_at.desc())
+        .first()
+    )
+    if last_run is None:
+        return None
+    return (datetime.now(timezone.utc) - as_aware(last_run.started_at)).total_seconds()
+
+
 async def dispatch(db: Session, incidents: list[Incident]) -> None:
     if not incidents:
         return
@@ -119,6 +148,34 @@ async def dispatch(db: Session, incidents: list[Incident]) -> None:
             continue
         node = incident.watch.probe.node
         for action in actions:
+            # cooldown_seconds == 0 — явный opt-out (см. DEFAULT_ACTION_
+            # COOLDOWN_SECONDS выше), всегда срабатывает без проверки.
+            if action.cooldown_seconds:
+                elapsed = _seconds_since_last_run(db, action.id)
+                if elapsed is not None and elapsed < action.cooldown_seconds:
+                    remaining = action.cooldown_seconds - elapsed
+                    logger.info(
+                        "action_id=%s incident_id=%s: пропуск — cooldown активен "
+                        "(последний запуск %.0fс назад, ещё %.0fс из %sс)",
+                        action.id,
+                        incident.id,
+                        elapsed,
+                        remaining,
+                        action.cooldown_seconds,
+                    )
+                    db.add(
+                        ActionRun(
+                            action_id=action.id,
+                            incident_id=incident.id,
+                            ok=False,
+                            output=(
+                                f"пропущено: cooldown {action.cooldown_seconds}с, "
+                                f"последний запуск {elapsed:.0f}с назад"
+                            ),
+                            skipped=True,
+                        )
+                    )
+                    continue
             if action.kind == ActionKind.ssh_command:
                 ok, output = await _run_ssh_action(db, action, node)
             else:

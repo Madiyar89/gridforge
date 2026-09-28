@@ -110,6 +110,17 @@ def _migrate_missing_columns() -> None:
         "credential_check_runs": [
             ("vlan_id", "INTEGER"),
         ],
+        "actions": [
+            # DEFAULT 300 (не 0!) — существующие Action, заведённые до
+            # появления cooldown, получают ту же защиту от дребезга, что
+            # и новые: поведение улучшается по умолчанию, а не остаётся
+            # молча незащищённым. См. DEFAULT_ACTION_COOLDOWN_SECONDS в
+            # actions_engine.py и Action.cooldown_seconds в models.py.
+            ("cooldown_seconds", "INTEGER DEFAULT 300"),
+        ],
+        "action_runs": [
+            ("skipped", "BOOLEAN DEFAULT 0"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:
