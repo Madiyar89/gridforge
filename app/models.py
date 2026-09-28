@@ -1205,6 +1205,19 @@ class Action(Base):
     Probe kind=ssh_command (см. probes.py), намеренно: одна ментальная
     модель на оба места, где GridForge исполняет SSH.
 
+    ВНИМАНИЕ при выборе command: её stdout сохраняется как есть в
+    ActionRun.output, а историю ActionRun может прочитать ЛЮБОЙ
+    действующий API-ключ (api_read, не только admin — см. GET
+    /api/incidents/{id}/action-runs в main.py), т.е. это НЕ защищённое
+    хранилище секретов. GridForge автоматически редактирует в выводе
+    точные совпадения уже известных ему секретов (Credential.password/
+    Integration.api_token/Channel-токены, см. secrets_crypto.
+    redact_known_secrets), но не может обнаружить произвольный чужой
+    секрет (сторонний API-ключ, зашитый в скрипт узла). Не пишите
+    command, которая печатает секрет, которого GridForge не хранит сам
+    (напр. `cat /etc/some-app/secret.conf`), если не готовы, что он
+    останется в истории Action в открытом виде.
+
     `cooldown_seconds` — минимальный интервал между двумя срабатываниями
     ЭТОГО Action, даже если его Watch успел закрыть и снова открыть
     Incident (дребезг/флаппинг). Без этого поля мигающий Watch мог бы

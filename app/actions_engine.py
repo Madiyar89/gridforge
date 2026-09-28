@@ -14,7 +14,12 @@ from sqlalchemy.orm import Session
 
 from app.credentials_engine import resolve_credential
 from app.models import Action, ActionKind, ActionRun, Credential, Incident, Node, as_aware
-from app.secrets_crypto import decrypt_secret
+from app.secrets_crypto import (
+    MIN_REDACTABLE_SECRET_LENGTH,
+    collect_known_secrets,
+    decrypt_secret,
+    redact_known_secrets,
+)
 from app.ssh_client import run_ssh_command
 
 logger = logging.getLogger("gridforge.actions")
@@ -110,11 +115,27 @@ async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool
             host_key_fingerprint_getter=None if known_hosts is not None else _get_fingerprint,
             host_key_fingerprint_setter=None if known_hosts is not None else _store_fingerprint,
         )
+    # Редактируем известные GridForge секреты в выводе ПЕРЕД обрезкой по
+    # длине (см. secrets_crypto.redact_known_secrets) — если резать
+    # сначала, секрет может оказаться разорван пополам обрезкой и
+    # перестать совпасть целиком, оставшись частично видимым. Набор
+    # секретов — все, что GridForge знает сам (Credential/Integration/
+    # Channel из БД), плюс пароль САМОГО этого SSH-подключения: даже если
+    # он передан вручную в config.password (не через центральную
+    # Credential), он всё равно секрет, и команда может случайно
+    # напечатать его (напр. echo $PASSWORD в verbose-отладке) — редактируем
+    # его наравне со всеми остальными, без исключений по происхождению.
+    known_secrets = collect_known_secrets(db)
+    if password and len(password) >= MIN_REDACTABLE_SECRET_LENGTH:
+        known_secrets.add(password)
+
     if result.ok:
-        return True, result.stdout[:2000]
+        stdout = redact_known_secrets(result.stdout, known_secrets) or ""
+        return True, stdout[:2000]
     output = result.error or "неизвестная ошибка"
     if result.stdout:
-        output = f"{output}: {result.stdout[:1000]}"
+        stdout = redact_known_secrets(result.stdout, known_secrets) or ""
+        output = f"{output}: {stdout[:1000]}"
     return False, output
 
 
