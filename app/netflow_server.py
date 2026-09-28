@@ -15,7 +15,19 @@ Protocol Buffers (схема отдельно от данных). Шаблон �
 поток молча пропускается, это не баг парсера, а свойство протокола.
 
 Порт по умолчанию — 2055 (общепринятый для NetFlow, не 514/что-то
-привилегированное — не требует root, тот же довод, что у syslog на 5140)."""
+привилегированное — не требует root, тот же довод, что у syslog на 5140).
+
+Батчинг + rate-limiting (доработка по итогам аудита, medium severity): один
+UDP-пакет NetFlow обычно несёт МНОГО flow-записей сразу (Data FlowSet —
+это уже естественный батч на уровне протокола), но раньше каждая запись
+всё равно писалась через db.add()+один общий db.commit() НА ПАКЕТ — под
+частым потоком пакетов от нескольких экспортёров это всё ещё много мелких
+commit'ов. Теперь записи из всех пакетов буферизуются и сбрасываются одним
+bulk-insert по размеру буфера или по таймеру (см. FlowBatcher,
+_periodic_flush). RateLimiter — на уровне ПАКЕТОВ (не отдельных
+flow-записей внутри пакета: экспортёр — не источник спуфинга в том же
+смысле, что произвольный источник syslog, но exporter_ip в UDP всё равно
+подделываем, поэтому та же защита нужна)."""
 
 from __future__ import annotations
 
@@ -27,11 +39,30 @@ import struct
 import time
 
 from app.db import get_session
-from app.models import FlowRecord
+from app.models import FlowRecord, _now
+from app.udp_flood_guard import RateLimiter
 
 logger = logging.getLogger("gridforge.netflow")
 
 DEFAULT_NETFLOW_PORT = int(os.environ.get("GRIDFORGE_NETFLOW_PORT", "2055"))
+
+# Буфер flow-записей сбрасывается в БД при достижении NETFLOW_BATCH_SIZE
+# записей ИЛИ каждые NETFLOW_BATCH_INTERVAL_SECONDS секунд — что раньше.
+# Порог выше, чем у syslog (SYSLOG_BATCH_SIZE=200): один NetFlow-пакет уже
+# сам по себе несёт до пары десятков записей, поэтому естественный размер
+# батча на уровне протокола больше, чем у построчного syslog.
+NETFLOW_BATCH_SIZE = int(os.environ.get("GRIDFORGE_NETFLOW_BATCH_SIZE", "500"))
+NETFLOW_BATCH_INTERVAL_SECONDS = float(os.environ.get("GRIDFORGE_NETFLOW_BATCH_INTERVAL_SECONDS", "2"))
+
+# Пороги rate-limiting считаются в ПАКЕТАХ/с (не в отдельных flow-записях
+# внутри пакета — количество записей в пакете и так ограничено MTU).
+# Парк из нескольких Cisco 9300, каждый экспортирует активные потоки раз в
+# несколько секунд, реально шлёт единицы-десятки пакетов/с на экспортёр —
+# 300/с на exporter_ip и 1000/с суммарно с большим запасом выше этого, но
+# ограничивают то, что один (возможно, подделанный) источник может залить
+# приёмник пакетами.
+NETFLOW_RATE_LIMIT_PER_SOURCE = int(os.environ.get("GRIDFORGE_NETFLOW_RATE_LIMIT_PER_SOURCE", "300"))
+NETFLOW_RATE_LIMIT_GLOBAL = int(os.environ.get("GRIDFORGE_NETFLOW_RATE_LIMIT_GLOBAL", "1000"))
 
 # Field Type -> (имя, конвертер raw-bytes -> Python-значение). Только то,
 # что реально используется дашбордом — остальные типы полей шаблона
@@ -156,12 +187,62 @@ def _parse_packet(data: bytes, exporter_ip: str) -> list[dict]:
     return out
 
 
+class FlowBatcher:
+    """Буфер flow-записей в памяти + сброс одним bulk-insert. Как и у
+    SyslogBatcher — датаграммы обрабатываются синхронно в event loop, add()
+    и периодический flush() никогда не пересекаются посреди друг друга."""
+
+    def __init__(self, batch_size: int = NETFLOW_BATCH_SIZE) -> None:
+        self._batch_size = batch_size
+        self._buffer: list[dict] = []
+
+    def __len__(self) -> int:
+        return len(self._buffer)
+
+    def add_many(self, records: list[dict]) -> None:
+        for rec in records:
+            self._buffer.append(
+                {
+                    "exporter_ip": rec["exporter_ip"],
+                    "src_addr": rec["src_addr"],
+                    "dst_addr": rec["dst_addr"],
+                    "src_port": rec.get("src_port"),
+                    "dst_port": rec.get("dst_port"),
+                    "protocol": rec.get("protocol"),
+                    "byte_count": rec.get("byte_count", 0),
+                    "packet_count": rec.get("packet_count", 0),
+                    "received_at": _now(),
+                }
+            )
+        if len(self._buffer) >= self._batch_size:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self._buffer:
+            return
+        batch, self._buffer = self._buffer, []
+        db = get_session()
+        try:
+            db.bulk_insert_mappings(FlowRecord, batch)
+            db.commit()
+        except Exception:
+            logger.exception("сбой сохранения batch из %d flow-записей", len(batch))
+        finally:
+            db.close()
+
+
 class NetflowProtocol(asyncio.DatagramProtocol):
+    def __init__(self, batcher: FlowBatcher, rate_limiter: RateLimiter) -> None:
+        self._batcher = batcher
+        self._rate_limiter = rate_limiter
+
     def connection_made(self, transport: asyncio.DatagramTransport) -> None:  # noqa: D102
         self.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         exporter_ip = addr[0]
+        if not self._rate_limiter.allow(exporter_ip):
+            return
         try:
             records = _parse_packet(data, exporter_ip)
         except Exception:
@@ -169,29 +250,54 @@ class NetflowProtocol(asyncio.DatagramProtocol):
             return
         if not records:
             return
-        db = get_session()
+        self._batcher.add_many(records)
+
+
+async def _periodic_flush(batcher: FlowBatcher, stop: asyncio.Event, interval: float) -> None:
+    while not stop.is_set():
         try:
-            for rec in records:
-                db.add(
-                    FlowRecord(
-                        exporter_ip=rec["exporter_ip"],
-                        src_addr=rec["src_addr"],
-                        dst_addr=rec["dst_addr"],
-                        src_port=rec.get("src_port"),
-                        dst_port=rec.get("dst_port"),
-                        protocol=rec.get("protocol"),
-                        byte_count=rec.get("byte_count", 0),
-                        packet_count=rec.get("packet_count", 0),
-                    )
-                )
-            db.commit()
-        finally:
-            db.close()
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+        batcher.flush()
+    batcher.flush()  # финальный сброс — не терять неполный batch на остановке
 
 
-async def start_netflow_server(port: int = DEFAULT_NETFLOW_PORT) -> asyncio.DatagramTransport:
+class NetflowServerHandle:
+    """Оборачивает транспорт + фоновую задачу периодического flush —
+    aclose() гарантирует, что последний неполный batch не потеряется при
+    штатной остановке (см. lifespan() в app/main.py)."""
+
+    def __init__(
+        self,
+        transport: asyncio.DatagramTransport,
+        stop_event: asyncio.Event,
+        flush_task: asyncio.Task,
+        batcher: FlowBatcher,
+    ) -> None:
+        self.transport = transport
+        self.batcher = batcher
+        self._stop_event = stop_event
+        self._flush_task = flush_task
+
+    async def aclose(self) -> None:
+        self.transport.close()
+        self._stop_event.set()
+        await self._flush_task
+
+
+async def start_netflow_server(port: int = DEFAULT_NETFLOW_PORT) -> NetflowServerHandle:
     loop = asyncio.get_running_loop()
-    transport, _protocol = await loop.create_datagram_endpoint(
-        NetflowProtocol, local_addr=("0.0.0.0", port)
+    batcher = FlowBatcher()
+    rate_limiter = RateLimiter(
+        per_source_limit=NETFLOW_RATE_LIMIT_PER_SOURCE,
+        global_limit=NETFLOW_RATE_LIMIT_GLOBAL,
+        logger=logger,
+        label="netflow",
     )
-    return transport
+    transport, _protocol = await loop.create_datagram_endpoint(
+        lambda: NetflowProtocol(batcher, rate_limiter), local_addr=("0.0.0.0", port)
+    )
+    stop_event = asyncio.Event()
+    flush_task = asyncio.create_task(_periodic_flush(batcher, stop_event, NETFLOW_BATCH_INTERVAL_SECONDS))
+    return NetflowServerHandle(transport, stop_event, flush_task, batcher)

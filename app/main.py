@@ -344,11 +344,14 @@ async def lifespan(_app: FastAPI):
         bootstrap_key_path.write_text(raw_key + "\n", encoding="utf-8")
         bootstrap_key_path.chmod(0o600)
     task = asyncio.create_task(_scheduler.run_forever())
-    syslog_transport = await start_syslog_server()
-    netflow_transport = await start_netflow_server()
+    syslog_handle = await start_syslog_server()
+    netflow_handle = await start_netflow_server()
     yield
-    syslog_transport.close()
-    netflow_transport.close()
+    # aclose() (не просто transport.close()) — досбрасывает последний
+    # неполный batch буферизованных syslog/netflow-записей перед
+    # остановкой, см. SyslogServerHandle/NetflowServerHandle.
+    await syslog_handle.aclose()
+    await netflow_handle.aclose()
     _scheduler.stop()
     await task
 
