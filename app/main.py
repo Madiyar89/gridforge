@@ -741,6 +741,21 @@ def update_node(
     return {"id": node.id}
 
 
+@api_write.delete("/api/nodes/{node_id}/ssh-host-key", status_code=204)
+def reset_node_ssh_host_key(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Сбрасывает сохранённый TOFU-fingerprint SSH host key узла (см.
+    app/ssh_client.py) — легитимный случай: устройство заменили/
+    переустановили, новый (ожидаемый) host key должен быть принят и
+    заново запомнен при следующем подключении, а не отклонён как
+    несовпадение. Отдельный эндпоинт, не поле в NodeUpdateIn: это
+    осознанное действие по безопасности («доверять новому ключу»), не
+    рядовое редактирование карточки узла — тот же admin-гейт (api_write),
+    что и у остальных мутаций Node."""
+    node = require_node_access(db, key, node_id)
+    node.ssh_host_key_fingerprint = None
+    db.commit()
+
+
 @api_write.delete("/api/nodes/{node_id}")
 def delete_node_endpoint(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Возвращает, что именно удалено: узел тянет за собой проверки,

@@ -54,6 +54,22 @@ async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool
                 return False, "нет ни username в действии, ни центральной учётки для этого узла"
             username, key_path, password = cred["username"], cred["key_path"], cred["password"]
 
+    # known_hosts, явно заданный в config — обычная проверка asyncssh по
+    # этому файлу, TOFU ниже не участвует (см. ssh_client.open_ssh_
+    # connection: явный known_hosts всегда в приоритете). Иначе — TOFU по
+    # Node.ssh_host_key_fingerprint: node уже загружен из этой же db-
+    # сессии, поэтому колбэки замыкаются прямо на него, отдельная сессия
+    # (как в probes.py/node_fingerprint_callbacks) не нужна.
+    known_hosts = cfg.get("known_hosts")
+
+    def _get_fingerprint() -> str | None:
+        return node.ssh_host_key_fingerprint
+
+    def _store_fingerprint(fingerprint: str) -> None:
+        node.ssh_host_key_fingerprint = fingerprint
+        db.add(node)
+        db.commit()
+
     result = await run_ssh_command(
         host=node.address,
         port=int(cfg.get("port", 22)),
@@ -62,7 +78,9 @@ async def _run_ssh_action(db: Session, action: Action, node: Node) -> tuple[bool
         timeout_seconds=float(cfg.get("timeout_seconds", DEFAULT_ACTION_TIMEOUT_SECONDS)),
         key_path=key_path,
         password=password,
-        known_hosts=cfg.get("known_hosts"),
+        known_hosts=known_hosts,
+        host_key_fingerprint_getter=None if known_hosts is not None else _get_fingerprint,
+        host_key_fingerprint_setter=None if known_hosts is not None else _store_fingerprint,
     )
     if result.ok:
         return True, result.stdout[:2000]

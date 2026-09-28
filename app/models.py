@@ -222,6 +222,13 @@ class Node(Base):
     vendor: Mapped[Vendor | None] = mapped_column(Enum(Vendor), nullable=True)
     active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # SHA256-fingerprint SSH host key, увиденного при ПЕРВОМ подключении
+    # (trust-on-first-use, см. app/ssh_client.py) — пусто до первого SSH-
+    # подключения к узлу. Совпадение при последующих подключениях
+    # подтверждает, что это тот же хост; несовпадение — сигнал MITM или
+    # переустановки устройства, соединение отклоняется (см.
+    # ssh_client.evaluate_host_key). Сброс — DELETE /api/nodes/{id}/ssh-host-key.
+    ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     group: Mapped["Group | None"] = relationship(back_populates="nodes")
     probes: Mapped[list["Probe"]] = relationship(back_populates="node", cascade="all, delete-orphan")

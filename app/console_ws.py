@@ -32,7 +32,7 @@ from app.auth import ROLE_RANK, _hash_key  # переиспользуем ров
 from app.credentials_engine import resolve_credential
 from app.db import get_session
 from app.models import ApiKey, ApiKeyRole, Node
-from app.ssh_client import ENCRYPTION_ALGS, KEX_ALGS
+from app.ssh_client import HostKeyRejected, open_ssh_connection
 
 # Минимальная роль для SSH-консоли — та же граница, что и у /api/actions
 # (api_write в main.py, только admin): запуск Action и интерактивная
@@ -111,30 +111,43 @@ async def handle_console(ws: WebSocket) -> None:
         await ws.close(code=1002)
         return
 
-    connect_kwargs: dict = {
-        "host": node.address,
-        "port": int(payload.get("port", 22)),
-        "username": username,
-        "known_hosts": None,
-        "connect_timeout": 10,
-        "kex_algs": KEX_ALGS,
-        "encryption_algs": ENCRYPTION_ALGS,
-    }
-    if key_path:
-        connect_kwargs["client_keys"] = [key_path]
-    elif password:
-        connect_kwargs["password"] = password
-        connect_kwargs["client_keys"] = None
-    else:
+    if not key_path and not password:
         await ws.send_json({"type": "error", "message": "нужен key_path или password"})
         await ws.close(code=1002)
         return
 
     cols, rows = int(payload.get("cols", 80)), int(payload.get("rows", 24))
 
+    # TOFU по Node.ssh_host_key_fingerprint — та же единая точка
+    # проверки host key, что и у Probe/Action (см. ssh_client.py). node
+    # уже загружен выше (сессия, которой он был загружен, уже закрыта,
+    # но плоские колонки, включая fingerprint, доступны и после этого);
+    # сохранение нового fingerprint открывает свою короткую сессию по id.
+    def _get_fingerprint() -> str | None:
+        return node.ssh_host_key_fingerprint
+
+    def _store_fingerprint(fingerprint: str) -> None:
+        write_db = get_session()
+        try:
+            fresh = write_db.get(Node, node.id)
+            if fresh is not None:
+                fresh.ssh_host_key_fingerprint = fingerprint
+                write_db.commit()
+        finally:
+            write_db.close()
+
     try:
-        conn = await asyncssh.connect(**connect_kwargs)
-    except (asyncssh.Error, OSError) as exc:
+        conn = await open_ssh_connection(
+            host=node.address,
+            port=int(payload.get("port", 22)),
+            username=username,
+            timeout_seconds=10,
+            key_path=key_path,
+            password=password,
+            host_key_fingerprint_getter=_get_fingerprint,
+            host_key_fingerprint_setter=_store_fingerprint,
+        )
+    except (asyncssh.Error, OSError, HostKeyRejected) as exc:
         await ws.send_json({"type": "error", "message": str(exc) or exc.__class__.__name__})
         await ws.close(code=1011)
         return

@@ -70,7 +70,9 @@ class Scheduler:
                 if probe is None or not probe.enabled:
                     self._known_probe_ids.discard(probe_id)
                     continue
-                outcome = await run_probe(probe.kind, probe.node.address, probe.params, probe.timeout_seconds)
+                outcome = await run_probe(
+                    probe.kind, probe.node.address, probe.params, probe.timeout_seconds, probe.node_id
+                )
                 sample = Sample(probe_id=probe.id, ok=outcome.ok, value=outcome.value, detail=outcome.detail)
                 if probe.kind is ProbeKind.snmp_counter_rate:
                     # Счётчик сам по себе не метрика — превращаем в скорость по
