@@ -188,24 +188,77 @@ async function api(path, options = {}) {
 // группе узла. Просим логин/пароль вручную только если сервер ответил, что
 // подходящей учётки нет (422, credentialRequired) — тогда одна попытка
 // повтора с введённой учёткой, без сохранения на клиенте.
+// Модалка логина/пароля вместо нативных prompt() — тот же паттерн, что
+// у apply-modal в templates.js/templates.html: <dialog> + .modal-actions,
+// стили уже общие (element-селекторы dialog{}/.modal-actions в
+// style.css, без привязки к конкретному id), поэтому строим dialog
+// динамически прямо здесь — common.js подключается на страницы, где
+// готовой разметки под этот диалог нет. Resolve'ится {username,password}
+// при отправке формы или null при отмене/Esc.
+function credentialsPrompt(title) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement("dialog");
+    dlg.innerHTML = `
+      <form method="dialog">
+        <h3>${escapeHtml(title)}</h3>
+        <label>Логин
+          <input type="text" name="username" autocomplete="username">
+        </label>
+        <label>Пароль (пусто — если вход по ключу)
+          <input type="password" name="password" autocomplete="current-password">
+        </label>
+        <div class="modal-actions">
+          <button type="button" value="cancel" class="btn-ghost">Отмена</button>
+          <button type="submit" value="ok">Продолжить</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dlg);
+    const form = dlg.querySelector("form");
+    const cancelBtn = dlg.querySelector(".btn-ghost");
+    function finish(result) {
+      dlg.close();
+      dlg.remove();
+      resolve(result);
+    }
+    cancelBtn.addEventListener("click", () => finish(null));
+    dlg.addEventListener("cancel", () => finish(null)); // закрытие по Esc
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const username = form.username.value.trim();
+      if (!username) {
+        finish(null);
+        return;
+      }
+      finish({ username, password: form.password.value || null });
+    });
+    dlg.showModal();
+    form.username.focus();
+  });
+}
+
 async function apiWithCredentials(path, options = {}) {
   try {
     return await api(path, options);
   } catch (e) {
     if (e.status !== 422 || !/нужен логин/.test(e.message)) throw e;
-    const username = prompt("Логин для подключения к узлу (учётка по умолчанию не настроена):");
-    if (!username) throw e;
-    const password = prompt("Пароль (пусто — если вход по ключу):") || null;
+    const creds = await credentialsPrompt("Логин для подключения к узлу (учётка по умолчанию не настроена)");
+    if (!creds) throw e;
     const body = options.body ? JSON.parse(options.body) : {};
-    body.username = username;
-    body.password = password;
+    body.username = creds.username;
+    body.password = creds.password;
     return await api(path, { ...options, body: JSON.stringify(body) });
   }
 }
 
+// role="status"/aria-live="polite" — тост не в фокусе, без этого скринридер
+// его просто не замечает; ставим на каждый показ, а не один раз при
+// загрузке — элемент один и тот же на странице, но дешевле не заводить
+// отдельную инициализацию под два атрибута.
 function toast(message, isError = false) {
   const el = document.getElementById("toast");
   if (!el) return;
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
   el.textContent = message;
   el.className = "toast show" + (isError ? " err" : "");
   clearTimeout(toast._t);
