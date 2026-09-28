@@ -74,7 +74,7 @@ from app.passwords import (
     password_problem,
     verify_password,
 )
-from app.secrets_crypto import encrypt_secret
+from app.secrets_crypto import PROBE_SECRET_PARAM_FIELDS, encrypt_secret
 from app.sessions import (
     COOKIE_NAME,
     SESSION_TTL,
@@ -827,7 +827,7 @@ def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: Princi
 def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_node_access(db, key, payload.node_id)
     params = dict(payload.params)
-    for secret_field in ("password", "auth_password", "priv_password", "community"):
+    for secret_field in PROBE_SECRET_PARAM_FIELDS:
         if params.get(secret_field):
             params[secret_field] = encrypt_secret(params[secret_field])
     probe = Probe(
