@@ -20,15 +20,19 @@ from app.models import ApiKey, ApiKeySession, Session, User, _now, as_aware
 COOKIE_NAME = "gridforge_session"
 SESSION_TTL = timedelta(days=7)
 
-# По умолчанию False — реальный деплой (deploy/gridforge.service,
-# боевой 192.0.2.244) сегодня обслуживается напрямую по HTTP, без TLS-
-# терминации (нет reverse-proxy перед uvicorn, в отличие от NetOpsHub с
-# его Caddy); Secure=True по умолчанию сделал бы куку нерабочей прямо
-# сейчас — браузер (и httpx/TestClient) молча не отправит Secure-куку
-# обратно по HTTP-соединению. Включать явно (GRIDFORGE_COOKIE_SECURE=1),
-# когда перед GridForge реально появится TLS (свой Caddy/nginx или
-# терминация на балансировщике) — тогда отсутствие Secure станет
-# реальной дырой, а не текущим фактом транспорта.
+# По умолчанию False — переменная сама по себе ничего не включает.
+# docker-compose.yml с 2026-09-29 разворачивает TLS-терминацию (caddy,
+# порт 8443) перед gridforge, и там же выставлен
+# GRIDFORGE_COOKIE_SECURE=1 — при деплое через docker compose кука уже
+# идёт с Secure. Но боевой деплой через systemd (deploy/gridforge.service,
+# 192.0.2.244) обслуживает uvicorn напрямую по HTTP, без reverse-proxy
+# и без этой переменной в юните — там Secure=True сделал бы куку
+# нерабочей (браузер и httpx/TestClient молча не отправят Secure-куку
+# обратно по HTTP), поэтому кука по-прежнему без Secure по умолчанию.
+# Если systemd-деплой тоже встанет за TLS (свой Caddy/nginx перед ним
+# или терминация на балансировщике) — добавь GRIDFORGE_COOKIE_SECURE=1
+# в Environment= юнита; до этого отсутствие Secure там остаётся текущим
+# фактом транспорта, а не решённой задачей.
 COOKIE_SECURE = os.environ.get("GRIDFORGE_COOKIE_SECURE", "") == "1"
 
 

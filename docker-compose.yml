@@ -33,6 +33,11 @@ services:
       # без публикации порта реальные свитчи снаружи контейнера не достучатся,
       # тот же принцип, что уже применён для syslog выше.
       - "2055:2055/udp"
+    environment:
+      # TLS терминируется на caddy (сервис ниже, порт 8443) — сессионная
+      # кука может (и должна) идти с флагом Secure. См. app/sessions.py:
+      # COOKIE_SECURE читает именно эту переменную.
+      - GRIDFORGE_COOKIE_SECURE=1
     volumes:
       - gridforge_data:/app/data
 
