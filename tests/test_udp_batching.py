@@ -81,7 +81,7 @@ def test_syslog_batch_does_not_flush_before_size_threshold(monkeypatch, db):
 def test_syslog_batch_resolves_node_id_in_bulk_at_flush_time(monkeypatch, db):
     import app.syslog_server as syslog_server
 
-    node = Node(name="floor-1", address="10.0.0.1")
+    node = Node(name="lab-1", address="10.0.0.1")
     db.add(node)
     db.commit()
     db.refresh(node)

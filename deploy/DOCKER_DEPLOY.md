@@ -35,9 +35,13 @@ docker logs gridforge   # тут при первом запуске покаже
 - `nmap`/`tshark` (для `scan_engine.py`/`capture_engine.py`) — внутри
   образа, с `cap_add: NET_RAW, NET_ADMIN` в compose (не полный root, и
   только для `gridforge` — сервису `caddy` эти capability не нужны).
-- `corporate-ca.crt` — корпоративный root CA (TLS-инспекция на этой сети),
-  без него ни `apt`, ни `pip` не достучатся наружу при сборке образа. Тот
-  же файл, что уже в NetOpsHub-backend.
+- Если сеть, где собирается образ, использует TLS-инспекцию (корпоративный
+  или гос. root CA подставляется вместо реального сертификата сайта) — `pip`
+  при сборке будет падать на TLS-хендшейке. Решение: положить свой corporate
+  CA (`.crt`/`.pem`) в `certs/` (см. `certs/README.md`) — `Dockerfile`
+  подхватит его через `update-ca-certificates` при сборке. Файл в `certs/`
+  не коммитится (`.gitignore`), в самом репозитории конкретного сертификата
+  нет — только этот механизм.
 - Развёрнуто и проверено на **192.0.2.10** (снаружи — порт 8443 через
   caddy, доп. к уже работающему там NetOps Hub/GridForge-Zabbix-fork/
   phonebook — конфликтов портов нет).
