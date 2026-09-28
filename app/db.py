@@ -13,8 +13,17 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+# Таймаут (в миллисекундах), который SQLite ждёт освобождения залоченной
+# базы, прежде чем вернуть "database is locked", вместо немедленного
+# отказа (см. PRAGMA busy_timeout ниже). 5с — типичный дефолт для
+# однофайловой SQLite под умеренной конкурентной нагрузкой (планировщик +
+# syslog_server + netflow_server + API-запросы пишут в один и тот же
+# файл) — достаточно, чтобы пережить короткую запись другого писателя, не
+# настолько много, чтобы подвисший запрос копил очередь неопределённо.
+SQLITE_BUSY_TIMEOUT_MS = 5000
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -52,6 +61,39 @@ engine = create_engine(
     pool_timeout=10,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+if _IS_SQLITE:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+        """Гоняется на КАЖДОЕ новое соединение пула (идиоматичный способ
+        SQLAlchemy применять PRAGMA к SQLite — PRAGMA живёт на уровне
+        соединения, не файла, и pool_size=20 в этом файле означает до 20
+        независимых соединений, каждое из которых иначе осталось бы на
+        journal_mode по умолчанию (rollback journal, не WAL) без
+        busy_timeout).
+
+        journal_mode=WAL — читатели не блокируют писателя и наоборот (в
+        отличие от journal_mode по умолчанию, где пишущая транзакция
+        блокирует всех читателей), критично при нескольких независимых
+        engine-потребителях одного файла (scheduler.py/syslog_server.py/
+        netflow_server.py/API-запросы, см. комментарий выше про
+        pool_size/max_overflow — тот же инцидент 2026-09-23, WAL и
+        busy_timeout снижают шанс "database is locked" при этой же
+        конкурентной нагрузке, но не заменяют сам пул).
+
+        busy_timeout — вместо немедленного "database is locked" ждёт до
+        SQLITE_BUSY_TIMEOUT_MS освобождения перед отказом.
+
+        Специфично для SQLite (PRAGMA — не стандартный SQL, MySQL/
+        MariaDB такого не поймёт) — весь блок под `if _IS_SQLITE`, тот же
+        принцип, что уже применяется в ask_engine.py."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        finally:
+            cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -159,12 +201,46 @@ def _migrate_renamed_columns() -> None:
         conn.commit()
 
 
+def _migrate_missing_indexes() -> None:
+    """Как и с колонками (см. `_migrate_missing_columns` выше),
+    `Base.metadata.create_all()` создаёт индексы только для ТАБЛИЦ,
+    которых ещё не было — если таблица `samples`/`incidents` уже
+    существует на диске с прошлой версии схемы (до появления составных
+    индексов в models.py, 2026-09-28), новый `Index(...)` из
+    `__table_args__` туда сам не долетит. `CREATE INDEX` (без `IF NOT
+    EXISTS` — не гарантирован на MySQL/MariaDB старых версий, тогда как
+    сама проверка через `sqlalchemy.inspect` диалект-независима и уже
+    используется тем же приёмом в `_migrate_missing_columns`) — тоже
+    синтаксис, одинаковый у SQLite и MySQL/MariaDB. Идемпотентно:
+    повторный запуск видит индекс уже существующим в инспекторе и
+    ничего не делает."""
+    additions = {
+        "samples": [("ix_samples_probe_id_taken_at", ["probe_id", "taken_at"])],
+        "incidents": [
+            ("ix_incidents_watch_id_resolved_at", ["watch_id", "resolved_at"]),
+            ("ix_incidents_resolved_at", ["resolved_at"]),
+        ],
+    }
+    inspector = inspect(engine)
+    with engine.connect() as conn:
+        for table, indexes in additions.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {ix["name"] for ix in inspector.get_indexes(table)}
+            for name, columns in indexes:
+                if name not in existing:
+                    cols = ", ".join(columns)
+                    conn.exec_driver_sql(f"CREATE INDEX {name} ON {table} ({cols})")
+        conn.commit()
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  — регистрирует таблицы в Base.metadata
 
     Base.metadata.create_all(engine)
     _migrate_renamed_columns()
     _migrate_missing_columns()
+    _migrate_missing_indexes()
 
 
 def get_session() -> Session:

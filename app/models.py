@@ -17,7 +17,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -261,9 +261,21 @@ class Probe(Base):
 class Sample(Base):
     """Один результат проверки. `ok` — проверка вообще выполнилась (узел
     ответил), `value` — измеренная величина (RTT в мс, 1/0 для доступности
-    порта и т.д.), интерпретация зависит от Probe.kind."""
+    порта и т.д.), интерпретация зависит от Probe.kind.
+
+    `ix_samples_probe_id_taken_at` — почти каждый запрос к Sample фильтрует
+    по conкретному Probe И сортирует/ограничивает по taken_at одновременно
+    (main.py: список последних выборок пробы; watch_engine.py: последние N
+    для оценки Watch; rate_engine.py: предыдущая выборка для расчёта
+    скорости; dashboard_engine.py: выборки за период по набору проб) — эта
+    таблица самая "горячая" на запись (одна строка на каждый прогон каждой
+    Probe), и составной индекс (probe_id, taken_at) покрывает эти запросы
+    напрямую, а не только через отдельный индекс на taken_at. Отдельный
+    индекс на taken_at оставлен — retention_engine.py чистит старые
+    Sample по одному только taken_at, без фильтра по probe_id."""
 
     __tablename__ = "samples"
+    __table_args__ = (Index("ix_samples_probe_id_taken_at", "probe_id", "taken_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     probe_id: Mapped[int] = mapped_column(ForeignKey("probes.id"), nullable=False)
@@ -1243,15 +1255,26 @@ class Incident(Base):
     """Открытое/закрытое совпадение Watch. Дедуп: пока для (watch_id)
     существует запись с resolved_at is None — новый Incident не создаётся,
     только обновляется last_seen_at (та же идея, что дедуп алертов в
-    NetOpsHub, но независимая реализация под свою схему)."""
+    NetOpsHub, но независимая реализация под свою схему).
+
+    Индексы: у этой таблицы нет отдельной колонки "status" — открыт/
+    закрыт различается по resolved_at IS NULL/NOT NULL (см. docstring
+    выше). `ix_incidents_watch_id_resolved_at` покрывает дедуп-проверку
+    в watch_engine.py (`Incident.watch_id == watch.id,
+    Incident.resolved_at.is_(None)`) и любой запрос по одному watch_id
+    без учёта resolved_at (main.py: `Action.watch_id`-подобные счётчики).
+    Отдельный индекс на resolved_at — под /api/incidents (main.py,
+    list_incidents): фильтр `Incident.resolved_at.is_(None)` без
+    watch_id, где составной индекс с ведущим watch_id не помог бы."""
 
     __tablename__ = "incidents"
+    __table_args__ = (Index("ix_incidents_watch_id_resolved_at", "watch_id", "resolved_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     watch_id: Mapped[int] = mapped_column(ForeignKey("watches.id"), nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     detail: Mapped[str] = mapped_column(Text, nullable=False)
     # Максимальный delay_minutes уже отправленного EscalationStep для этого
     # Incident (0 = ни одного шага эскалации ещё не было, только исходная
