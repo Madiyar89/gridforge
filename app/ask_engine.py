@@ -41,6 +41,70 @@ _FORBIDDEN_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Белый список таблиц, которые модель имеет право читать через query_db —
+# осознанно белый, не чёрный: таблица, добавленная позже и забытая здесь,
+# по умолчанию НЕ видна модели (безопаснее, чем наоборот). Ниже — все
+# таблицы GridForge (см. app/models.py, __tablename__), КРОМЕ тех, где
+# лежат секреты/учётные данные:
+#   credentials (password/key_path), integrations (api_token),
+#   ldap_connections (password), api_keys (key_hash), users (password_hash),
+#   sessions (token_hash), channels (config — bot_token/webhook-URL и т.п.),
+#   domain_scan_credential_sets (password).
+_ALLOWED_TABLES = frozenset(
+    {
+        "groups",
+        "vlans",
+        "nodes",
+        "probes",
+        "samples",
+        "watches",
+        "templates",
+        "port_snapshots",
+        "sweeps",
+        "sweep_results",
+        "scenarios",
+        "scenario_runs",
+        "scenario_results",
+        "backups",
+        "scans",
+        "scan_hosts",
+        "discovery_scan_schedules",
+        "vuln_scans",
+        "vuln_scan_hosts",
+        "vuln_scan_schedules",
+        "cable_links",
+        "cable_discovery_schedules",
+        "domain_scans",
+        "domain_scan_hosts",
+        "captures",
+        "syslog_messages",
+        "flow_records",
+        "ad_audit_runs",
+        "ad_findings",
+        "credential_check_runs",
+        "credential_check_targets",
+        "audit_rules",
+        "audit_findings",
+        "actions",
+        "action_runs",
+        "incidents",
+        "escalation_steps",
+        "remote_sites",
+        "remote_site_reports",
+        "flow_alert_rules",
+    }
+)
+
+# Имя таблицы после FROM/JOIN — с опциональными кавычками и опциональным
+# алиасом сразу за именем; этого достаточно для SQLite (нет схем/линкованных
+# серверов, как в MySQL/Postgres) — полноценный SQL-парсер тут избыточен
+# (см. докстринг модуля про _validate_readonly_sql — тот же принцип).
+_TABLE_REF_RE = re.compile(r"\b(?:FROM|JOIN)\s+[\"'\[`]?([A-Za-z_][A-Za-z0-9_]*)[\"'\]`]?", re.IGNORECASE)
+
+
+def _referenced_tables(sql: str) -> set[str]:
+    return {m.group(1).lower() for m in _TABLE_REF_RE.finditer(sql)}
+
 
 class AskError(Exception):
     pass
@@ -63,6 +127,12 @@ def _validate_readonly_sql(sql: str) -> str:
 
 def _run_readonly_query(sql: str) -> dict:
     stripped = _validate_readonly_sql(sql)
+    forbidden = _referenced_tables(stripped) - _ALLOWED_TABLES
+    if forbidden:
+        raise AskError(
+            "запрос обращается к таблице, закрытой для ИИ-инструмента (содержит секреты/учётные данные): "
+            + ", ".join(sorted(forbidden))
+        )
     if not _IS_SQLITE:
         # MySQL/MariaDB: нужна read-only учётка на уровне СУБД (см. README) —
         # здесь честно отказываем, а не притворяемся, что защита есть.
@@ -96,11 +166,19 @@ def _run_readonly_query(sql: str) -> dict:
 def _schema_summary() -> str:
     """Список таблиц и колонок — та же read-only техника, что у самих
     запросов модели (не читерство мимо защиты, просто для системного
-    промпта нужно один раз на старте)."""
+    промпта нужно один раз на старте).
+
+    Фильтруется по тому же _ALLOWED_TABLES, что и сами запросы — иначе
+    модель узнаёт имена/колонки таблиц с секретами (credentials, api_keys
+    и т.п.) из одного системного промпта, даже не пытаясь их прочитать."""
     uri = f"file:{DB_PATH}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=5)
     try:
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        tables = [
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            if r[0] in _ALLOWED_TABLES
+        ]
         lines = []
         for table in sorted(tables):
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
