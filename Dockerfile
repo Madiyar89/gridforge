@@ -1,10 +1,15 @@
 # GridForge (собственный Python-проект, НЕ форк Zabbix — см. README.md)
 FROM python:3.12-slim
-# Корпоративный root CA (TLS-инспекция на этой сети) — без него ни apt,
-# ни pip не достучатся до внешних зеркал. Тот же файл, что уже используют
-# другие сервисы в этой инфраструктуре (NetOpsHub backend/ansible-runner).
-COPY corporate-ca.crt /usr/local/share/ca-certificates/corporate-ca.crt
+# Опциональный corporate/state root CA — см. certs/README.md. Папка
+# пустая по умолчанию (публичная сборка проходит без изменений); если
+# твоя сеть перехватывает TLS, положи туда свой .crt локально (в
+# .gitignore, в репозиторий не попадёт).
+COPY certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates
+# PIP_CERT — иначе pip использует свой встроенный набор корневых (certifi),
+# не системный — добавленный выше корпоративный CA не подхватится сам
+# по себе без этой переменной.
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nmap tshark iputils-ping ca-certificates curl unzip git libcap2-bin \
@@ -15,7 +20,7 @@ WORKDIR /app
 RUN groupadd -g 10001 gridforge && \
     useradd -u 10001 -g gridforge -M -d /app -s /usr/sbin/nologin gridforge
 COPY requirements.txt .
-RUN pip install --no-cache-dir --retries 10 --timeout 120 --cert /usr/local/share/ca-certificates/corporate-ca.crt -r requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 # impacket вендорён (см. requirements.txt — комментарий про BrokenPipeError
 # на прокси), файлы взяты из уже рабочей установки, кладём напрямую в
 # site-packages вместо pip install.

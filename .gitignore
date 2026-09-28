@@ -10,3 +10,8 @@ data/
 data/
 *.pyc
 __pycache__/
+
+# Опциональный corporate/state root CA (certs/README.md) — конкретный
+# сертификат конкретной сети никогда не должен попасть в публичный репо.
+certs/*.crt
+certs/*.pem

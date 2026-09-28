@@ -41,11 +41,11 @@ HTML/CSS/JS без шага сборки (`static/*.html` + одноимённы
   - **Локальный** — `/mnt/e/NetOpsHub-scaffold/gridforge-local` (тот же
     WSL), свой `docker-compose.yml`, `git pull` + `docker compose build
     gridforge && docker compose up -d gridforge`.
-  - **Боевой** — `192.0.2.244`, пользователь `sysadm`, ключ
+  - **Боевой** — `192.0.2.10`, пользователь `sysadm`, ключ
     `~/.ssh/netops_244`, путь `~/gridforge-app`. Файлы копируются
     `scp` (не git pull — там нет .git), затем то же
     `docker compose build/up`. Команды на нём всегда через
-    `wsl -d kali-linux -- bash -c "ssh -i ~/.ssh/netops_244 sysadm@192.0.2.244 '...'"`.
+    `wsl -d kali-linux -- bash -c "ssh -i ~/.ssh/netops_244 sysadm@192.0.2.10 '...'"`.
   - После деплоя проверять `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8100/login.html`
     на каждом (200 = живой) и смотреть `docker logs gridforge --tail N`
     на ошибки миграции/старта.

@@ -111,7 +111,7 @@ class IntegrationSpec:
 
 
 INTEGRATION_REGISTRY: dict[str, IntegrationSpec] = {
-    "graylog": IntegrationSpec("Graylog", "http://192.0.2.115:9000", _test_graylog),
+    "graylog": IntegrationSpec("Graylog", "http://192.0.2.11:9000", _test_graylog),
     "zabbix": IntegrationSpec("Zabbix", "http://192.0.2.243:8080/api_jsonrpc.php", _test_zabbix),
     "maxmind": IntegrationSpec("MaxMind GeoLite2 (GeoIP/ASN)", "Account ID, например 1416588", _test_maxmind),
     "gemini": IntegrationSpec("Gemini (Спроси про сеть)", "модель, например gemini-3.6-flash", _test_gemini),
