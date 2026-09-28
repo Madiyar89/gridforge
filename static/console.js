@@ -64,10 +64,13 @@ document.getElementById("c-connect").addEventListener("click", () => {
   ws = new WebSocket(`${proto}//${location.host}/ws/console`);
 
   ws.addEventListener("open", () => {
+    // Без api_key — браузер сам прикладывает куку входа (та же
+    // gridforge_session, что и остальной сайт) при WebSocket-хендшейке,
+    // сервер проверяет её в handle_console (см. console_ws.py). api_key в
+    // теле сообщения остаётся рабочим отдельно для не-браузерных клиентов.
     ws.send(
       JSON.stringify({
         type: "connect",
-        api_key: apiKey(),
         node_id: Number(nodeId),
         username,
         key_path: keyPath || undefined,

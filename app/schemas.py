@@ -226,6 +226,14 @@ class LoginIn(BaseModel):
     password: str
 
 
+class ApiKeyExchangeIn(BaseModel):
+    """Тело POST /api/session/from-key — намеренно только в JSON-body, не
+    query-параметром: иначе сырой ключ оседал бы в логах доступа сервера
+    ровно там, откуда его и пытаемся убрать (см. main.py)."""
+
+    api_key: str
+
+
 class UserIn(BaseModel):
     username: str
     password: str

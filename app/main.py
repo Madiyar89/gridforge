@@ -33,6 +33,7 @@ from app.auth import (
     require_node_access,
     require_operator_key,
     require_probe_access,
+    resolve_api_key,
     scope_nodes,
 )
 from app.db import get_session, init_db
@@ -79,8 +80,10 @@ from app.sessions import (
     COOKIE_NAME,
     SESSION_TTL,
     bootstrap_first_user,
+    create_api_key_session,
     create_session,
     revoke_all_for_user,
+    revoke_api_key_session,
     revoke_session,
 )
 from app.signal import encrypt_channel_config, mask_channel_config
@@ -172,6 +175,7 @@ from app.schemas import (
     ActionIn,
     ActionUpdate,
     AdAuditIn,
+    ApiKeyExchangeIn,
     ApiKeyIn,
     AskIn,
     AuditRuleIn,
@@ -2446,9 +2450,45 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(_db)):
     return {"username": user.username, "role": user.role.value, "group_id": user.group_id}
 
 
+@app.post("/api/session/from-key")
+def session_from_key(payload: ApiKeyExchangeIn, response: Response, db: Session = Depends(_db)):
+    """Обмен API-ключа на ту же куку входа, что выдаёт /api/login — для
+    браузерного UI (common.js), чтобы сырой ключ не оседал в
+    localStorage, откуда его достанет любой XSS (httponly-куку JS не
+    читает вообще). Намеренно НЕ на api_read: сам обмен и есть вход,
+    авторизовываться ещё нечем.
+
+    Ключ приходит только в теле запроса, не query-параметром — иначе он
+    осел бы в логах доступа сервера ровно там, откуда его и убираем.
+    Заголовок X-API-Key при этом продолжает работать как раньше, это
+    дополнительный способ входа, не замена."""
+    key = resolve_api_key(db, payload.api_key)
+    if key is None:
+        raise HTTPException(status_code=401, detail="Неверный или отозванный API-ключ")
+
+    raw_token = create_api_key_session(db, key)
+    response.set_cookie(
+        COOKIE_NAME,
+        raw_token,
+        httponly=True,
+        samesite="lax",
+        secure=True,  # см. комментарий у COOKIE_NAME в /api/login выше
+        max_age=int(SESSION_TTL.total_seconds()),
+        path="/",
+    )
+    return {"label": key.label, "role": key.role.value}
+
+
 @app.post("/api/logout")
 def logout(response: Response, gridforge_session: str | None = Cookie(default=None), db: Session = Depends(_db)):
+    # Кука могла произойти либо от входа по паролю (Session), либо от
+    # обмена API-ключа (ApiKeySession, см. /api/session/from-key выше) —
+    # выход снимает обе, не зная заранее, какая именно. Отзываем только
+    # куку/сессию, сам API-ключ живым остаётся: выход из браузера — не
+    # повод молча гасить ключ, которым может пользоваться что-то ещё
+    # (скрипт, интеграция), это отдельное, явное действие в «Ключи API».
     revoke_session(db, gridforge_session)
+    revoke_api_key_session(db, gridforge_session)
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"status": "logged_out"}
 

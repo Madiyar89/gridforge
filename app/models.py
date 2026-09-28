@@ -450,6 +450,31 @@ class Session(Base):
     user: Mapped["User"] = relationship()
 
 
+class ApiKeySession(Base):
+    """Кука входа, выданная взамен API-ключа — для браузерного UI (см.
+    POST /api/session/from-key в main.py). Отдельная таблица, а не
+    расширение Session выше: та жёстко привязана к User (user_id
+    NOT NULL), а у API-ключа своей учётки User нет и заводить её ради
+    этого не нужно. Кука при этом используется ОДНА и та же
+    (sessions.COOKIE_NAME) — auth.require_api_key при чтении куки
+    проверяет сперва Session (человек, пароль/AD/OIDC), потом эту
+    таблицу (программа/человек, вошедший бывшим API-ключом): один
+    формат куки, две таблицы происхождения, а не два разных механизма
+    входа.
+
+    Хранится хеш токена, не сам токен — та же причина, что у Session."""
+
+    __tablename__ = "api_key_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    api_key_id: Mapped[int] = mapped_column(ForeignKey("api_keys.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    api_key: Mapped["ApiKey"] = relationship()
+
+
 class PortSnapshot(Base):
     """Снимок состояния портов узла на момент опроса.
 

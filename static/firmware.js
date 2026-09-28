@@ -72,9 +72,11 @@ document.getElementById("fw-upload-form").addEventListener("submit", async (e) =
   btn.textContent = "Загружаю…";
   statusEl.textContent = "";
   try {
+    // Многочастная загрузка мимо общего api() — но авторизация та же:
+    // кука same-origin, без ручного заголовка (см. common.js).
     const res = await fetch("/api/firmware/upload", {
       method: "POST",
-      headers: { "X-API-Key": apiKey() },
+      credentials: "same-origin",
       body: fd,
     });
     if (!res.ok) {

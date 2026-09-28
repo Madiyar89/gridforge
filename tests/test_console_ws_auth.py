@@ -45,8 +45,57 @@ def admin_key(db):
     return generate_key(db, label="test-console-admin", role=ApiKeyRole.admin)
 
 
-def test_missing_api_key_rejected():
-    assert _run(_authenticate({})) == "api_key обязателен"
+def test_missing_api_key_and_no_cookie_rejected():
+    assert _run(_authenticate({})) == "нужен api_key или вход в систему"
+
+
+# --- вход через куку хендшейка (браузер, см. console.js/common.js —
+# api_key в сообщении connect больше не шлётся, только gridforge_session)
+# ---
+
+
+def test_user_session_cookie_grants_access(db):
+    from app.models import User
+    from app.passwords import hash_password
+    from app.sessions import create_session
+
+    admin_user = User(username="test-console-user", password_hash=hash_password("длинный-пароль-x"), role=ApiKeyRole.admin)
+    db.add(admin_user)
+    db.commit()
+    token = create_session(db, admin_user)
+
+    assert _run(_authenticate({}, token)) is None
+
+
+def test_user_session_cookie_below_admin_rejected(db):
+    from app.models import User
+    from app.passwords import hash_password
+    from app.sessions import create_session
+
+    viewer_user = User(
+        username="test-console-viewer-user", password_hash=hash_password("длинный-пароль-y"), role=ApiKeyRole.viewer
+    )
+    db.add(viewer_user)
+    db.commit()
+    token = create_session(db, viewer_user)
+
+    error = _run(_authenticate({}, token))
+    assert error is not None
+    assert "admin" in error
+
+
+def test_api_key_session_cookie_grants_access(db, admin_key):
+    from app.auth import resolve_api_key
+    from app.sessions import create_api_key_session
+
+    key_row = resolve_api_key(db, admin_key)
+    token = create_api_key_session(db, key_row)
+
+    assert _run(_authenticate({}, token)) is None
+
+
+def test_garbage_cookie_rejected():
+    assert _run(_authenticate({}, "forged-token-not-in-database")) == "нужен api_key или вход в систему"
 
 
 def test_unknown_key_rejected():
@@ -86,8 +135,10 @@ def test_revoked_admin_key_rejected(db, admin_key):
 
 class FakeWebSocket:
     """Минимальная замена fastapi.WebSocket для теста ветки ошибки
-    подключения — handle_console вызывает только эти четыре метода до
-    того, как соединение установлено."""
+    подключения — handle_console вызывает только эти методы до того, как
+    соединение установлено. `.cookies` — пустой словарь, как у реального
+    WebSocket без куки в хендшейке (тесты этого класса используют вход
+    через api_key в теле сообщения, не куку)."""
 
     def __init__(self, connect_payload: dict):
         import json
@@ -95,6 +146,7 @@ class FakeWebSocket:
         self._raw = json.dumps(connect_payload)
         self.sent: list[dict] = []
         self.closed_code: int | None = None
+        self.cookies: dict[str, str] = {}
 
     async def accept(self) -> None:
         pass

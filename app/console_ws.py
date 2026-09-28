@@ -18,6 +18,15 @@ Guacamole: последняя проксирует RDP/VNC/SSH через отд
     {"type": "data", "data": "<вывод с узла>"}
     {"type": "error", "message": "..."}
     {"type": "closed"}
+
+`api_key` в {type: connect} — не единственный способ входа: браузер
+(console.js) его больше не отправляет вовсе (см. common.js — ключ в
+localStorage не хранится) и полагается на куку gridforge_session, которую
+сам браузер прикладывает к WebSocket-хендшейку на тот же origin — она
+проверяется здесь так же, как в auth.require_api_key (сессия входа по
+паролю ИЛИ кука, полученная обменом API-ключа на POST
+/api/session/from-key). Заголовок/поле api_key остаётся рабочим отдельно
+— для не-браузерных клиентов, которым неоткуда взять куку.
 """
 
 from __future__ import annotations
@@ -29,10 +38,11 @@ import logging
 import asyncssh
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.auth import ROLE_RANK, _hash_key  # переиспользуем ровно ту же проверку ключа, что и HTTP API
+from app.auth import ROLE_RANK, resolve_api_key  # переиспользуем ровно ту же проверку ключа, что и HTTP API
 from app.credentials_engine import resolve_credential
 from app.db import get_session
-from app.models import ApiKey, ApiKeyRole, Node
+from app.models import ApiKeyRole, Node
+from app.sessions import COOKIE_NAME, resolve_api_key_session, resolve_session
 from app.ssh_client import HostKeyRejected, open_ssh_connection
 
 logger = logging.getLogger("gridforge.console_ws")
@@ -45,21 +55,35 @@ logger = logging.getLogger("gridforge.console_ws")
 MIN_CONSOLE_ROLE = ApiKeyRole.admin
 
 
-async def _authenticate(payload: dict) -> str | None:
-    """Возвращает None, если ключ валиден И его роли достаточно для
-    SSH-консоли, иначе текст ошибки. Проверка ключа — та же, что
-    require_api_key в auth.py, но без HTTP-зависимостей FastAPI
-    (WebSocket — не обычный запрос); проверка роли — тот же ROLE_RANK,
-    что require_admin_key использует на HTTP-стороне (см. auth.py)."""
+async def _authenticate(payload: dict, cookie_token: str | None = None) -> str | None:
+    """Возвращает None, если вход валиден И роли достаточно для
+    SSH-консоли, иначе текст ошибки. Порядок проверки — как в
+    require_api_key (auth.py): сначала api_key из тела сообщения (годится
+    и для браузера, и для скриптов), затем кука хендшейка — сессия входа
+    по паролю, затем кука, выданная обменом API-ключа. Роль читается
+    одинаково независимо от способа входа и сравнивается тем же
+    ROLE_RANK, что и require_admin_key на HTTP-стороне."""
     api_key = payload.get("api_key")
-    if not api_key:
-        return "api_key обязателен"
     db = get_session()
     try:
-        key = db.query(ApiKey).filter(ApiKey.key_hash == _hash_key(api_key), ApiKey.revoked.is_(False)).first()
-        if key is None:
-            return "неверный или отозванный API-ключ"
-        if ROLE_RANK[key.role] < ROLE_RANK[MIN_CONSOLE_ROLE]:
+        role: ApiKeyRole | None = None
+        if api_key:
+            key = resolve_api_key(db, api_key)
+            if key is None:
+                return "неверный или отозванный API-ключ"
+            role = key.role
+        else:
+            user = resolve_session(db, cookie_token)
+            if user is not None:
+                role = user.role
+            else:
+                key = resolve_api_key_session(db, cookie_token)
+                if key is not None:
+                    role = key.role
+
+        if role is None:
+            return "нужен api_key или вход в систему"
+        if ROLE_RANK[role] < ROLE_RANK[MIN_CONSOLE_ROLE]:
             return "недостаточно прав — SSH-консоль требует роль admin"
         return None
     finally:
@@ -80,7 +104,7 @@ async def handle_console(ws: WebSocket) -> None:
         await ws.close(code=1002)
         return
 
-    auth_error = await _authenticate(payload)
+    auth_error = await _authenticate(payload, ws.cookies.get(COOKIE_NAME))
     if auth_error:
         await ws.send_json({"type": "error", "message": auth_error})
         await ws.close(code=1008)
