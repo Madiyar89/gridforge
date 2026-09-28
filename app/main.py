@@ -355,6 +355,46 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="GridForge", lifespan=lifespan)
 
+
+# CSP как defense-in-depth против будущей XSS-регрессии (сам по себе аудит
+# innerHTML в static/*.js не нашёл активной уязвимости — это страховка на
+# будущее, не фикс известной дыры). Весь фронтенд — статические .html/.js/
+# .css без сборки и без CDN (см. README.md): все <script src=...> и
+# <link rel=stylesheet> — относительные пути на тот же origin (включая
+# vendor/xterm.js — библиотека вендорится локально, не грузится с CDN), нет
+# ни одного инлайн <script>, ни одного inline-обработчика (onclick= и т.п.).
+# Поэтому script-src можно держать строгим — без 'unsafe-inline'.
+#
+# А вот style-src нужен с 'unsafe-inline': почти каждая static/*.html
+# страница использует инлайн <style> в <head> и inline style="..." на
+# элементах (тёмная тема форм и т.п.) — это десятки файлов, вынести все
+# в style.css — отдельная большая переделка фронтенда, не входит в объём
+# этой правки (только защитный заголовок).
+#
+# connect-src 'self' — используется и для обычных fetch('/api/...'), и для
+# WebSocket на /ws/console (console.js открывает `${proto}//${location.host}/ws/console`, тот же origin): по спеке CSP 'self' покрывает и
+# соответствующую ws/wss-схему того же origin, отдельно ws:/wss: указывать
+# не нужно.
+_CSP_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self'; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def add_csp_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = _CSP_POLICY
+    return response
+
+
 # Три уровня доступа (см. app/auth.py, ROLE_RANK):
 #   api_read    — любой действующий ключ: смотреть Node/Probe/Sample/
 #                 Watch/Incident/Channel и историю.
