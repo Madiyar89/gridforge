@@ -18,7 +18,7 @@ from app.sessions import COOKIE_NAME, bootstrap_first_user, resolve_session, rev
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
 
 
@@ -107,6 +107,23 @@ def test_login_sets_httponly_cookie(client, user):
     cookie_header = resp.headers["set-cookie"]
     assert "httponly" in cookie_header.lower()  # JavaScript не достанет — XSS не украдёт сессию
     assert "samesite=lax" in cookie_header.lower()
+    # secure ВЫКЛЮЧЕН по умолчанию (см. COOKIE_SECURE в app/sessions.py):
+    # часть развёрнутых инстансов обслуживается напрямую по HTTP без TLS-
+    # терминации (нет Caddy/nginx перед uvicorn) — Secure=True сделал бы
+    # куку нерабочей там прямо сейчас. Включается явно через
+    # GRIDFORGE_COOKIE_SECURE=1 там, где перед GridForge реально стоит TLS
+    # (см. test_login_cookie_secure_when_enabled ниже).
+    assert "secure" not in cookie_header.lower()
+
+
+def test_login_cookie_secure_when_enabled(client, user, monkeypatch):
+    """Secure появляется, когда явно включена переменная окружения — то
+    есть там, где перед GridForge реально стоит TLS-терминация (Caddy)."""
+    monkeypatch.setattr("app.main.COOKIE_SECURE", True)
+    resp = client.post("/api/login", json={"username": "петров", "password": "длинный-пароль-1"})
+    assert resp.status_code == 200
+    cookie_header = resp.headers["set-cookie"]
+    assert "secure" in cookie_header.lower()
 
 
 def test_session_grants_access_without_api_key(client, user):

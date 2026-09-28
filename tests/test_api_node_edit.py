@@ -8,7 +8,7 @@ from app.models import ApiKeyRole, Group, Node, Probe, ProbeKind, Watch, WatchOp
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
 
 
@@ -135,3 +135,26 @@ def test_delete_probe_and_watch(client, admin_key, node, db):
     assert client.delete(f"/api/watches/{watch.id}", headers=_h(admin_key)).status_code == 204
     assert client.delete(f"/api/probes/{probe.id}", headers=_h(admin_key)).status_code == 204
     assert db.query(Probe).count() == 0
+
+
+def test_admin_can_reset_ssh_host_key(client, admin_key, node, db):
+    """Легитимная замена устройства: сбросить сохранённый TOFU-fingerprint
+    (см. app/ssh_client.py), чтобы новый host key был принят и снова
+    запомнен при следующем подключении."""
+    node.ssh_key_fingerprint = "SHA256:aaaa"
+    db.commit()
+
+    resp = client.delete(f"/api/nodes/{node.id}/ssh-key", headers=_h(admin_key))
+    assert resp.status_code == 204
+    db.refresh(node)
+    assert node.ssh_key_fingerprint is None
+
+
+def test_operator_cannot_reset_ssh_host_key(client, operator_key, node, db):
+    node.ssh_key_fingerprint = "SHA256:aaaa"
+    db.commit()
+
+    resp = client.delete(f"/api/nodes/{node.id}/ssh-key", headers=_h(operator_key))
+    assert resp.status_code == 403
+    db.refresh(node)
+    assert node.ssh_key_fingerprint == "SHA256:aaaa"

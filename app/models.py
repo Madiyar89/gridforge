@@ -17,7 +17,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -222,6 +222,13 @@ class Node(Base):
     vendor: Mapped[Vendor | None] = mapped_column(Enum(Vendor), nullable=True)
     active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # SHA256-fingerprint SSH host key, увиденного при ПЕРВОМ подключении
+    # (trust-on-first-use, см. app/ssh_client.py) — пусто до первого SSH-
+    # подключения к узлу. Совпадение при последующих подключениях
+    # подтверждает, что это тот же хост; несовпадение — сигнал MITM или
+    # переустановки устройства, соединение отклоняется (см.
+    # ssh_client.evaluate_host_key). Сброс — DELETE /api/nodes/{id}/ssh-key.
+    ssh_key_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     group: Mapped["Group | None"] = relationship(back_populates="nodes")
     probes: Mapped[list["Probe"]] = relationship(back_populates="node", cascade="all, delete-orphan")
@@ -254,9 +261,21 @@ class Probe(Base):
 class Sample(Base):
     """Один результат проверки. `ok` — проверка вообще выполнилась (узел
     ответил), `value` — измеренная величина (RTT в мс, 1/0 для доступности
-    порта и т.д.), интерпретация зависит от Probe.kind."""
+    порта и т.д.), интерпретация зависит от Probe.kind.
+
+    `ix_samples_probe_id_taken_at` — почти каждый запрос к Sample фильтрует
+    по conкретному Probe И сортирует/ограничивает по taken_at одновременно
+    (main.py: список последних выборок пробы; watch_engine.py: последние N
+    для оценки Watch; rate_engine.py: предыдущая выборка для расчёта
+    скорости; dashboard_engine.py: выборки за период по набору проб) — эта
+    таблица самая "горячая" на запись (одна строка на каждый прогон каждой
+    Probe), и составной индекс (probe_id, taken_at) покрывает эти запросы
+    напрямую, а не только через отдельный индекс на taken_at. Отдельный
+    индекс на taken_at оставлен — retention_engine.py чистит старые
+    Sample по одному только taken_at, без фильтра по probe_id."""
 
     __tablename__ = "samples"
+    __table_args__ = (Index("ix_samples_probe_id_taken_at", "probe_id", "taken_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     probe_id: Mapped[int] = mapped_column(ForeignKey("probes.id"), nullable=False)
@@ -429,6 +448,31 @@ class Session(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     user: Mapped["User"] = relationship()
+
+
+class ApiKeySession(Base):
+    """Кука входа, выданная взамен API-ключа — для браузерного UI (см.
+    POST /api/session/from-key в main.py). Отдельная таблица, а не
+    расширение Session выше: та жёстко привязана к User (user_id
+    NOT NULL), а у API-ключа своей учётки User нет и заводить её ради
+    этого не нужно. Кука при этом используется ОДНА и та же
+    (sessions.COOKIE_NAME) — auth.require_api_key при чтении куки
+    проверяет сперва Session (человек, пароль/AD/OIDC), потом эту
+    таблицу (программа/человек, вошедший бывшим API-ключом): один
+    формат куки, две таблицы происхождения, а не два разных механизма
+    входа.
+
+    Хранится хеш токена, не сам токен — та же причина, что у Session."""
+
+    __tablename__ = "api_key_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    api_key_id: Mapped[int] = mapped_column(ForeignKey("api_keys.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    api_key: Mapped["ApiKey"] = relationship()
 
 
 class PortSnapshot(Base):
@@ -1189,7 +1233,30 @@ class Action(Base):
     config для ssh_command: {"username":..., "key_path"|"password":...,
     "command":..., "port": 22 (опц.)} — тот же формат параметров, что у
     Probe kind=ssh_command (см. probes.py), намеренно: одна ментальная
-    модель на оба места, где GridForge исполняет SSH."""
+    модель на оба места, где GridForge исполняет SSH.
+
+    ВНИМАНИЕ при выборе command: её stdout сохраняется как есть в
+    ActionRun.output, а историю ActionRun может прочитать ЛЮБОЙ
+    действующий API-ключ (api_read, не только admin — см. GET
+    /api/incidents/{id}/action-runs в main.py), т.е. это НЕ защищённое
+    хранилище секретов. GridForge автоматически редактирует в выводе
+    точные совпадения уже известных ему секретов (Credential.password/
+    Integration.api_token/Channel-токены, см. secrets_crypto.
+    redact_known_secrets), но не может обнаружить произвольный чужой
+    секрет (сторонний API-ключ, зашитый в скрипт узла). Не пишите
+    command, которая печатает секрет, которого GridForge не хранит сам
+    (напр. `cat /etc/some-app/secret.conf`), если не готовы, что он
+    останется в истории Action в открытом виде.
+
+    `cooldown_seconds` — минимальный интервал между двумя срабатываниями
+    ЭТОГО Action, даже если его Watch успел закрыть и снова открыть
+    Incident (дребезг/флаппинг). Без этого поля мигающий Watch мог бы
+    перезапускать сервис по кругу на каждое переоткрытие — см. дословную
+    формулировку риска в исходном handoff-документе проекта. 0 — cooldown
+    отключён (действие срабатывает каждый раз, opt-out для тех, кому это
+    реально нужно). Дефолт — DEFAULT_ACTION_COOLDOWN_SECONDS в
+    actions_engine.py (число здесь и там должно совпадать, значение не
+    импортируется сюда во избежание цикла models.py <-> actions_engine.py)."""
 
     __tablename__ = "actions"
 
@@ -1198,7 +1265,24 @@ class Action(Base):
     kind: Mapped[ActionKind] = mapped_column(Enum(ActionKind), default=ActionKind.ssh_command)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Аудит-трейл: Action решает, какая SSH-команда запускается на
+    # устройстве автоматически по срабатыванию Watch — одна из самых
+    # чувствительных сущностей в системе (см. разбор аудита безопасности,
+    # 2026-09-28). created_by/updated_by хранят Principal.label (метку
+    # ключа или имя пользователя), не FK на ApiKey.id — та же схема, что
+    # уже используют Sweep.started_by/ScenarioRun.started_by/
+    # CredentialCheckRun.triggered_by: запись об авторе переживёт отзыв
+    # ключа (см. ApiKey.revoked — ключи только отзываются, не удаляются
+    # физически) и одинаково работает для входа и по ключу, и по User
+    # (Principal.label — единственное поле, общее для обоих способов
+    # входа; ApiKey.id для входа через User не имел бы смысла).
+    # updated_by/updated_at — пусто, пока Action ни разу не редактировали
+    # после создания.
+    created_by: Mapped[str] = mapped_column(String(128), default="")
+    updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     watch: Mapped["Watch"] = relationship()
 
@@ -1206,7 +1290,14 @@ class Action(Base):
 class ActionRun(Base):
     """Журнал одного выполнения Action — что реально произошло, когда
     Incident открылся (не факт совпадения условия — это Incident, а факт
-    попытки действия и её результат)."""
+    попытки действия и её результат).
+
+    `skipped` — True, если Action НЕ был реально выполнен из-за cooldown
+    (см. Action.cooldown_seconds и actions_engine.dispatch). Пишем такую
+    запись явно (а не молчим), чтобы в истории Action-runs по Incident
+    было видно, что срабатывание было намеренно подавлено флаппинг-
+    защитой, а не просто "не случилось". ok всегда False при skipped=True
+    (не выполнялось — не может быть "успешным")."""
 
     __tablename__ = "action_runs"
 
@@ -1216,21 +1307,33 @@ class ActionRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     ok: Mapped[bool] = mapped_column(nullable=False)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skipped: Mapped[bool] = mapped_column(default=False)
 
 
 class Incident(Base):
     """Открытое/закрытое совпадение Watch. Дедуп: пока для (watch_id)
     существует запись с resolved_at is None — новый Incident не создаётся,
     только обновляется last_seen_at (та же идея, что дедуп алертов в
-    NetOpsHub, но независимая реализация под свою схему)."""
+    NetOpsHub, но независимая реализация под свою схему).
+
+    Индексы: у этой таблицы нет отдельной колонки "status" — открыт/
+    закрыт различается по resolved_at IS NULL/NOT NULL (см. docstring
+    выше). `ix_incidents_watch_id_resolved_at` покрывает дедуп-проверку
+    в watch_engine.py (`Incident.watch_id == watch.id,
+    Incident.resolved_at.is_(None)`) и любой запрос по одному watch_id
+    без учёта resolved_at (main.py: `Action.watch_id`-подобные счётчики).
+    Отдельный индекс на resolved_at — под /api/incidents (main.py,
+    list_incidents): фильтр `Incident.resolved_at.is_(None)` без
+    watch_id, где составной индекс с ведущим watch_id не помог бы."""
 
     __tablename__ = "incidents"
+    __table_args__ = (Index("ix_incidents_watch_id_resolved_at", "watch_id", "resolved_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     watch_id: Mapped[int] = mapped_column(ForeignKey("watches.id"), nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     detail: Mapped[str] = mapped_column(Text, nullable=False)
     # Максимальный delay_minutes уже отправленного EscalationStep для этого
     # Incident (0 = ни одного шага эскалации ещё не было, только исходная

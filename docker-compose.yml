@@ -1,8 +1,20 @@
 services:
   gridforge:
     build: .
+    # Явный тег — без него docker compose называет образ по имени папки
+    # проекта (напр. gridforge-app-gridforge), что ломается при переносе
+    # на другую машину/директорию (офлайн-установка в ЕТС: `docker load`
+    # кладёт образ под этим именем, `docker compose up -d` без --build
+    # использует уже загруженный образ, не пытается пересобрать).
+    image: gridforge:latest
     container_name: gridforge
     restart: unless-stopped
+    # Дефолтный grace period Docker (10с) короче, чем может занять
+    # штатное завершение: drain Action-задач (до 20с, см. actions_engine.py
+    # DEFAULT_ACTION_TIMEOUT_SECONDS) + periodic-задач планировщика (до 5с)
+    # в scheduler.py. Без этого Docker просто убьёт процесс SIGKILL раньше,
+    # чем успеет сработать код graceful shutdown.
+    stop_grace_period: 30s
     # nmap (scan_engine.py) и dumpcap/tshark (capture_engine.py) нужны сырые
     # сокеты — без этих capability оба работали бы только как root целиком,
     # так безопаснее (точечные права, не полный root).
@@ -10,7 +22,12 @@ services:
       - NET_RAW
       - NET_ADMIN
     ports:
-      - "8100:8100"
+      # Только localhost — LAN больше не достучится до plaintext HTTP
+      # напрямую (X-API-Key раньше шёл в открытом виде по сети). Снаружи
+      # доступ только через caddy (TLS, порт 8443). Локальный curl с
+      # этого же хоста (деплой-проверки, см. CLAUDE.md) продолжает
+      # работать как прежде.
+      - "127.0.0.1:8100:8100"
       - "5140:5140/udp"
       # NetFlow v9 (docs/landscape-report.md, п.4.5, app/netflow_server.py) —
       # без публикации порта реальные свитчи снаружи контейнера не достучатся,
@@ -19,5 +36,20 @@ services:
     volumes:
       - gridforge_data:/app/data
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: gridforge-caddy
+    restart: unless-stopped
+    depends_on:
+      - gridforge
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   gridforge_data:
+  caddy_data:
+  caddy_config:

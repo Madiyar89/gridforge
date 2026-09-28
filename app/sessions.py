@@ -15,7 +15,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import Session, User, _now, as_aware
+from app.models import ApiKey, ApiKeySession, Session, User, _now, as_aware
 
 COOKIE_NAME = "gridforge_session"
 SESSION_TTL = timedelta(days=7)
@@ -74,6 +74,58 @@ def revoke_session(db: DbSession, raw_token: str | None) -> None:
     if not raw_token:
         return
     db.query(Session).filter(Session.token_hash == _hash_token(raw_token)).delete(synchronize_session=False)
+    db.commit()
+
+
+# --- Кука входа взамен API-ключа (см. ApiKeySession в models.py) ---
+#
+# Тот же формат токена/куки, что и у Session выше, но своя таблица — у
+# API-ключа нет User, к которому Session.user_id мог бы привязаться.
+# auth.require_api_key при чтении куки пробует сначала resolve_session
+# (человек, пароль/AD/OIDC), затем resolve_api_key_session — так права
+# не расходятся между способами входа.
+
+
+def create_api_key_session(db: DbSession, api_key: ApiKey) -> str:
+    """Возвращает сырой токен для куки; в БД уходит только его хеш —
+    симметрично create_session выше."""
+    raw_token = secrets.token_urlsafe(32)
+    db.add(
+        ApiKeySession(
+            token_hash=_hash_token(raw_token),
+            api_key_id=api_key.id,
+            expires_at=_now() + SESSION_TTL,
+        )
+    )
+    db.commit()
+    return raw_token
+
+
+def resolve_api_key_session(db: DbSession, raw_token: str | None) -> ApiKey | None:
+    """API-ключ по токену куки, если сессия жива и ключ не отозван с тех
+    пор (отзыв ключа должен сразу гасить и куки, выданные по нему —
+    иначе отозванный ключ продолжал бы работать через старую куку)."""
+    if not raw_token:
+        return None
+    session = db.query(ApiKeySession).filter(ApiKeySession.token_hash == _hash_token(raw_token)).first()
+    if session is None:
+        return None
+    if as_aware(session.expires_at) <= _now():
+        db.delete(session)
+        db.commit()
+        return None
+    key = session.api_key
+    if key is None or key.revoked:
+        return None
+    return key
+
+
+def revoke_api_key_session(db: DbSession, raw_token: str | None) -> None:
+    if not raw_token:
+        return
+    db.query(ApiKeySession).filter(ApiKeySession.token_hash == _hash_token(raw_token)).delete(
+        synchronize_session=False
+    )
     db.commit()
 
 

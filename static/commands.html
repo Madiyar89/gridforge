@@ -72,7 +72,7 @@
       <tr><td>SNMP (community / v3)</td><td><code>snmp-server community public RO</code>; v3 — <code>snmp-server group GRP v3 priv</code> → <code>snmp-server user USER GRP v3 auth sha &lt;pass&gt; priv aes 128 &lt;pass&gt;</code></td></tr>
       <tr><td>AAA — RADIUS</td><td><code>aaa new-model</code> → <code>radius server RAD1</code> → <code>address ipv4 192.0.2.10 auth-port 1812 acct-port 1813</code> → <code>key &lt;secret&gt;</code> → <code>aaa authentication login default group radius local</code></td></tr>
       <tr><td>AAA — TACACS+</td><td><code>tacacs server TAC1</code> → <code>address ipv4 192.0.2.11</code> → <code>key &lt;secret&gt;</code> → <code>aaa authentication login default group tacacs+ local</code></td></tr>
-      <tr><td>NTP / syslog</td><td><code>ntp server 192.0.2.140</code> / <code>logging host 192.0.2.115 transport udp port 1514</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>ntp server 192.0.2.12</code> / <code>logging host 192.0.2.11 transport udp port 1514</code></td></tr>
       <tr><td>Бэкап конфига на TFTP</td><td><code>copy running-config tftp://192.0.2.7/backup.cfg</code></td></tr>
     </tbody></table>
   </div>
@@ -102,7 +102,7 @@
       <tr><td>Port security (secure-access-port)</td><td><code>set ethernet-switching-options secure-access-port interface ge-0/0/1 mac-limit 1</code></td></tr>
       <tr><td>SNMP (community / v3)</td><td><code>set snmp community public authorization read-only</code>; v3 — <code>set snmp v3 usm local-engine user USER authentication-sha authentication-password &lt;pass&gt; privacy-aes128 privacy-password &lt;pass&gt;</code></td></tr>
       <tr><td>AAA — RADIUS / TACACS+</td><td><code>set system radius-server 192.0.2.10 secret &lt;secret&gt;</code> → <code>set system authentication-order radius</code>; TACACS — <code>set system tacplus-server 192.0.2.11 secret &lt;secret&gt;</code> → <code>set system authentication-order tacplus</code></td></tr>
-      <tr><td>NTP / syslog</td><td><code>set system ntp server 192.0.2.140</code> / <code>set system syslog host 192.0.2.115 any any</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>set system ntp server 192.0.2.12</code> / <code>set system syslog host 192.0.2.11 any any</code></td></tr>
     </tbody></table>
   </div>
 
@@ -132,7 +132,7 @@
       <tr><td>SNMP (community / v3)</td><td><code>snmp-agent community read public</code>; v3 — <code>snmp-agent usm-user v3 USER GRP authentication-mode sha &lt;pass&gt; privacy-mode aes128 &lt;pass&gt;</code></td></tr>
       <tr><td>AAA — RADIUS</td><td><code>radius scheme RAD1</code> → <code>primary authentication 192.0.2.10</code> → <code>key authentication simple &lt;secret&gt;</code> → <code>domain default</code> → <code>authentication login radius-scheme RAD1</code></td></tr>
       <tr><td>AAA — TACACS+</td><td><code>hwtacacs scheme TAC1</code> → <code>primary authentication 192.0.2.11</code> → <code>key authentication simple &lt;secret&gt;</code></td></tr>
-      <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.140</code> / <code>info-center loghost 192.0.2.115</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.12</code> / <code>info-center loghost 192.0.2.11</code></td></tr>
     </tbody></table>
   </div>
 
@@ -162,7 +162,7 @@
       <tr><td>SNMP (community / v3)</td><td><code>snmp-agent community read cipher public</code>; v3 — <code>snmp-agent usm-user v3 USER GRP authentication-mode sha &lt;pass&gt; privacy-mode aes128 &lt;pass&gt;</code></td></tr>
       <tr><td>AAA — RADIUS</td><td><code>radius-server template RAD1</code> → <code>radius-server authentication 192.0.2.10 1812</code> → <code>radius-server shared-key cipher &lt;secret&gt;</code> → <code>aaa</code> → <code>authentication-scheme default</code> → <code>authentication-mode radius</code></td></tr>
       <tr><td>AAA — TACACS+</td><td><code>hwtacacs-server template TAC1</code> → <code>hwtacacs-server authentication 192.0.2.11</code></td></tr>
-      <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.140</code> / <code>info-center loghost 192.0.2.115</code></td></tr>
+      <tr><td>NTP / syslog</td><td><code>ntp-service unicast-server 192.0.2.12</code> / <code>info-center loghost 192.0.2.11</code></td></tr>
     </tbody></table>
   </div>
 
@@ -192,7 +192,7 @@
       <tr><td>SNMP (community / v3)</td><td><code>/snmp set enabled=yes</code> → <code>/snmp community add name=public addresses=192.0.2.0/24</code>; v3 — <code>/snmp community add name=v3user security=private authentication-protocol=sha authentication-password=&lt;pass&gt; encryption-protocol=aes encryption-password=&lt;pass&gt;</code></td></tr>
       <tr><td>AAA — RADIUS</td><td><code>/radius add address=192.0.2.10 secret=&lt;secret&gt; service=login</code> → <code>/user aaa set use-radius=yes</code></td></tr>
       <tr><td>AAA — TACACS+</td><td>Встроенной поддержки TACACS+ нет — только RADIUS</td></tr>
-      <tr><td>NTP / удалённый лог</td><td><code>/system ntp client set enabled=yes primary-ntp=192.0.2.140</code> / <code>/system logging action add name=remote target=remote remote=192.0.2.115</code></td></tr>
+      <tr><td>NTP / удалённый лог</td><td><code>/system ntp client set enabled=yes primary-ntp=192.0.2.12</code> / <code>/system logging action add name=remote target=remote remote=192.0.2.11</code></td></tr>
     </tbody></table>
   </div>
 </div>

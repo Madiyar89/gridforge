@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from app.secrets_crypto import decrypt_secret
-from app.ssh_client import run_ssh_command
+from app.ssh_client import node_fingerprint_callbacks, run_ssh_command
 from pysnmp.hlapi.v3arch.asyncio import (
     CommunityData,
     ContextData,
@@ -44,7 +44,13 @@ class ProbeOutcome:
     detail: str | None = None
 
 
-ProbeExecutor = Callable[[str, dict, float], Awaitable[ProbeOutcome]]
+# node_id (последний параметр) — id узла, к которому относится проверка,
+# нужен только ssh_command (TOFU-fingerprint хранится на Node, см.
+# ssh_client.node_fingerprint_callbacks); остальные исполнители его
+# просто игнорируют. Единая сигнатура для всех ProbeKind, а не
+# опциональный параметр только у ssh_command — run_probe вызывает
+# исполнителя одинаково для любого kind.
+ProbeExecutor = Callable[[str, dict, float, "int | None"], Awaitable[ProbeOutcome]]
 
 _REGISTRY: dict[ProbeKind, ProbeExecutor] = {}
 
@@ -57,18 +63,20 @@ def register(kind: ProbeKind) -> Callable[[ProbeExecutor], ProbeExecutor]:
     return decorator
 
 
-async def run_probe(kind: ProbeKind, address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def run_probe(
+    kind: ProbeKind, address: str, params: dict, timeout_seconds: float, node_id: int | None = None
+) -> ProbeOutcome:
     executor = _REGISTRY.get(kind)
     if executor is None:
         return ProbeOutcome(ok=False, value=None, detail=f"нет исполнителя для {kind}")
     try:
-        return await executor(address, params, timeout_seconds)
+        return await executor(address, params, timeout_seconds, node_id)
     except Exception as exc:  # исполнитель не должен уронить планировщик
         return ProbeOutcome(ok=False, value=None, detail=f"ошибка проверки: {exc}")
 
 
 @register(ProbeKind.icmp_ping)
-async def _icmp_ping(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def _icmp_ping(address: str, params: dict, timeout_seconds: float, node_id: int | None = None) -> ProbeOutcome:
     """Без прав на сырой ICMP-сокет (обычно нужен root) — используем
     системную утилиту `ping`, замеряем RTT сами по времени вызова, если
     утилита не отдаёт его в парсибельном виде. Не завязываемся на локаль
@@ -91,7 +99,7 @@ async def _icmp_ping(address: str, params: dict, timeout_seconds: float) -> Prob
 
 
 @register(ProbeKind.tcp_port)
-async def _tcp_port(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def _tcp_port(address: str, params: dict, timeout_seconds: float, node_id: int | None = None) -> ProbeOutcome:
     port = params.get("port")
     if port is None:
         return ProbeOutcome(ok=False, value=None, detail="params.port не задан")
@@ -119,7 +127,9 @@ async def _tcp_port(address: str, params: dict, timeout_seconds: float) -> Probe
 
 
 @register(ProbeKind.ssh_command)
-async def _ssh_command(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def _ssh_command(
+    address: str, params: dict, timeout_seconds: float, node_id: int | None = None
+) -> ProbeOutcome:
     """Подключается по SSH, выполняет одну команду, интерпретирует вывод.
 
     params:
@@ -133,17 +143,28 @@ async def _ssh_command(address: str, params: dict, timeout_seconds: float) -> Pr
       expect_numeric (bool, default false) — распарсить первую строку stdout
         как float и положить в Sample.value (аналог числового item в
         Zabbix); при false Sample.value остаётся пустым, ok = exit_status==0
-      known_hosts (str|None) — путь к known_hosts; не задан => host key
-        вообще не проверяется (client_keys=None, known_hosts=None) —
-        приемлемо для лабораторного полигона, ОПАСНО для боевой сети,
-        задать явно перед использованием вне теста
-    """
+      known_hosts (str|None) — явный путь к known_hosts-файлу, если задан —
+        обычная проверка asyncssh по этому файлу, TOFU (см. ниже) не
+        используется.
+
+    Если known_hosts НЕ задан и есть node_id (штатный случай — Probe
+    всегда привязан к Node) — trust-on-first-use по Node.
+    ssh_key_fingerprint (см. ssh_client.evaluate_host_key): первое
+    подключение запоминает host key, последующие сверяют, несовпадение
+    рвёт соединение. Если node_id тоже нет (например, вызов не из
+    обычного планировщика Probe) — старое поведение, host key вообще не
+    проверяется."""
     username = params.get("username")
     command = params.get("command")
     if not username or not command:
         return ProbeOutcome(ok=False, value=None, detail="params.username и params.command обязательны")
 
     expect_numeric = bool(params.get("expect_numeric", False))
+
+    known_hosts = params.get("known_hosts")
+    fingerprint_getter = fingerprint_setter = None
+    if known_hosts is None and node_id is not None:
+        fingerprint_getter, fingerprint_setter = node_fingerprint_callbacks(node_id)
 
     result = await run_ssh_command(
         host=address,
@@ -153,7 +174,9 @@ async def _ssh_command(address: str, params: dict, timeout_seconds: float) -> Pr
         timeout_seconds=timeout_seconds,
         key_path=params.get("key_path"),
         password=decrypt_secret(params["password"]) if params.get("password") else None,
-        known_hosts=params.get("known_hosts"),
+        known_hosts=known_hosts,
+        host_key_fingerprint_getter=fingerprint_getter,
+        host_key_fingerprint_setter=fingerprint_setter,
     )
     if not result.ok:
         detail = result.error
@@ -229,7 +252,7 @@ def _build_snmp_auth(params: dict) -> tuple[CommunityData | UsmUserData | None, 
         if isinstance(auth, str):
             return None, auth
         return auth, None
-    community = params.get("community", "public")
+    community = decrypt_secret(params.get("community", "public"))
     mp_model = 0 if version == "1" else 1  # 0=SNMPv1, 1=SNMPv2c
     return CommunityData(community, mpModel=mp_model), None
 
@@ -240,13 +263,16 @@ def _close_engine(engine: SnmpEngine) -> None:
 
 
 @register(ProbeKind.snmp_get)
-async def _snmp_get(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def _snmp_get(address: str, params: dict, timeout_seconds: float, node_id: int | None = None) -> ProbeOutcome:
     """GET одного OID. OID — открытые данные вендора (см. MIB/документацию
     Cisco/Juniper/H3C/PA-450), не тащим их из чужих Zabbix-шаблонов — см.
     GridForge Rewrite Ledger, раздел «Шаблоны мониторинга».
 
     params (v1/v2c):
-      oid, community (default "public"), version ("1"|"2c", default "2c"), port
+      oid, community (default "public") — шифруется при сохранении
+        (secrets_crypto, тот же ключ data/secret.key, что у password
+        ssh_command) и расшифровывается здесь перед запросом,
+      version ("1"|"2c", default "2c"), port
     params (v3, version="3") — USM, авторизация + опционально шифрование:
       oid, username (обязателен), auth_password (опц. — noAuthNoPriv, если
       не задан), auth_protocol ("sha"|"sha224"|"sha256"|"md5", default sha),
@@ -302,7 +328,7 @@ _WALK_AGGREGATES = {
 
 
 @register(ProbeKind.snmp_walk)
-async def _snmp_walk(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def _snmp_walk(address: str, params: dict, timeout_seconds: float, node_id: int | None = None) -> ProbeOutcome:
     """Обход поддерева OID со сверткой в одно число.
 
     Watch сравнивает ровно одно число, поэтому walk возвращает не список,
@@ -400,7 +426,7 @@ async def _snmp_walk(address: str, params: dict, timeout_seconds: float) -> Prob
 
 
 @register(ProbeKind.snmp_counter_rate)
-async def _snmp_counter_rate(address: str, params: dict, timeout_seconds: float) -> ProbeOutcome:
+async def _snmp_counter_rate(address: str, params: dict, timeout_seconds: float, node_id: int | None = None) -> ProbeOutcome:
     """Читает SNMP-счётчик как есть. Скорость из него вычисляет
     rate_engine при сохранении Sample — здесь нет доступа к предыдущему
     измерению, а без него «скорость» посчитать не из чего.

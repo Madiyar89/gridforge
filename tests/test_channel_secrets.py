@@ -16,7 +16,7 @@ from app.signal import dispatch, encrypt_channel_config, mask_channel_config
 
 @pytest.fixture()
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="https://testserver") as c:
         yield c
 
 

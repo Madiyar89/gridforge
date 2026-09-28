@@ -33,6 +33,7 @@ from app.auth import (
     require_node_access,
     require_operator_key,
     require_probe_access,
+    resolve_api_key,
     scope_nodes,
 )
 from app.db import get_session, init_db
@@ -76,14 +77,16 @@ from app.passwords import (
     password_problem,
     verify_password,
 )
-from app.secrets_crypto import encrypt_secret
+from app.secrets_crypto import PROBE_SECRET_PARAM_FIELDS, encrypt_secret
 from app.sessions import (
     COOKIE_NAME,
     COOKIE_SECURE,
     SESSION_TTL,
     bootstrap_first_user,
+    create_api_key_session,
     create_session,
     revoke_all_for_user,
+    revoke_api_key_session,
     revoke_session,
 )
 from app.signal import encrypt_channel_config, mask_channel_config
@@ -173,7 +176,9 @@ from app.syslog_server import DEFAULT_SYSLOG_PORT, start_syslog_server
 from app.netflow_server import DEFAULT_NETFLOW_PORT, start_netflow_server
 from app.schemas import (
     ActionIn,
+    ActionUpdate,
     AdAuditIn,
+    ApiKeyExchangeIn,
     ApiKeyIn,
     AskIn,
     AuditRuleIn,
@@ -346,11 +351,14 @@ async def lifespan(_app: FastAPI):
         bootstrap_key_path.write_text(raw_key + "\n", encoding="utf-8")
         bootstrap_key_path.chmod(0o600)
     task = asyncio.create_task(_scheduler.run_forever())
-    syslog_transport = await start_syslog_server()
-    netflow_transport = await start_netflow_server()
+    syslog_handle = await start_syslog_server()
+    netflow_handle = await start_netflow_server()
     yield
-    syslog_transport.close()
-    netflow_transport.close()
+    # aclose() (не просто transport.close()) — досбрасывает последний
+    # неполный batch буферизованных syslog/netflow-записей перед
+    # остановкой, см. SyslogServerHandle/NetflowServerHandle.
+    await syslog_handle.aclose()
+    await netflow_handle.aclose()
     _scheduler.stop()
     await task
 
@@ -360,7 +368,7 @@ app = FastAPI(title="GridForge", lifespan=lifespan)
 
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
-    """Заголовки без риска что-то сломать (в отличие от CSP — на
+    """Заголовки без риска что-то сломать (в отличие от CSP ниже — на
     static/*.html есть инлайн-стили/обработчики, ужесточать без полного
     прогона по всем страницам небезопасно, оставлено отдельной задачей).
     X-Frame-Options — от clickjacking (встраивание в чужой <iframe>),
@@ -371,6 +379,46 @@ async def _security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     return response
+
+
+# CSP как defense-in-depth против будущей XSS-регрессии (сам по себе аудит
+# innerHTML в static/*.js не нашёл активной уязвимости — это страховка на
+# будущее, не фикс известной дыры). Весь фронтенд — статические .html/.js/
+# .css без сборки и без CDN (см. README.md): все <script src=...> и
+# <link rel=stylesheet> — относительные пути на тот же origin (включая
+# vendor/xterm.js — библиотека вендорится локально, не грузится с CDN), нет
+# ни одного инлайн <script>, ни одного inline-обработчика (onclick= и т.п.).
+# Поэтому script-src можно держать строгим — без 'unsafe-inline'.
+#
+# А вот style-src нужен с 'unsafe-inline': почти каждая static/*.html
+# страница использует инлайн <style> в <head> и inline style="..." на
+# элементах (тёмная тема форм и т.п.) — это десятки файлов, вынести все
+# в style.css — отдельная большая переделка фронтенда, не входит в объём
+# этой правки (только защитный заголовок).
+#
+# connect-src 'self' — используется и для обычных fetch('/api/...'), и для
+# WebSocket на /ws/console (console.js открывает `${proto}//${location.host}/ws/console`, тот же origin): по спеке CSP 'self' покрывает и
+# соответствующую ws/wss-схему того же origin, отдельно ws:/wss: указывать
+# не нужно.
+_CSP_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self'; "
+    "font-src 'self'; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def add_csp_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = _CSP_POLICY
+    return response
+
 
 # Три уровня доступа (см. app/auth.py, ROLE_RANK):
 #   api_read    — любой действующий ключ: смотреть Node/Probe/Sample/
@@ -759,6 +807,21 @@ def update_node(
     return {"id": node.id}
 
 
+@api_write.delete("/api/nodes/{node_id}/ssh-key", status_code=204)
+def reset_node_ssh_host_key(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
+    """Сбрасывает сохранённый TOFU-fingerprint SSH host key узла (см.
+    app/ssh_client.py) — легитимный случай: устройство заменили/
+    переустановили, новый (ожидаемый) host key должен быть принят и
+    заново запомнен при следующем подключении, а не отклонён как
+    несовпадение. Отдельный эндпоинт, не поле в NodeUpdateIn: это
+    осознанное действие по безопасности («доверять новому ключу»), не
+    рядовое редактирование карточки узла — тот же admin-гейт (api_write),
+    что и у остальных мутаций Node."""
+    node = require_node_access(db, key, node_id)
+    node.ssh_key_fingerprint = None
+    db.commit()
+
+
 @api_write.delete("/api/nodes/{node_id}")
 def delete_node_endpoint(node_id: int, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     """Возвращает, что именно удалено: узел тянет за собой проверки,
@@ -786,7 +849,7 @@ def delete_watch_endpoint(watch_id: int, db: Session = Depends(_db), key: Princi
 def create_probe(payload: ProbeIn, db: Session = Depends(_db), key: Principal = Depends(require_api_key)):
     require_node_access(db, key, payload.node_id)
     params = dict(payload.params)
-    for secret_field in ("password", "auth_password", "priv_password"):
+    for secret_field in PROBE_SECRET_PARAM_FIELDS:
         if params.get(secret_field):
             params[secret_field] = encrypt_secret(params[secret_field])
     probe = Probe(
@@ -1170,13 +1233,19 @@ def apply_template_endpoint(template_id: int, payload: TemplateApplyIn, db: Sess
 
 
 @api_write.post("/api/actions", status_code=201)
-def create_action(payload: ActionIn, db: Session = Depends(_db)):
+def create_action(payload: ActionIn, db: Session = Depends(_db), admin: Principal = Depends(require_admin_key)):
     if db.get(Watch, payload.watch_id) is None:
         raise HTTPException(status_code=404, detail="Watch не найден")
     config = dict(payload.config)
     if config.get("password"):
         config["password"] = encrypt_secret(config["password"])
-    action = Action(watch_id=payload.watch_id, kind=payload.kind, config=config)
+    action = Action(
+        watch_id=payload.watch_id,
+        kind=payload.kind,
+        config=config,
+        cooldown_seconds=payload.cooldown_seconds,
+        created_by=admin.label,
+    )
     db.add(action)
     db.commit()
     db.refresh(action)
@@ -1192,9 +1261,55 @@ def list_actions(watch_id: int | None = None, db: Session = Depends(_db)):
         return {k: ("***" if k == "password" else v) for k, v in config.items()}
 
     return [
-        {"id": a.id, "watch_id": a.watch_id, "kind": a.kind.value, "config": _safe_config(a.config), "enabled": a.enabled}
+        {
+            "id": a.id,
+            "watch_id": a.watch_id,
+            "kind": a.kind.value,
+            "config": _safe_config(a.config),
+            "enabled": a.enabled,
+            "cooldown_seconds": a.cooldown_seconds,
+            "created_at": iso(a.created_at),
+            "created_by": a.created_by,
+            "updated_at": iso(a.updated_at),
+            "updated_by": a.updated_by,
+        }
         for a in query.all()
     ]
+
+
+@api_write.patch("/api/actions/{action_id}")
+def update_action(
+    action_id: int,
+    payload: ActionUpdate,
+    db: Session = Depends(_db),
+    admin: Principal = Depends(require_admin_key),
+):
+    """Точечное обновление — на сейчас только cooldown_seconds/enabled
+    (см. ActionUpdate в schemas.py), без пересоздания config/учётки."""
+    action = db.get(Action, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action не найден")
+    changed = False
+    if payload.cooldown_seconds is not None:
+        if payload.cooldown_seconds < 0:
+            raise HTTPException(status_code=422, detail="cooldown_seconds не может быть отрицательным")
+        action.cooldown_seconds = payload.cooldown_seconds
+        changed = True
+    if payload.enabled is not None:
+        action.enabled = payload.enabled
+        changed = True
+    if changed:
+        action.updated_by = admin.label
+        action.updated_at = _now()
+    db.add(action)
+    db.commit()
+    return {
+        "id": action.id,
+        "cooldown_seconds": action.cooldown_seconds,
+        "enabled": action.enabled,
+        "updated_by": action.updated_by,
+        "updated_at": iso(action.updated_at),
+    }
 
 
 @api_write.delete("/api/actions/{action_id}", status_code=204)
@@ -1210,7 +1325,14 @@ def delete_action(action_id: int, db: Session = Depends(_db)):
 def list_action_runs(incident_id: int, db: Session = Depends(_db)):
     rows = db.query(ActionRun).filter(ActionRun.incident_id == incident_id).order_by(ActionRun.started_at.desc()).all()
     return [
-        {"id": r.id, "action_id": r.action_id, "started_at": iso(r.started_at), "ok": r.ok, "output": r.output}
+        {
+            "id": r.id,
+            "action_id": r.action_id,
+            "started_at": iso(r.started_at),
+            "ok": r.ok,
+            "output": r.output,
+            "skipped": r.skipped,
+        }
         for r in rows
     ]
 
@@ -2353,16 +2475,54 @@ def login(payload: LoginIn, request: Request, response: Response, db: Session = 
         raw_token,
         httponly=True,   # недоступна JavaScript: XSS не сможет украсть сессию
         samesite="lax",  # не уходит на сторонние сайты — защита от CSRF
-        secure=COOKIE_SECURE,  # не уходит по голому HTTP (см. sessions.py)
+        secure=COOKIE_SECURE,  # не уходит по голому HTTP без Caddy (см. sessions.py) —
+                               # включить GRIDFORGE_COOKIE_SECURE=1 там, где перед
+                               # GridForge реально стоит TLS-терминация (Caddy :8443)
         max_age=int(SESSION_TTL.total_seconds()),
         path="/",
     )
     return {"username": user.username, "role": user.role.value, "group_id": user.group_id}
 
 
+@app.post("/api/session/from-key")
+def session_from_key(payload: ApiKeyExchangeIn, response: Response, db: Session = Depends(_db)):
+    """Обмен API-ключа на ту же куку входа, что выдаёт /api/login — для
+    браузерного UI (common.js), чтобы сырой ключ не оседал в
+    localStorage, откуда его достанет любой XSS (httponly-куку JS не
+    читает вообще). Намеренно НЕ на api_read: сам обмен и есть вход,
+    авторизовываться ещё нечем.
+
+    Ключ приходит только в теле запроса, не query-параметром — иначе он
+    осел бы в логах доступа сервера ровно там, откуда его и убираем.
+    Заголовок X-API-Key при этом продолжает работать как раньше, это
+    дополнительный способ входа, не замена."""
+    key = resolve_api_key(db, payload.api_key)
+    if key is None:
+        raise HTTPException(status_code=401, detail="Неверный или отозванный API-ключ")
+
+    raw_token = create_api_key_session(db, key)
+    response.set_cookie(
+        COOKIE_NAME,
+        raw_token,
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,  # см. комментарий у COOKIE_NAME в /api/login выше
+        max_age=int(SESSION_TTL.total_seconds()),
+        path="/",
+    )
+    return {"label": key.label, "role": key.role.value}
+
+
 @app.post("/api/logout")
 def logout(response: Response, gridforge_session: str | None = Cookie(default=None), db: Session = Depends(_db)):
+    # Кука могла произойти либо от входа по паролю (Session), либо от
+    # обмена API-ключа (ApiKeySession, см. /api/session/from-key выше) —
+    # выход снимает обе, не зная заранее, какая именно. Отзываем только
+    # куку/сессию, сам API-ключ живым остаётся: выход из браузера — не
+    # повод молча гасить ключ, которым может пользоваться что-то ещё
+    # (скрипт, интеграция), это отдельное, явное действие в «Ключи API».
     revoke_session(db, gridforge_session)
+    revoke_api_key_session(db, gridforge_session)
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"status": "logged_out"}
 

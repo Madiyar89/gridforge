@@ -16,6 +16,15 @@ from pathlib import Path
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+# Таймаут (в миллисекундах), который SQLite ждёт освобождения залоченной
+# базы, прежде чем вернуть "database is locked", вместо немедленного
+# отказа (см. PRAGMA busy_timeout ниже). 5с — типичный дефолт для
+# однофайловой SQLite под умеренной конкурентной нагрузкой (планировщик +
+# syslog_server + netflow_server + API-запросы пишут в один и тот же
+# файл) — достаточно, чтобы пережить короткую запись другого писателя, не
+# настолько много, чтобы подвисший запрос копил очередь неопределённо.
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Переопределяется тестами (GRIDFORGE_DB_PATH) — иначе pytest писал бы в
@@ -55,25 +64,36 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 if _IS_SQLITE:
-    # По умолчанию SQLite использует journal_mode=DELETE — блокировка на
-    # запись эксклюзивная на весь файл (не постраничная), а приложение
-    # пишет в БД параллельно из одного процесса сразу из нескольких мест:
-    # HTTP-обработчики (пул connect_args выше), scheduler.py (периодический
-    # опрос), syslog_server.py (commit на каждое UDP-сообщение) и
-    # netflow_server.py. При pool_size=20/max_overflow=30 это увеличивает
-    # частоту "database is locked". WAL даёт постраничную блокировку и
-    # параллельные читатели во время записи; busy_timeout — чтобы писатель,
-    # упёршийся в чужую запись, подождал и повторил попытку сам (на уровне
-    # sqlite3), а не падал сразу с OperationalError. Выполняется на каждое
-    # новое соединение (event "connect"), а не один раз — journal_mode=WAL
-    # хранится в самом файле БД и обычно достаточно один раз, но
-    # busy_timeout — свойство соединения, сбрасывается на каждое новое.
     @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # noqa: ANN001
+    def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+        """Гоняется на КАЖДОЕ новое соединение пула (идиоматичный способ
+        SQLAlchemy применять PRAGMA к SQLite — PRAGMA живёт на уровне
+        соединения, не файла, и pool_size=20 в этом файле означает до 20
+        независимых соединений, каждое из которых иначе осталось бы на
+        journal_mode по умолчанию (rollback journal, не WAL) без
+        busy_timeout).
+
+        journal_mode=WAL — читатели не блокируют писателя и наоборот (в
+        отличие от journal_mode по умолчанию, где пишущая транзакция
+        блокирует всех читателей), критично при нескольких независимых
+        engine-потребителях одного файла (scheduler.py/syslog_server.py/
+        netflow_server.py/API-запросы, см. комментарий выше про
+        pool_size/max_overflow — тот же инцидент 2026-09-23, WAL и
+        busy_timeout снижают шанс "database is locked" при этой же
+        конкурентной нагрузке, но не заменяют сам пул).
+
+        busy_timeout — вместо немедленного "database is locked" ждёт до
+        SQLITE_BUSY_TIMEOUT_MS освобождения перед отказом.
+
+        Специфично для SQLite (PRAGMA — не стандартный SQL, MySQL/
+        MariaDB такого не поймёт) — весь блок под `if _IS_SQLITE`, тот же
+        принцип, что уже применяется в ask_engine.py."""
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=5000")
-        cursor.close()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        finally:
+            cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -94,6 +114,7 @@ def _migrate_missing_columns() -> None:
             ("group_id", "INTEGER"),
             ("vendor", "TEXT"),
             ("active", "BOOLEAN DEFAULT 1"),
+            ("ssh_key_fingerprint", "TEXT"),
         ],
         "channels": [
             ("node_id", "INTEGER"),
@@ -134,6 +155,26 @@ def _migrate_missing_columns() -> None:
         "flow_records": [
             ("tcp_flags", "INTEGER"),
         ],
+        "actions": [
+            # DEFAULT 300 (не 0!) — существующие Action, заведённые до
+            # появления cooldown, получают ту же защиту от дребезга, что
+            # и новые: поведение улучшается по умолчанию, а не остаётся
+            # молча незащищённым. См. DEFAULT_ACTION_COOLDOWN_SECONDS в
+            # actions_engine.py и Action.cooldown_seconds в models.py.
+            ("cooldown_seconds", "INTEGER DEFAULT 300"),
+            # Аудит-трейл (см. Action.created_by/updated_by/updated_at в
+            # models.py) — существующие Action, заведённые до появления
+            # этих полей, получают пустой created_by (кто их реально
+            # завёл, неизвестно и восстановить нельзя) и NULL
+            # updated_by/updated_at (ещё не редактировались этой веткой
+            # кода).
+            ("created_by", "VARCHAR(128) DEFAULT ''"),
+            ("updated_by", "VARCHAR(128)"),
+            ("updated_at", "DATETIME"),
+        ],
+        "action_runs": [
+            ("skipped", "BOOLEAN DEFAULT 0"),
+        ],
     }
     inspector = inspect(engine)
     with engine.connect() as conn:
@@ -172,12 +213,46 @@ def _migrate_renamed_columns() -> None:
         conn.commit()
 
 
+def _migrate_missing_indexes() -> None:
+    """Как и с колонками (см. `_migrate_missing_columns` выше),
+    `Base.metadata.create_all()` создаёт индексы только для ТАБЛИЦ,
+    которых ещё не было — если таблица `samples`/`incidents` уже
+    существует на диске с прошлой версии схемы (до появления составных
+    индексов в models.py, 2026-09-28), новый `Index(...)` из
+    `__table_args__` туда сам не долетит. `CREATE INDEX` (без `IF NOT
+    EXISTS` — не гарантирован на MySQL/MariaDB старых версий, тогда как
+    сама проверка через `sqlalchemy.inspect` диалект-независима и уже
+    используется тем же приёмом в `_migrate_missing_columns`) — тоже
+    синтаксис, одинаковый у SQLite и MySQL/MariaDB. Идемпотентно:
+    повторный запуск видит индекс уже существующим в инспекторе и
+    ничего не делает."""
+    additions = {
+        "samples": [("ix_samples_probe_id_taken_at", ["probe_id", "taken_at"])],
+        "incidents": [
+            ("ix_incidents_watch_id_resolved_at", ["watch_id", "resolved_at"]),
+            ("ix_incidents_resolved_at", ["resolved_at"]),
+        ],
+    }
+    inspector = inspect(engine)
+    with engine.connect() as conn:
+        for table, indexes in additions.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {ix["name"] for ix in inspector.get_indexes(table)}
+            for name, columns in indexes:
+                if name not in existing:
+                    cols = ", ".join(columns)
+                    conn.exec_driver_sql(f"CREATE INDEX {name} ON {table} ({cols})")
+        conn.commit()
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  — регистрирует таблицы в Base.metadata
 
     Base.metadata.create_all(engine)
     _migrate_renamed_columns()
     _migrate_missing_columns()
+    _migrate_missing_indexes()
     if _IS_SQLITE and DB_PATH.exists():
         # По умолчанию create_all создаёт файл с правами процесса (обычно
         # 644 — читаемо любым локальным пользователем). Файл содержит

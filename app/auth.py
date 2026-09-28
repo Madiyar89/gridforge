@@ -1,9 +1,13 @@
 """Вход и права.
 
-Два способа войти: API-ключ в заголовке `X-API-Key` (программы,
-интеграции) и логин с паролем через куку сессии (люди в браузере, см.
-passwords.py и sessions.py). Оба сводятся к одному объекту Principal,
-чтобы права не разъезжались между путями входа.
+Три способа войти, но все сводятся к одному объекту Principal, чтобы
+права не разъезжались между путями: API-ключ в заголовке `X-API-Key`
+(программы, интеграции), логин с паролем через куку сессии (люди в
+браузере, см. passwords.py и sessions.py) и — для той же куки — обмен
+API-ключа на куку через POST /api/session/from-key (main.py), чтобы
+браузерный UI не держал сырой ключ в localStorage, доступном любому XSS
+(см. ApiKeySession в models.py и create_api_key_session/
+resolve_api_key_session в sessions.py).
 
 Две оси прав: роль (viewer < operator < admin, см. ROLE_RANK) и
 необязательное ограничение области одной группой узлов (нижняя половина
@@ -20,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import ApiKey, ApiKeyRole, Backup, Node, Probe
-from app.sessions import resolve_session
+from app.sessions import resolve_api_key_session, resolve_session
 
 
 def _hash_key(raw_key: str) -> str:
@@ -68,27 +72,43 @@ class Principal:
     kind: str                # "api_key" | "user"
 
 
+def _principal_from_key(key: ApiKey) -> Principal:
+    return Principal(label=key.label, role=key.role, group_id=key.group_id, kind="api_key")
+
+
+def resolve_api_key(db: Session, raw_key: str) -> ApiKey | None:
+    """Живой (не отозванный) ApiKey по сырому значению — общая точка
+    хеширования и поиска, используется и здесь (заголовок X-API-Key), и
+    в main.py: POST /api/session/from-key (обмен ключа на куку)."""
+    return db.query(ApiKey).filter(ApiKey.key_hash == _hash_key(raw_key), ApiKey.revoked.is_(False)).first()
+
+
 async def require_api_key(
     x_api_key: str | None = Header(default=None),
     gridforge_session: str | None = Cookie(default=None),
 ) -> Principal:
-    """Действующий API-ключ ИЛИ живая сессия входа — для чтения (GET).
-    См. require_admin_key ниже для операций записи."""
+    """Действующий API-ключ (заголовок ИЛИ обменянный на куку через
+    /api/session/from-key) ИЛИ живая сессия входа по паролю — для чтения
+    (GET). См. require_admin_key ниже для операций записи.
+
+    Заголовок проверяется первым и по-прежнему работает независимо от
+    куки — внешние интеграции, curl, Sync Node это изменение не
+    затрагивает вообще."""
     db = get_session()
     try:
         if x_api_key:
-            key = (
-                db.query(ApiKey)
-                .filter(ApiKey.key_hash == _hash_key(x_api_key), ApiKey.revoked.is_(False))
-                .first()
-            )
+            key = resolve_api_key(db, x_api_key)
             if key is None:
                 raise HTTPException(status_code=401, detail="Неверный или отозванный API-ключ")
-            return Principal(label=key.label, role=key.role, group_id=key.group_id, kind="api_key")
+            return _principal_from_key(key)
 
         user = resolve_session(db, gridforge_session)
         if user is not None:
             return Principal(label=user.username, role=user.role, group_id=user.group_id, kind="user")
+
+        key = resolve_api_key_session(db, gridforge_session)
+        if key is not None:
+            return _principal_from_key(key)
 
         raise HTTPException(status_code=401, detail="Нужен заголовок X-API-Key или вход в систему")
     finally:

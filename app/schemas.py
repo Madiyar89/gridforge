@@ -4,6 +4,7 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.actions_engine import DEFAULT_ACTION_COOLDOWN_SECONDS
 from app.models import (
     ActionKind,
     ApiKeyRole,
@@ -62,16 +63,40 @@ class RemoteSiteIn(BaseModel):
     label: str
 
 
+class SyncIncidentIn(BaseModel):
+    """Один инцидент внутри отчёта площадки (см. app/sync_engine.py:
+    build_snapshot — те же 4 поля). Площадка — недоверенная сторона
+    (см. docs/landscape-report.md §4.10): границы длин подобраны по
+    соответствующим колонкам в models.py (Node.name — String(128),
+    Watch.label — String(255)), severity — значение WatchSeverity
+    (короткое слово), opened_at — ISO-дата/время."""
+
+    node: str | None = Field(default=None, max_length=128)
+    watch_label: str | None = Field(default=None, max_length=255)
+    severity: str | None = Field(default=None, max_length=32)
+    opened_at: str | None = Field(default=None, max_length=64)
+
+
 class SyncReportIn(BaseModel):
     """Снимок состояния, который присылает площадка (см.
-    app/sync_engine.py:build_snapshot — та же форма на обеих сторонах)."""
+    app/sync_engine.py:build_snapshot — та же форма на обеих сторонах).
 
-    label: str | None = None
+    Площадка аутентифицируется собственным токеном, а не X-API-Key хаба
+    (см. app/main.py:receive_sync_report) — то есть это единственная
+    точка входа, где хаб доверяет данные СЕТЕВОМУ узлу, а не своему же
+    админу. incidents ограничен и по длине списка (max_length=200 —
+    щедрый запас над MAX_INCIDENTS_IN_REPORT=50 из app/sync_engine.py,
+    который всё равно обрежет до 50 при записи — см. record_report),
+    и по размеру каждого элемента (SyncIncidentIn выше), чтобы
+    скомпрометированная или неисправная площадка не могла прислать
+    аномально большой/произвольный payload."""
+
+    label: str | None = Field(default=None, max_length=255)
     node_count: int = 0
     incidents_critical: int = 0
     incidents_warning: int = 0
     incidents_info: int = 0
-    incidents: list[dict] = []
+    incidents: list[SyncIncidentIn] = Field(default_factory=list, max_length=200)
 
 
 class FlowAlertRuleIn(BaseModel):
@@ -218,6 +243,14 @@ class LoginIn(BaseModel):
     password: str
 
 
+class ApiKeyExchangeIn(BaseModel):
+    """Тело POST /api/session/from-key — намеренно только в JSON-body, не
+    query-параметром: иначе сырой ключ оседал бы в логах доступа сервера
+    ровно там, откуда его и пытаемся убрать (см. main.py)."""
+
+    api_key: str
+
+
 class UserIn(BaseModel):
     username: str
     password: str
@@ -269,6 +302,21 @@ class ActionIn(BaseModel):
     watch_id: int
     kind: ActionKind = ActionKind.ssh_command
     config: dict
+    # Флаппинг-защита (см. Action.cooldown_seconds в models.py и разбор
+    # риска в actions_engine.py) — сколько секунд ждать после последнего
+    # реального срабатывания этого Action, прежде чем сработать снова, даже
+    # если Watch успел переоткрыть Incident. 0 — без cooldown (opt-out).
+    cooldown_seconds: int = DEFAULT_ACTION_COOLDOWN_SECONDS
+
+
+class ActionUpdate(BaseModel):
+    """Частичное обновление Action — на сейчас только то, что реально
+    нужно тюнить после создания (cooldown и enabled/disabled), не полный
+    PUT с пересозданием config (для смены команды/учётки проще удалить и
+    создать Action заново, как и раньше)."""
+
+    cooldown_seconds: int | None = None
+    enabled: bool | None = None
 
 
 class BackupTriggerIn(BaseModel):

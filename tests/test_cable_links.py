@@ -20,7 +20,7 @@ import pytest
 
 @pytest.fixture()
 def client():
-    with TestClient(client_app) as c:
+    with TestClient(client_app, base_url="https://testserver") as c:
         yield c
 
 
