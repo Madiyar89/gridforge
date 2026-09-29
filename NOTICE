@@ -1,0 +1,35 @@
+GridForge
+Copyright 2026 Madiyar Omarov
+
+Licensed under the Apache License, Version 2.0.
+
+This product is developed under an open-core model: the code in this
+repository is licensed under Apache-2.0 and is free to use, modify and
+redistribute under its terms. Additional proprietary features, hosted
+services, or support offerings built on top of GridForge may be
+provided separately by the author under different commercial terms;
+they are not part of, and are not covered by, this repository or its
+license.
+
+---
+
+Third-party notices required by dependency licenses:
+
+* asyncssh is dual-licensed under EPL-2.0 OR GPL-2.0-or-later.
+  GridForge uses asyncssh, unmodified, as a library dependency under
+  the terms of the Eclipse Public License 2.0 (EPL-2.0).
+
+* vendor/impacket/ contains code from the Impacket project
+  (https://github.com/fortra/impacket), used unmodified for SMB/NTLM
+  protocol handling in domain inventory features. Impacket is
+  distributed under a modified Apache 1.1 license by Fortra, LLC.
+  In accordance with that license:
+    - This copyright notice is retained: Copyright Fortra, LLC and its
+      affiliated companies.
+    - The name "Impacket" is not used to endorse or promote products
+      derived from GridForge without prior written permission.
+  See vendor/impacket-0.12.0.dist-info/licenses/LICENSE for the full text of that license.
+
+* ldap3 (LGPL v3) is used unmodified, imported as a standard library
+  dependency, not statically embedded in a way that would prevent a
+  user from substituting an alternate LGPL v3-compatible version.
