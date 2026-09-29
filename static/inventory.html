@@ -6,6 +6,9 @@
 <title>GridForge — Инвентарь</title>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  #inv-scan-results:empty{display:none}
+</style>
 </head>
 <body>
 
@@ -73,6 +76,17 @@
 
 <div class="grid">
   <div>
+    <div class="panel">
+      <h2>Сканировать сеть</h2>
+      <div class="form-row" style="border-top:none">
+        <input id="scan-cidr" placeholder="CIDR/IP, например 192.168.1.0/24">
+        <input id="scan-ports" placeholder="порты (опц., например 22,80,443) — иначе топ-20">
+        <button id="run-inv-scan">Сканировать</button>
+      </div>
+      <div class="hint">Разовый опрос подсети — тот же скан, что на странице «Сканы», без перехода туда. У каждой VLAN справа тоже есть кнопка «сканировать эту сеть».</div>
+      <div class="body" id="inv-scan-results"></div>
+    </div>
+
     <div class="panel">
       <h2>Добавить VLAN / сеть</h2>
       <div class="form-row" style="flex-direction:column;border-top:none;">

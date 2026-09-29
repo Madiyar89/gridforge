@@ -632,6 +632,16 @@ document.getElementById("add-group").addEventListener("click", async () => {
   }
 });
 
+// Единая точка создания узла (POST /api/nodes) — использует и форма
+// "Добавить узел" ниже, и кнопка "+ добавить как узел" у результатов
+// скана сети (панель "Сканировать сеть"), чтобы не дублировать вызов.
+async function createNode({ name, address, group_id = null, vendor = null }) {
+  return api("/api/nodes", {
+    method: "POST",
+    body: JSON.stringify({ name, address, group_id, vendor }),
+  });
+}
+
 document.getElementById("add-node").addEventListener("click", async () => {
   const name = document.getElementById("new-node-name").value.trim();
   const address = document.getElementById("new-node-addr").value.trim();
@@ -639,14 +649,11 @@ document.getElementById("add-node").addEventListener("click", async () => {
   const vendor = document.getElementById("new-node-vendor").value;
   if (!name || !address) return toast("Укажи имя и адрес", true);
   try {
-    await api("/api/nodes", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        address,
-        group_id: groupId ? Number(groupId) : null,
-        vendor: vendor || null,
-      }),
+    await createNode({
+      name,
+      address,
+      group_id: groupId ? Number(groupId) : null,
+      vendor: vendor || null,
     });
     document.getElementById("new-node-name").value = "";
     document.getElementById("new-node-addr").value = "";
@@ -655,6 +662,88 @@ document.getElementById("add-node").addEventListener("click", async () => {
   } catch (e) {
     toast(e.message, true);
   }
+});
+
+// --- Панель "Сканировать сеть" (запрос владельца, 2026-09-29): тот же
+// разовый скан, что на странице scan.html (POST /api/scans + GET
+// /api/scans/{id}/hosts), но прямо на Инвентаре — чтобы не уходить на
+// отдельную страницу ради разового опроса подсети. "+ добавить как узел"
+// переиспользует createNode() выше, как и форма "Добавить узел".
+
+async function runInventoryScan(cidr, ports) {
+  if (!cidr) return toast("Укажи CIDR/IP", true);
+  const resultsBody = document.getElementById("inv-scan-results");
+  const btn = document.getElementById("run-inv-scan");
+  btn.disabled = true;
+  btn.textContent = "Сканирую…";
+  resultsBody.innerHTML = `<div class="empty">Сканирую…</div>`;
+  try {
+    const result = await api("/api/scans", {
+      method: "POST",
+      body: JSON.stringify({ cidr, ports: ports || null }),
+    });
+    if (result.status === "failed") {
+      toast("Скан не удался: " + result.error, true);
+      resultsBody.innerHTML = `<div class="empty">Скан не удался: ${escapeHtml(result.error || "")}</div>`;
+      return;
+    }
+    toast(`Скан завершён: ${result.host_count} хост(ов)`);
+    await renderInventoryScanHosts(result.id);
+  } catch (e) {
+    toast(e.message, true);
+    resultsBody.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Сканировать";
+  }
+}
+
+async function renderInventoryScanHosts(scanId) {
+  const resultsBody = document.getElementById("inv-scan-results");
+  let hosts;
+  try {
+    hosts = await api(`/api/scans/${scanId}/hosts`);
+  } catch (e) {
+    resultsBody.innerHTML = `<div class="empty">${emptyOrError(e)}</div>`;
+    return;
+  }
+  if (hosts.length === 0) {
+    resultsBody.innerHTML = `<div class="empty">Живых хостов не найдено</div>`;
+    return;
+  }
+  resultsBody.innerHTML = hosts
+    .map((h) => {
+      const ports = h.open_ports.map((p) => `${p.port}${p.service ? "/" + p.service : ""}`).join(", ") || "нет открытых портов";
+      const action = h.already_node
+        ? `<span class="count">уже в инвентаре</span>`
+        : `<button type="button" data-addr="${escapeHtml(h.address)}" data-hostname="${escapeHtml(h.hostname || "")}" class="inv-scan-add-node">+ добавить как узел</button>`;
+      return `
+        <div class="channel-row">
+          <span>${escapeHtml(h.hostname || h.address)} ${h.hostname ? `<span class="count">(${escapeHtml(h.address)})</span>` : ""} <span class="count">· ${escapeHtml(ports)}</span></span>
+          ${action}
+        </div>`;
+    })
+    .join("");
+  resultsBody.querySelectorAll(".inv-scan-add-node").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        await createNode({ name: btn.dataset.hostname || btn.dataset.addr, address: btn.dataset.addr });
+        toast("Узел добавлен в инвентарь");
+        await renderInventoryScanHosts(scanId);
+        refreshNodes();
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+document.getElementById("run-inv-scan").addEventListener("click", () => {
+  const cidr = document.getElementById("scan-cidr").value.trim();
+  const ports = document.getElementById("scan-ports").value.trim();
+  runInventoryScan(cidr, ports);
 });
 
 // Подсказки движка правил жизненного цикла устройств (docs/
@@ -773,6 +862,7 @@ async function refreshVlans() {
           <span class="actions">
             <span class="addr">${escapeHtml(v.cidr)}${v.group_name ? ` · ${escapeHtml(v.group_name)}` : ""}</span>
             <button type="button" class="icon-btn check-vlan" data-id="${v.id}">проверить</button>
+            <button type="button" class="icon-btn scan-vlan-net" data-cidr="${escapeHtml(v.cidr)}">сканировать эту сеть</button>
             <button type="button" class="icon-btn del-vlan" data-id="${v.id}" data-name="${escapeHtml(v.name)}">удалить</button>
           </span>
         </div>
@@ -809,6 +899,14 @@ async function refreshVlans() {
       } catch (e) {
         toast(e.message, true);
       }
+    });
+  });
+  body.querySelectorAll(".scan-vlan-net").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const cidrInput = document.getElementById("scan-cidr");
+      cidrInput.value = btn.dataset.cidr;
+      cidrInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      runInventoryScan(btn.dataset.cidr, document.getElementById("scan-ports").value.trim());
     });
   });
 }
