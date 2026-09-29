@@ -19,3 +19,9 @@ certs/*.pem
 # Резервные копии файлов и кеш pytest — не должны попадать в репозиторий.
 *.bak*
 .pytest_cache/
+
+# Локальные offline-костыли для сборки под TLS-инспекцией (не коммитить)
+.wheelhouse/
+.nuclei-templates-tmp/
+nuclei.zip
+ferox.zip
