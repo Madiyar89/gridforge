@@ -53,12 +53,29 @@ _IS_SQLITE = _DATABASE_URL.startswith("sqlite")
 # закрываются в finally. Пул просто был мал для реальной параллельной
 # нагрузки. pool_timeout короче — чтобы при повторном исчерпании сайт
 # быстро отдавал ошибку отдельным запросам, а не вис целиком минутами.
+# isolation_level="READ COMMITTED" — только для MySQL/MariaDB (переход
+# на MySQL, 2026-09-30, docs/specs/000-platform-foundations.md). Живая
+# проверка на реальном MySQL-инстансе вскрыла реальный баг: InnoDB по
+# умолчанию REPEATABLE READ, и session с открытой (но ещё не
+# закоммиченной заново) транзакцией продолжает видеть СТАРЫЙ снимок
+# данных даже после явного db.refresh()/новой SELECT, если это первая
+# транзакция другой сессии уже закоммитила изменение — снимок
+# REPEATABLE READ фиксируется на момент ПЕРВОЙ инструкции внутри
+# транзакции, а не обновляется на каждый SELECT. На SQLite (через
+# pysqlite) такого не было — там чтения вне явной транзакции ведут себя
+# ближе к autocommit, поэтому баг был невидим все время разработки на
+# SQLite. READ COMMITTED — типичная рекомендация для веб-приложений с
+# короткими сессиями на запрос (каждый новый SELECT видит уже
+# закоммиченные другими соединениями данные) и ближе всего к тому
+# поведению, на которое неявно рассчитан остальной код. Параметр не
+# существует у SQLite-диалекта — передаётся только при MySQL/MariaDB.
 engine = create_engine(
     _DATABASE_URL,
     connect_args={"check_same_thread": False} if _IS_SQLITE else {},
     pool_size=20,
     max_overflow=30,
     pool_timeout=10,
+    **({} if _IS_SQLITE else {"isolation_level": "READ COMMITTED"}),
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 

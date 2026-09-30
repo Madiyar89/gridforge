@@ -222,6 +222,19 @@ async def ask_network(api_key: str, question: str, model: str | None = None) -> 
     пусто — берётся GEMINI_MODEL."""
     from datetime import datetime, timezone
 
+    # Проверка ДО _schema_summary() (не только внутри _run_readonly_query,
+    # как было раньше) — реальная находка живой проверки на MySQL
+    # (переход на MySQL, 2026-09-30, docs/specs/000-platform-foundations.md):
+    # _schema_summary() безусловно открывает DB_PATH как SQLite-файл, и на
+    # MySQL (DB_PATH там не БД, а неиспользуемый путь) падала необработанным
+    # sqlite3.OperationalError вместо честного отказа AskError, который
+    # README обещает как поведение на MySQL.
+    if not _IS_SQLITE:
+        raise AskError(
+            "read-only соединение для этой БД не настроено (GRIDFORGE_DATABASE_URL указывает не на SQLite) — "
+            "см. README, раздел «Спроси про сеть»"
+        )
+
     model = model or GEMINI_MODEL
 
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(schema=_schema_summary(), now=datetime.now(timezone.utc).isoformat())

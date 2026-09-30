@@ -1,6 +1,7 @@
 import pytest
 
 from app import ask_engine
+from app.db import _IS_SQLITE
 
 
 def test_allowed_table_passes_validation():
@@ -25,6 +26,10 @@ def test_join_with_forbidden_table_is_rejected():
         ask_engine._run_readonly_query(sql)
 
 
+@pytest.mark.skipif(
+    not _IS_SQLITE,
+    reason="_schema_summary() — read-only SQLite-файловое соединение, см. ask_engine.py",
+)
 def test_schema_summary_omits_sensitive_tables():
     summary = ask_engine._schema_summary()
     for table in (

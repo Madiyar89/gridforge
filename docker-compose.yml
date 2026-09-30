@@ -38,8 +38,37 @@ services:
       # кука может (и должна) идти с флагом Secure. См. app/sessions.py:
       # COOKIE_SECURE читает именно эту переменную.
       - GRIDFORGE_COOKIE_SECURE=1
+      # Переход на MySQL/MariaDB (2026-09-30, docs/specs/000-platform-
+      # foundations.md) — до этого GRIDFORGE_DATABASE_URL нигде не был
+      # задан, и приложение реально работало на SQLite несмотря на то, что
+      # код поддерживал MySQL с 2026-09-20. Пароль — из .env (не в git, см.
+      # .gitignore), сервис mysql ниже.
+      - GRIDFORGE_DATABASE_URL=mysql+pymysql://gridforge:${GRIDFORGE_MYSQL_PASSWORD:?задайте GRIDFORGE_MYSQL_PASSWORD в .env}@mysql:3306/gridforge?charset=utf8mb4
+    depends_on:
+      mysql:
+        condition: service_healthy
     volumes:
       - gridforge_data:/app/data
+
+  mysql:
+    image: mariadb:11
+    container_name: gridforge-mysql
+    restart: unless-stopped
+    environment:
+      - MARIADB_ROOT_PASSWORD=${GRIDFORGE_MYSQL_ROOT_PASSWORD:?задайте GRIDFORGE_MYSQL_ROOT_PASSWORD в .env}
+      - MARIADB_DATABASE=gridforge
+      - MARIADB_USER=gridforge
+      - MARIADB_PASSWORD=${GRIDFORGE_MYSQL_PASSWORD:?задайте GRIDFORGE_MYSQL_PASSWORD в .env}
+    volumes:
+      - gridforge_mysql_data:/var/lib/mysql
+    # gridforge (см. depends_on выше) не должен стартовать раньше, чем
+    # MariaDB реально готова принимать соединения — иначе первый запуск
+    # init_db() падает "connection refused" при холодном старте стека.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   caddy:
     image: caddy:2-alpine
@@ -56,5 +85,6 @@ services:
 
 volumes:
   gridforge_data:
+  gridforge_mysql_data:
   caddy_data:
   caddy_config:

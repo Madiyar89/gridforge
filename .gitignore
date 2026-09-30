@@ -25,3 +25,7 @@ certs/*.pem
 .nuclei-templates-tmp/
 nuclei.zip
 ferox.zip
+
+# Пароли MySQL/MariaDB для docker-compose (переход на MySQL, 2026-09-30,
+# docs/specs/000-platform-foundations.md) — секреты, не код.
+.env

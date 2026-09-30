@@ -5,13 +5,48 @@ Incident.resolved_at) — реальный аудит нашёл оба проб
 netflow_server.py/API одновременно) без busy_timeout рискует
 "database is locked", а Sample/Incident без нужных индексов означают
 полное сканирование таблицы на каждый частый запрос (см. db.py/
-models.py)."""
+models.py).
 
+Индексные тесты диалект-независимы (запускаются и на SQLite, и на MySQL/
+MariaDB, см. docs/specs/000-platform-foundations.md, переход на MySQL,
+2026-09-30) — но `DROP INDEX` пришлось сделать диалект-осознанным
+(`DROP INDEX name ON table` на MySQL, `DROP INDEX name` на SQLite) И
+учесть реальную находку живой проверки на MySQL: `ix_samples_probe_id_
+taken_at`/`ix_incidents_watch_id_resolved_at` — единственные индексы,
+покрывающие FK-колонки (`probe_id`/`watch_id`), а InnoDB не даёт дропнуть
+индекс, если это оставит FK без покрывающего индекса (ошибка 1553).
+Тест эмулирует "старую" БД без составного индекса, поэтому на MySQL
+временно подменяет его обычным одноколоночным индексом на время дропа —
+сам продакшен-код (`_migrate_missing_indexes`) индексы никогда не дропает,
+это только тестовая симуляция "как будто миграция ещё не применена".
+PRAGMA-тест — честно SQLite-специфичный (PRAGMA не существует в MySQL),
+пропускается на других диалектах."""
+
+import pytest
 from sqlalchemy import inspect, text
 
-from app.db import SQLITE_BUSY_TIMEOUT_MS, _migrate_missing_indexes, engine
+from app.db import _IS_SQLITE, SQLITE_BUSY_TIMEOUT_MS, _migrate_missing_indexes, engine
 
 
+def _drop_index(conn, name: str, table: str, fk_column: str | None = None) -> None:
+    if _IS_SQLITE:
+        conn.exec_driver_sql(f"DROP INDEX {name}")
+        return
+    tmp_name = f"{name}__fk_tmp"
+    if fk_column:
+        # InnoDB требует хотя бы один индекс, покрывающий FK-колонку —
+        # без временной замены DROP ниже упадёт с "needed in a foreign
+        # key constraint" (см. докстринг файла).
+        conn.exec_driver_sql(f"CREATE INDEX {tmp_name} ON {table} ({fk_column})")
+    conn.exec_driver_sql(f"DROP INDEX {name} ON {table}")
+
+
+def _drop_temp_fk_index(conn, name: str, table: str) -> None:
+    if not _IS_SQLITE:
+        conn.exec_driver_sql(f"DROP INDEX {name}__fk_tmp ON {table}")
+
+
+@pytest.mark.skipif(not _IS_SQLITE, reason="PRAGMA — синтаксис, специфичный для SQLite")
 def test_wal_mode_and_busy_timeout_applied_on_connect(db):
     # `db` (conftest.py) уже открыл соединение через тот же engine — те же
     # PRAGMA, что event-листенер применяет на КАЖДОЕ новое соединение пула.
@@ -41,9 +76,9 @@ def test_migrate_missing_indexes_is_idempotent_on_existing_db(db):
     # сами новые индексы у неё отсутствуют — как было бы у реального
     # gridforge.db, созданного до этой правки.
     with engine.begin() as conn:
-        conn.exec_driver_sql("DROP INDEX ix_samples_probe_id_taken_at")
-        conn.exec_driver_sql("DROP INDEX ix_incidents_watch_id_resolved_at")
-        conn.exec_driver_sql("DROP INDEX ix_incidents_resolved_at")
+        _drop_index(conn, "ix_samples_probe_id_taken_at", "samples", fk_column="probe_id")
+        _drop_index(conn, "ix_incidents_watch_id_resolved_at", "incidents", fk_column="watch_id")
+        _drop_index(conn, "ix_incidents_resolved_at", "incidents")
 
     inspector = inspect(engine)
     assert "ix_samples_probe_id_taken_at" not in {ix["name"] for ix in inspector.get_indexes("samples")}
@@ -57,6 +92,13 @@ def test_migrate_missing_indexes_is_idempotent_on_existing_db(db):
     assert "ix_samples_probe_id_taken_at" in sample_indexes
     assert "ix_incidents_watch_id_resolved_at" in incident_indexes
     assert "ix_incidents_resolved_at" in incident_indexes
+
+    # Реальный составной индекс уже снова покрывает FK — временную замену
+    # можно убрать (иначе она просто лишний индекс, ничему не мешает, но
+    # незачем оставлять мусор от симуляции).
+    with engine.begin() as conn:
+        _drop_temp_fk_index(conn, "ix_samples_probe_id_taken_at", "samples")
+        _drop_temp_fk_index(conn, "ix_incidents_watch_id_resolved_at", "incidents")
 
     # Повторный прогон на уже смигрированной БД — не должен падать
     # (идемпотентность: индексы уже есть, ничего заново не создаётся).

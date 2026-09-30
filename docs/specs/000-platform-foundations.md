@@ -1,6 +1,6 @@
 # 000 — Платформенные основы: дизайн, разработка, SQLite→MySQL
 
-Статус: draft
+Статус: in progress (переход на MySQL — done на gridforge-local, 2026-09-30; прод не трогали)
 
 ## Проблема / зачем
 
@@ -123,3 +123,58 @@ FTS5 (SQLite) / FULLTEXT INDEX (MySQL) — это **разный SQL-синта�
   описан выше; сам переход (шаги 1-6) — отдельная задача следующей
   сессии (правило "одна сессия — одна задача"), не выполняется в
   рамках написания этого ТЗ.
+- 2026-09-30 (та же дата, следующая сессия): шаги 1-5 выполнены на
+  `gridforge-local`. Коммит: см. `git log` (feat(db): поднять
+  MySQL/MariaDB на gridforge-local, скрипт переноса из SQLite).
+
+  Что сделано:
+  1. Сервис `mysql` (MariaDB 11) добавлен в `docker-compose.yml`
+     репозитория и развёрнутого `gridforge-local`; пароли — в `.env`
+     (сгенерированы, не в git).
+  2. `GRIDFORGE_DATABASE_URL` у `gridforge` указывает на контейнер
+     `mysql` — прописан прямо в `docker-compose.yml`, руками не задаётся.
+  3. `deploy/migrate_sqlite_to_mysql.py` — разовый скрипт переноса,
+     SQLAlchemy Core, таблица за таблицей в порядке FK-зависимостей.
+  4. Тесты прогнаны против живого MySQL-контейнера (все ~245 тестов,
+     кроме заведомо SQLite-специфичных PRAGMA/`_schema_summary()`,
+     помеченных `skipif`) — нашли и исправили ТРИ реальных бага,
+     невидимых на SQLite:
+     - `app/db.py`: MySQL по умолчанию REPEATABLE READ — сессия не
+       видела уже закоммиченные другой сессией изменения без новой
+       транзакции. Добавлен `isolation_level="READ COMMITTED"` для
+       не-SQLite (в SQLite такого параметра нет, поведение не менялось).
+     - `tests/conftest.py`: `Base.metadata.drop_all()` падал на MySQL
+       ("needed in a foreign key constraint") — SQLite не проверяет FK
+       по умолчанию, поэтому баг был невидим. Обёрнуто
+       `SET FOREIGN_KEY_CHECKS=0/1` вокруг пересоздания схемы теста
+       (только тестовая инфраструктура, прод не касается — там `drop_all`
+       не вызывается).
+     - `app/ask_engine.py`: `/api/ask` на MySQL падал необработанным
+       `sqlite3.OperationalError` вместо документированного честного
+       отказа `AskError` — `_schema_summary()` вызывалась до проверки
+       диалекта. Проверка перенесена в начало `ask_network()`.
+     - `app/models.py`: 11 полей `error: String(500)` расширены до
+       `Text` — реальные сообщения об ошибках SSH (список алгоритмов
+       key exchange) доходили до 568 символов, MySQL строго проверяет
+       длину `VARCHAR` (`Data too long`), SQLite — нет, поэтому
+       усечения раньше не было видно.
+     - Также обнаружена и НЕ исправлена (вне рамок этой сессии,
+       не связана с MySQL): предсуществующий баг порядка тестов на
+       SQLite — `test_api_roles.py` перед `test_db_sqlite_tuning.py`
+       ломает `test_sample_and_incident_indexes_exist_on_fresh_schema`
+       (воспроизводится и на исходном `conftest.py` до всех правок этой
+       сессии). Отдельная задача, не MySQL-миграция.
+  5. Живая проверка на `gridforge-local`: реальные данные (53 узла,
+     76918 Sample, 190 port_snapshots, 106 incidents, 20 AD-findings и
+     т.д. — всего 82428 строк) перенесены и сверены через API
+     (`/api/dashboard`, `/api/nodes`, `/api/nodes/{id}/probes`,
+     `/api/ad-audit/runs`) — совпадают с исходной SQLite.
+  6. Известный принятый (не наш) пробел: `/api/ask` на MySQL по-прежнему
+     честно отказывает (нет read-only СУБД-учётки) — задокументировано
+     в README, не в рамках этого перехода.
+
+  Прод (192.168.7.244) НЕ тронут — остаётся на SQLite, переход туда не
+  выполнялся и не планировался в этой сессии.
+
+  Дальше (следующая сессия): реализация 002 (FTS/FULLTEXT) на уже
+  работающем MySQL-инстансе `gridforge-local`.

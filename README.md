@@ -747,6 +747,53 @@ curl -X POST localhost:8100/api/sync/sites -H 'X-API-Key: <admin-ключ>' -H '
 `key_path` (рекомендованный способ) в шифровании не нуждается — это путь
 к файлу на диске, не секрет сам по себе.
 
+## Хранилище: SQLite / MySQL (`app/db.py`)
+
+По умолчанию — SQLite-файл (`data/gridforge.db`), не нужен отдельный
+сервер БД, удобно для разработки/маленьких инсталляций. Для боевого
+сайта — MySQL/MariaDB через `GRIDFORGE_DATABASE_URL`, тот же код, без
+Alembic (см. `_migrate_missing_columns`/`_migrate_missing_indexes` в
+`app/db.py` — диалект-независимые миграции колонок/индексов через
+`sqlalchemy.inspect`).
+
+**2026-09-30**: до этой даты MySQL-путь существовал только в коде (с
+2026-09-20) и никогда не был поднят вживую — оба `docker-compose.yml`
+(репозиторий и развёрнутый `gridforge-local`) реально работали на
+SQLite. С этой даты `gridforge-local` переведён на MySQL/MariaDB —
+сервис `mysql` в `docker-compose.yml`, пароли в `.env` (не в git):
+
+```bash
+# .env рядом с docker-compose.yml (создан один раз при переходе,
+# не перегенерировать без необходимости — сломает уже поднятый MySQL)
+GRIDFORGE_MYSQL_ROOT_PASSWORD=...
+GRIDFORGE_MYSQL_PASSWORD=...
+```
+
+`GRIDFORGE_DATABASE_URL` у сервиса `gridforge` уже прописан в
+`docker-compose.yml` и указывает на контейнер `mysql` — руками задавать
+не нужно, `docker compose up -d` поднимает оба сервиса, `gridforge`
+ждёт `mysql` healthy (healthcheck на `mariadb-healthcheck.sh`).
+
+Перенос существующих данных SQLite → MySQL — разовый скрипт
+`deploy/migrate_sqlite_to_mysql.py` (SQLAlchemy Core, таблица за
+таблицей в порядке FK-зависимостей, не сырой SQL-дамп — типы `Boolean`/
+`JSON` не идентичны между движками):
+
+```bash
+venv/bin/python3 deploy/migrate_sqlite_to_mysql.py \
+    --sqlite-path data/gridforge.db \
+    --mysql-url "mysql+pymysql://gridforge:PASSWORD@127.0.0.1:3306/gridforge?charset=utf8mb4"
+```
+
+Известный принятый пробел: `/api/ask` (см. раздел выше) на MySQL честно
+отказывает — read-only ИИ-отчёт требует физически read-only соединение,
+а GridForge не заводит отдельную read-only учётку на уровне СУБД. Не
+починка в рамках перехода на MySQL, отдельный вопрос при необходимости.
+
+**Прод (192.168.7.244) пока на SQLite** — переход на MySQL сначала
+полностью проверяется на `gridforge-local`, прод не трогается, пока это
+не подтверждено (см. `docs/specs/000-platform-foundations.md`).
+
 ## Что дальше (не сделано)
 
 - Более тонкий RBAC — сейчас две независимые оси: роль (viewer/operator/admin,

@@ -489,7 +489,7 @@ class PortSnapshot(Base):
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     command: Mapped[str] = mapped_column(String(255), nullable=False)
     ok: Mapped[bool] = mapped_column(default=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Разобранные порты: [{name, state, description, vlan, speed, is_trunk}].
     # JSON, а не отдельная таблица на каждый порт: снимок читается и
     # пишется целиком, по одному порту его не обновляют, а 48 строк на
@@ -544,7 +544,7 @@ class SweepResult(Base):
     command: Mapped[str] = mapped_column(String(255), nullable=False)
     ok: Mapped[bool | None] = mapped_column(nullable=True)  # None = ещё выполняется
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     sweep: Mapped["Sweep"] = relationship(back_populates="results")
@@ -619,7 +619,7 @@ class ScenarioResult(Base):
     command: Mapped[str] = mapped_column(Text, nullable=False)
     ok: Mapped[bool | None] = mapped_column(nullable=True)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     run: Mapped["ScenarioRun"] = relationship(back_populates="results")
@@ -676,7 +676,7 @@ class Backup(Base):
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     changed: Mapped[bool] = mapped_column(default=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     node: Mapped["Node"] = relationship()
 
@@ -700,7 +700,7 @@ class Scan(Base):
     status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.running)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Заполняется, только когда скан запущен как проверка конкретного VLAN
     # (POST /api/vlans/{id}/check) — обычный ручной скан (/api/scans) его
     # не трогает, останется NULL.
@@ -804,7 +804,7 @@ class VulnScan(Base):
     responsible: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Ф.И.О. и должность — для отчёта
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Заполняется при завершении: попал ли скан в накопительный .xlsx-реестр
     # (True), или ничего не найдено И встраивать было нечего — на деле
     # ingest_scan() всегда пишет хотя бы строку "не выявлено", так что
@@ -973,7 +973,7 @@ class DomainScan(Base):
     status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.running)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     live_addresses: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     hosts: Mapped[list["DomainScanHost"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
@@ -1034,7 +1034,7 @@ class Capture(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     packet_count: Mapped[int] = mapped_column(Integer, default=0)
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SyslogMessage(Base):
@@ -1099,7 +1099,7 @@ class AdAuditRun(Base):
     search_base: Mapped[str] = mapped_column(String(255), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     ok: Mapped[bool] = mapped_column(default=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     findings: Mapped[list["AdFinding"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
@@ -1154,7 +1154,7 @@ class CredentialCheckRun(Base):
     status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.running)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Заполняется, только когда прогон запущен по конкретному VLAN
     # (payload.vlan_id) — цели тогда берутся из последнего скана этого
     # VLAN (ScanHost, "живые" пользовательские хосты подсети), не из
@@ -1173,7 +1173,7 @@ class CredentialCheckTarget(Base):
     run_id: Mapped[int] = mapped_column(ForeignKey("credential_check_runs.id"), nullable=False)
     address: Mapped[str] = mapped_column(String(64), nullable=False)
     ok: Mapped[bool] = mapped_column(default=False)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     run: Mapped["CredentialCheckRun"] = relationship(back_populates="targets")
 
